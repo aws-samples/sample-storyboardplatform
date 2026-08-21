@@ -1,0 +1,40 @@
+
+schema {
+  query: Query
+  mutation: Mutation
+  subscription: Subscription
+}
+
+type Op {
+  boardId: ID!
+  id: ID!
+  ts: String!
+  actor: ID!
+  body: String!
+}
+
+type OpPage {
+  items: [Op!]!
+  nextToken: String
+}
+
+type Presence {
+  boardId: ID!
+  actor: ID!
+  body: String!
+}
+
+type Query {
+  listOps(boardId: ID!, since: String, nextToken: String): OpPage!
+  plan(spec: AWSJSON!): AWSJSON!
+}
+
+type Mutation {
+  publishOp(boardId: ID!, id: ID!, ts: String!, actor: ID!, body: String!): Op!
+  publishPresence(boardId: ID!, actor: ID!, body: String!): Presence!
+}
+
+type Subscription {
+  onOp(boardId: ID!): Op @aws_subscribe(mutations: ["publishOp"])
+  onPresence(boardId: ID!): Presence @aws_subscribe(mutations: ["publishPresence"])
+}

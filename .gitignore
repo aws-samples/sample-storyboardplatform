@@ -1,0 +1,15 @@
+node_modules/
+cdk.out/
+.holmes/
+.DS_Store
+__pycache__/
+
+# 브라우저로 화면을 확인할 때 나오는 스크린샷·스냅샷. 남길 화면은 walkthrough/에 둔다.
+.playwright-mcp/
+# 확인하다 리포 뿌리에 떨어진 스크린샷. 뿌리에만 걸린다 — walkthrough/와
+# docs/architecture/의 그림은 남는다.
+/*.png
+
+# CDK가 VPC 조회 결과를 캐시하는 파일. 계정 번호가 들어가므로 공개 리포지토리에는 올리지 않는다.
+# 없으면 배포할 때 다시 조회한다.
+cdk.context.json

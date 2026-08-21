@@ -1,0 +1,12 @@
+{
+  "name": "storyboard-infra",
+  "private": true,
+  "description": "\ucf58\ud2f0 \ubcf4\ub4dc \ub370\ubaa8 \uc778\ud504\ub77c. TypeScript\ub97c \uc4f0\uc9c0 \uc54a\ub294\ub2e4 \u2014 \ube4c\ub4dc \ub2e8\uacc4\uac00 \uc5c6\uc5b4\uc57c \ubc30\ud3ec\uac00 \ud55c \uc904\uc774\ub2e4.",
+  "dependencies": {
+    "aws-cdk-lib": "2.264.0",
+    "constructs": "10.8.1"
+  },
+  "devDependencies": {
+    "aws-cdk": "2.1136.0"
+  }
+}

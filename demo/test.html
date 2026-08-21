@@ -1,0 +1,451 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>core.js 자체 검사</title>
+<style>
+  body { font: 14px/1.6 ui-monospace, Menlo, monospace; background: #16181C; color: #E8E4DA; padding: 32px; }
+  .pass { color: #6FCF97 } .fail { color: #FF6B5E; font-weight: 700 }
+  h1 { font-size: 16px; letter-spacing: .12em; text-transform: uppercase; color: #E3A93C }
+</style>
+<h1>core.js 자체 검사</h1>
+<pre id="out"></pre>
+<script type="module">
+  const {
+    orderKeyBetween, orderKeyForIndex, canTransition, canEditContent, canMakeArt, ART_ROLES,
+    canSeeAdmin, ADMIN_VIEW_ROLES,
+    splitScenario, mergeField, handBackTo, notifFor, POSES, STATUS, TRANSITIONS,
+    canPlan, normalizePlan, epLabel, CAMERAS,
+    mentionsIn, sceneGroups, clock, startTimes, scrub, debounceBy,
+    lostEdit, isActionable, changedSince, liveVer, deadVer,
+    canGrantRole, workload, NEEDS, ROLES, ACTIONS,
+    tally, stalls, retakes, flow, pace, actorPace, firstPass, reviewLag, fmtDur,
+  } = await import(`./core.js?t=${Date.now()}`)
+
+  const out = document.getElementById('out')
+  let failed = 0
+  const ok = (name, cond, extra = '') => {
+    if (!cond) failed++
+    out.insertAdjacentHTML('beforeend',
+      `<span class="${cond ? 'pass' : 'fail'}">${cond ? 'PASS' : 'FAIL'}</span>  ${name}${extra ? '  ' + extra : ''}\n`)
+  }
+
+  ok('빈 보드의 첫 키', typeof orderKeyBetween(null, null) === 'string')
+  ok('a < mid < b', (() => {
+    const m = orderKeyBetween('A', 'B')
+    return 'A' < m && m < 'B'
+  })())
+  ok('접두 관계도 처리 (A < A5)', (() => {
+    const m = orderKeyBetween('A', 'A5')
+    return 'A' < m && m < 'A5'
+  })())
+  ok('틈 없는 인접 키 사이 (0 < 1)', (() => {
+    const m = orderKeyBetween('0', '1')
+    return '0' < m && m < '1'
+  })())
+  ok('맨 앞 삽입', (() => { const m = orderKeyBetween(null, 'A'); return m < 'A' })())
+  ok('맨 뒤 삽입', (() => { const m = orderKeyBetween('A', null); return m > 'A' })())
+
+  ok('같은 위치 200회 삽입 후에도 순서 유지', (() => {
+    let lo = orderKeyBetween(null, null)
+    let hi = orderKeyBetween(lo, null)
+    const inserted = []
+    for (let i = 0; i < 200; i++) {
+      const m = orderKeyBetween(lo, hi)
+      if (!(lo < m && m < hi)) return false
+      inserted.push(m)
+      hi = m
+    }
+    const sorted = [...inserted].sort()
+    return sorted.join() === [...inserted].reverse().join()
+  })())
+
+  ok('임의 위치 200회 삽입 후 전체 정렬 무결', (() => {
+    const keys = []
+    let seed = 42
+    const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648
+    for (let i = 0; i < 200; i++) {
+      const at = Math.floor(rnd() * (keys.length + 1))
+      keys.splice(at, 0, orderKeyForIndex(keys, at))
+    }
+    return keys.every((k, i) => i === 0 || keys[i - 1] < k) && new Set(keys).size === keys.length
+  })())
+
+  ok('역순 인자는 거부', (() => {
+    try { orderKeyBetween('B', 'A'); return false } catch { return true }
+  })())
+
+  ok('감독은 리뷰 대기 컷을 승인', canTransition('director', 'in_review', 'approve').ok)
+  ok('승인 결과 상태는 approved', canTransition('director', 'in_review', 'approve').to === 'approved')
+  ok('아티스트는 승인 불가', !canTransition('artist', 'in_review', 'approve').ok)
+  ok('리뷰어는 수정 요청 가능', canTransition('reviewer', 'in_review', 'request_changes').ok)
+  ok('작업 중인 컷은 승인 불가', !canTransition('director', 'in_progress', 'approve').ok)
+  ok('수정 요청 후 작업 재개', canTransition('artist', 'changes_requested', 'resume').to === 'in_progress')
+  ok('승인된 컷은 감독만 되돌림', canTransition('director', 'approved', 'reopen').ok && !canTransition('artist', 'approved', 'reopen').ok)
+  ok('모든 전이 결과가 알려진 상태', Object.values(TRANSITIONS)
+    .flatMap((m) => Object.entries(m))
+    .every(([from, to]) => STATUS[from] && STATUS[to]))
+  ok('승인된 컷은 내용 편집 잠금', !canEditContent('artist', { status: 'approved' }))
+  ok('리뷰어는 내용 편집 불가', !canEditContent('reviewer', { status: 'in_progress' }))
+
+  ok('그림은 아티스트와 기획만 만든다', canMakeArt('artist') && canMakeArt('planner'))
+  ok('감독·리뷰어·관리자는 그림을 만들지 않는다',
+    !['director', 'reviewer', 'admin', undefined, 'admin"'].some(canMakeArt))
+  ok('감독은 그림은 못 만들어도 컷 글은 고친다',
+    !canMakeArt('director') && canEditContent('director', { status: 'in_progress' }))
+  ok('그림 권한 목록의 역할은 모두 이름을 가진다', ART_ROLES.every((r) => ROLES[r]))
+
+  ok('관리 화면은 감독만 연다', canSeeAdmin('director'))
+  ok('기획·아티스트·리뷰어·관리자는 관리 화면을 못 연다',
+    !['planner', 'artist', 'reviewer', 'admin', undefined, 'director"'].some(canSeeAdmin))
+  ok('여는 권한과 역할 지정 권한은 따로다',
+    canSeeAdmin('director') && !canGrantRole('director') && canGrantRole('admin') && !canSeeAdmin('admin'))
+  ok('관리 화면 권한 목록의 역할은 모두 이름을 가진다', ADMIN_VIEW_ROLES.every((r) => ROLES[r]))
+
+  ok('관리자만 남의 역할을 정한다',
+    canGrantRole('admin') && !['director', 'planner', 'artist', 'reviewer', undefined].some(canGrantRole))
+  ok('담당 지정은 관리자도 할 수 있다', canTransition('admin', 'draft', 'assign').ok)
+  ok('모든 역할이 이름을 가진다',
+    [...new Set(Object.values(ACTIONS).flatMap((a) => a.roles))].every((r) => ROLES[r]))
+  ok('역할을 받는 사람 id도 모양으로 자른다',
+    scrub({ userId: 'u2" onerror="x' }).userId === '' && scrub({ userId: 'u2' }).userId === 'u2')
+
+  const LOAD = [
+    { id: 'c1', assignee: 'u2', status: 'in_progress' },
+    { id: 'c2', assignee: 'u2', status: 'in_review' },
+    { id: 'c3', assignee: 'u2', status: 'approved' },
+    { id: 'c4', assignee: null, status: 'draft' },
+    { id: 'c5', assignee: 'u9', status: 'changes_requested' },
+  ]
+  const W = workload(LOAD, ['u1', 'u2'])
+  ok('승인된 컷은 진행 중에서 빠진다', W.u2.open === 2 && W.u2.approved === 1)
+  ok('진행 중 목록은 남은 컷만', W.u2.cuts.map((p) => p.id).join() === 'c1,c2')
+  ok('상태별로도 센다', W.u2.by.in_review === 1 && W.u2.by.approved === 1)
+  ok('일이 없는 사람도 표에 남는다', W.u1 && W.u1.open === 0 && W.u1.cuts.length === 0)
+  ok('담당 없는 컷은 아무에게도 안 얹힌다',
+    !Object.values(W).some((w) => w.cuts.some((p) => p.id === 'c4')))
+  ok('명부에 없는 담당자도 빠지지 않는다', W.u9?.open === 1)
+  ok('빈 보드도 죽지 않는다', Object.keys(workload([], [])).length === 0 && workload(null).u1 === undefined)
+
+  const need = (k) => LOAD.filter(NEEDS[k].hit).map((p) => p.id).join()
+  ok('담당 없음은 승인 안 된 무담당 컷', need('unassigned') === 'c4')
+  ok('리뷰 대기는 상태로 고른다', need('in_review') === 'c2')
+  ok('진행 중은 승인만 뺀다', need('open') === 'c1,c2,c4,c5')
+  ok('전체는 전체다', need('all') === LOAD.map((p) => p.id).join())
+  ok('모든 잣대에 이름과 규칙이 있다',
+    Object.values(NEEDS).every((n) => n.label && typeof n.hit === 'function'))
+
+  const HOUR = 36e5
+  const AT = 1750000000000
+  const DAY0 = Math.floor(AT / 864e5) * 864e5
+  const BOARD = [
+    { id: 'c1', charId: null, secs: 4, assignee: 'u2', status: 'approved', _ts: { status: DAY0 } },
+    { id: 'c2', charId: null, secs: 6, assignee: 'u2', status: 'in_review', _ts: { status: DAY0 } },
+    { id: 'c3', charId: null, secs: 5, assignee: null, status: 'draft', _ts: { action: DAY0 } },
+    { id: 'c4', charId: 'ch1', assignee: 'u2', status: 'approved', _ts: { status: DAY0 } },
+  ]
+  const EV = [
+    { panelId: 'c1', from: 'draft', to: 'in_progress', actor: 'u2', ts: DAY0 + 1 * HOUR },
+    { panelId: 'c1', from: 'in_progress', to: 'in_review', actor: 'u2', ts: DAY0 + 2 * HOUR },
+    { panelId: 'c1', from: 'in_review', to: 'changes_requested', actor: 'u3', ts: DAY0 + 3 * HOUR },
+    { panelId: 'c1', from: 'changes_requested', to: 'in_progress', actor: 'u2', ts: DAY0 + 3 * HOUR },
+    { panelId: 'c1', from: 'in_progress', to: 'in_review', actor: 'u2', ts: DAY0 + 4 * HOUR },
+    { panelId: 'c1', from: 'in_review', to: 'approved', actor: 'u3', ts: DAY0 + 5 * HOUR },
+    { panelId: 'c2', from: 'in_progress', to: 'in_review', actor: 'u2', ts: DAY0 + 2 * HOUR },
+  ]
+  const T = tally(BOARD)
+  ok('컷 수와 단계별 수', T.n === 4 && T.byStatus.approved === 2 && T.byStatus.in_review === 1)
+  ok('담당 없음은 NEEDS와 같은 잣대', T.unassigned === BOARD.filter(NEEDS.unassigned.hit).length)
+  ok('분량은 보드 컷만 센다 (인물 구도 제외)', T.secs === 15 && T.secsDone === 4)
+
+  const S = stalls(BOARD, EV, DAY0 + 6 * HOUR)
+  ok('오래 멈춘 컷이 앞에 온다', S.map((x) => x.p.id).join() === 'c3,c4,c2,c1')
+  ok('마지막 기록으로 잰다', S.find((x) => x.p.id === 'c2').secs === 4 * 3600
+    && S.find((x) => x.p.id === 'c1').secs === 1 * 3600)
+  ok('단계 기록이 없으면 컷이 바뀐 시각으로 잰다', S.find((x) => x.p.id === 'c3').secs === 6 * 3600)
+  ok('경과가 숫자가 아니면 안 된다', S.every((x) => Number.isFinite(x.secs)))
+  ok('그것도 없으면 known=false', stalls([{ id: 'x', status: 'draft' }], [], AT)[0].known === false)
+
+  ok('재작업은 수정 요청으로 떨어진 횟수', retakes(EV).c1 === 1 && retakes(EV).c2 === undefined)
+
+  const F = flow(EV)
+  ok('되돌아간 이동만 back으로 센다', F.back === 1 && F.fwd === 6)
+  ok('같은 이동은 한 줄로 묶인다', F.pairs[0].from === 'in_progress' && F.pairs[0].to === 'in_review' && F.pairs[0].n === 3)
+  ok('수정 요청은 뒤로 간 것으로 본다', F.pairs.find((r) => r.to === 'changes_requested').back === true)
+
+  const P = pace(EV, DAY0 + 6 * HOUR)
+  ok('한 칸이 한 시간, 첫 기록부터 지금까지', P.cols.length === 6 && P.total === EV.length)
+  ok('아무것도 없던 시간도 칸을 차지한다', P.cols[1].n === 2 && P.cols[5].n === 0)
+  ok('셈은 칸의 합과 같다', P.total === P.cols.reduce((s, c) => s + c.n, 0))
+  ok('어제 기록은 오늘 칸에 섞이지 않는다',
+    pace([{ panelId: 'c1', to: 'approved', ts: DAY0 - HOUR }], DAY0 + HOUR).cols.length === 0)
+  ok('시계가 앞선 op도 칸을 받는다', (() => {
+    const skew = pace([{ panelId: 'c1', to: 'x', ts: DAY0 + 3 * HOUR }], DAY0 + HOUR)
+    return skew.cols.length === 1 && skew.cols[0].n === 1
+  })())
+
+  ok('오늘 누가 옮겼는지', actorPace(EV, AT).u2.n === 5 && actorPace(EV, AT).u3.n === 2)
+
+  const FP = firstPass(BOARD, EV)
+  ok('한 번에 통과: 되돌아온 컷은 빠진다', FP.total === 2 && FP.clean === 1)
+  ok('승인이 없으면 0%가 아니라 표본이 0이다', firstPass([], EV).total === 0)
+  ok('리뷰→승인 중간값', reviewLag(BOARD, EV) === 3 * 3600)
+  ok('기록이 없으면 null (0이 아니다)', reviewLag(BOARD, []) === null)
+  ok('빈 판에서도 죽지 않는다',
+    tally().n === 0 && stalls().length === 0 && flow().fwd === 0 && pace([], AT).cols.length === 0)
+  ok('경과는 사람 말로', fmtDur(30) === '방금' && fmtDur(600) === '10분' && fmtDur(7200) === '2시간' && fmtDur(864e2 * 2) === '2일')
+
+  const EVENTS = [
+    { panelId: 'p1', to: 'in_review', actor: 'artistA' },
+    { panelId: 'p2', to: 'in_review', actor: 'artistB' },
+    { panelId: 'p1', to: 'approved', actor: 'director' },
+  ]
+  ok('수정 요청은 리뷰를 올린 사람에게 돌아감', handBackTo(EVENTS, 'p1', 'director') === 'artistA')
+  ok('다른 컷의 기록에 오염되지 않음', handBackTo(EVENTS, 'p2', 'director') === 'artistB')
+  ok('기록이 없으면 현재 담당 유지', handBackTo(EVENTS, 'p9', 'director') === 'director')
+
+  const PEOPLE = [
+    { id: 'u1', name: '김하나' }, { id: 'u2', name: '이도현' },
+    { id: 'u3', name: '박서준' }, { id: 'u4', name: '최유진' },
+  ]
+  const cmtOp = (author, body = '메모', extra = {}) =>
+    ({ kind: 'comment.add', comment: { author, body, ...extra } })
+  const to = (op, panel, ctx) => notifFor(op, panel, ctx).map((n) => `${n.to}:${n.kind}`)
+
+  ok('메모는 담당자에게 알림', to(cmtOp('u3'), { assignee: 'u2' }).join() === 'u2:comment')
+  ok('담당자 본인의 메모는 알림 없음', to(cmtOp('u2'), { assignee: 'u2' }).length === 0)
+  ok('담당 없는 컷의 메모는 알림 없음', to(cmtOp('u3'), { assignee: null }).length === 0)
+  ok('상태 변경은 새 담당자에게 알림',
+    to({ kind: 'panel.status', assignee: 'u2', actor: 'u3' }, {}).join() === 'u2:status')
+  ok('내가 내 담당으로 가져오면 알림 없음',
+    to({ kind: 'panel.status', assignee: 'u2', actor: 'u2' }, {}).length === 0)
+  ok('편집은 알림을 만들지 않음', to({ kind: 'panel.patch' }, { assignee: 'u2' }).length === 0)
+  ok('내용 편집은 담당자에게도 알림 없음',
+    to({ kind: 'panel.patch', fields: { action: '수정' }, actor: 'u3' }, { assignee: 'u2' }).length === 0)
+  ok('담당 지정은 새 담당자에게 알림',
+    to({ kind: 'panel.patch', fields: { assignee: 'u2' }, actor: 'u3' }, {}).join() === 'u2:assign')
+  ok('담당을 비우면 알림 없음',
+    to({ kind: 'panel.patch', fields: { assignee: null }, actor: 'u3' }, { assignee: 'u2' }).length === 0)
+
+  ok('이름이 불린 사람에게 알림',
+    to(cmtOp('u3', '@김하나 이 컷 순서 맞나요?'), { assignee: null }, { people: PEOPLE })
+      .join() === 'u1:mention')
+  ok('멘션과 담당자에게 각각 알림',
+    to(cmtOp('u3', '@김하나 확인 부탁'), { assignee: 'u2' }, { people: PEOPLE })
+      .join() === 'u1:mention,u2:comment')
+  ok('담당자를 멘션해도 알림은 하나',
+    to(cmtOp('u3', '@이도현 여기 봐주세요'), { assignee: 'u2' }, { people: PEOPLE })
+      .join() === 'u2:mention')
+  ok('자기를 언급해도 알림 없음',
+    to(cmtOp('u3', '@박서준 메모'), { assignee: null }, { people: PEOPLE }).length === 0)
+  ok('답글은 원 메모를 쓴 사람에게',
+    to(cmtOp('u2', '고쳤습니다', { parentId: 'c1' }), { assignee: 'u2' }, { parentAuthor: 'u3' })
+      .join() === 'u3:reply')
+  ok('없는 이름은 멘션이 아님',
+    to(cmtOp('u3', '@홍길동 봐주세요'), { assignee: null }, { people: PEOPLE }).length === 0)
+  ok('긴 이름을 짧은 이름으로 오인하지 않음',
+    mentionsIn('@김하나 봐주세요', [{ id: 'a', name: '김하' }, { id: 'b', name: '김하나' }]).join() === 'b')
+
+  const CUTS = [
+    { id: 1, scene: '씬 1', secs: 2.5 }, { id: 2, scene: '씬 1', secs: 1.5 },
+    { id: 3, scene: '씬 2', secs: 2 }, { id: 4, scene: '씬 1', secs: 1 },
+  ]
+  ok('붙어 있는 같은 씬만 묶임', sceneGroups(CUTS).map((g) => g.cuts.length).join() === '2,1,1')
+  ok('씬 길이는 컷 길이의 합', sceneGroups(CUTS)[0].secs === 4)
+  ok('씬 없는 컷도 한 덩어리', sceneGroups([{ id: 1 }, { id: 2 }]).length === 1)
+  ok('빈 목록은 씬 없음', sceneGroups([]).length === 0)
+  ok('초는 분:초로 표시', clock(0) === '0:00' && clock(75) === '1:15' && clock(2.5) === '0:03')
+
+  ok('시작 시각은 앞 컷들의 합', (() => {
+    const s = startTimes(CUTS)
+    return s[1] === 0 && s[2] === 2.5 && s[3] === 4 && s[4] === 6
+  })())
+  ok('길이 없는 컷도 자리를 차지하지 않는다',
+    startTimes([{ id: 'a' }, { id: 'b', secs: 2 }, { id: 'c' }]).c === 2)
+  ok('빈 보드는 빈 표', Object.keys(startTimes([])).length === 0)
+
+  ok('구도 슬롯은 중복 없음', new Set(POSES).size === POSES.length && POSES.length >= 4)
+
+  ok('늦게 도착한 옛 편집은 새 편집을 덮지 않음', (() => {
+    const p = {}
+    mergeField(p, 'action', '새 내용', 200)
+    mergeField(p, 'action', '옛 내용', 100)
+    return p.action === '새 내용'
+  })())
+  ok('최신 편집은 반영됨', (() => {
+    const p = {}
+    mergeField(p, 'action', 'v1', 100)
+    mergeField(p, 'action', 'v2', 300)
+    return p.action === 'v2'
+  })())
+
+  const applyVer = (p, op) => {
+    if (op.kind === 'panel.version') {
+      p.versions = [...(p.versions || []), { ...op.version, vid: op.id }]
+      if (!p.dead?.[op.id]) mergeField(p, 'current', p.versions.length - 1, op.ts)
+    } else if (op.kind === 'panel.version.remove' && op.verId) {
+      p.dead = { ...(p.dead || {}), [op.verId]: op.ts }
+      p._ts = { ...(p._ts || {}), dead: op.ts }
+    }
+    return p
+  }
+  const build = (ops) => ops.reduce(applyVer, { id: 'p1', versions: [], current: -1 })
+  const add = (id, ts) => ({ kind: 'panel.version', id, ts, version: { src: id, author: 'u2', ts } })
+  const rm = (verId, ts) => ({ kind: 'panel.version.remove', verId, ts })
+
+  ok('묘비가 찍힌 버전은 죽었다', (() => {
+    const p = build([add('a', 100), rm('a', 200)])
+    return deadVer(p, p.versions[0]) && liveVer(p) === null
+  })())
+  ok('vid 없는 옛 캐시 버전은 지운 것으로 오해되지 않는다', (() => {
+    const p = { versions: [{ src: 'x' }], current: 0, dead: { a: 1 } }
+    return !deadVer(p, p.versions[0]) && liveVer(p).i === 0
+  })())
+  ok('현재가 묘비면 살아 있는 마지막으로 물러난다', (() => {
+    const p = build([add('a', 100), add('b', 200), rm('b', 300)])
+    return liveVer(p).i === 0 && liveVer(p).ver.src === 'a'
+  })())
+  ok('가운데를 지워도 뒤쪽 v번호가 밀리지 않는다', (() => {
+    const p = build([add('a', 100), add('b', 200), add('c', 300), rm('a', 400)])
+    return p.versions.length === 3 && liveVer(p).i === 2 && p.versions[2].vid === 'c'
+  })())
+  ok('묘비가 먼저 도착해도 결과가 같다', (() => {
+    const fwd = build([add('a', 100), add('b', 200), rm('b', 300)])
+    const rev = build([rm('b', 300), add('a', 100), add('b', 200)])
+    const same = (p) => `${liveVer(p)?.i}:${Object.keys(p.dead).sort().join()}`
+    return same(fwd) === same(rev) && same(fwd) === '0:b'
+  })())
+  ok('지우기가 장부에 시각을 남긴다 — 지난 방문 이후 변경에 잡힌다', (() => {
+    const p = build([add('a', 100), rm('a', 500)])
+    return changedSince({ p1: p }, 400).join() === 'p1'
+  })())
+  ok("'__proto__' verId가 산 그림을 죽이지 못한다", (() => {
+    const p = build([add('a', 100), rm('__proto__', 200)])
+    return liveVer(p)?.i === 0 && Object.getPrototypeOf(p.dead) === Object.prototype
+  })())
+  ok('verId 모양 검사는 통과시킨다 (자유 텍스트가 아니다)', scrub({ verId: 'abc123' }).verId === 'abc123'
+    && scrub({ verId: '<img src=x>' }).verId === '')
+
+  ok('칸마다 따로 미룬다 — 옆 칸을 고쳐도 취소되지 않는다', (() => {
+    const q = new Map()
+    let id = 0
+    const set = (fn) => { q.set(++id, fn); return id }
+    const clear = (t) => q.delete(t)
+    const later = debounceBy(140, set, clear)
+    const fired = []
+    later('p1:scene', () => fired.push('scene'))
+    later('p1:secs', () => fired.push('secs'))
+    later('p1:secs', () => fired.push('secs2'))
+    for (const fn of [...q.values()]) fn()
+    return fired.length === 2 && fired.includes('scene') && fired.includes('secs2')
+  })())
+
+  ok('빈 시나리오는 빈 배열', splitScenario('').length === 0)
+  ok('문단 수만큼 컷 생성', splitScenario('아침 거리.\n\n남자가 걷는다.').length === 2)
+  ok('대사 인식', (() => {
+    const [cut] = splitScenario('남자가 문을 연다.\n"들어와."')
+    return cut.dialogue.includes('들어와')
+  })())
+  ok('카메라 힌트 추출', splitScenario('그의 얼굴 클로즈업.')[0].camera === 'CU')
+  ok('대사만 있는 블록은 설명이 비어 있음', (() => {
+    const [cut] = splitScenario('"누군가의 아침은 밤에 시작된다."')
+    return cut.action === '' && cut.dialogue.includes('누군가의')
+  })())
+
+  ok('기획은 기획·감독만', canPlan('planner') && canPlan('director') && !canPlan('artist') && !canPlan('reviewer'))
+  ok('쓰레기를 넣어도 빈 기획안', (() => {
+    const p = normalizePlan(null)
+    return p.title === '' && p.chars.length === 0 && p.cuts.length === 0
+  })())
+  ok('인물 수 상한을 지킨다', (() => {
+    const chars = Array.from({ length: 9 }, (_, i) => ({ name: `인물${i}`, brief: 'x' }))
+    return normalizePlan({ chars }, { maxChars: 3 }).chars.length === 3
+  })())
+  ok('컷 수 상한을 지킨다', (() => {
+    const cuts = Array.from({ length: 99 }, () => ({ action: '걷는다' }))
+    return normalizePlan({ cuts }, { maxCuts: 6 }).cuts.length === 6
+  })())
+  ok('같은 이름의 인물은 하나만', normalizePlan({ chars: [{ name: '가온' }, { name: '가온' }] }).chars.length === 1)
+  ok('이름 없는 인물은 버린다', normalizePlan({ chars: [{ brief: '설명만' }] }).chars.length === 0)
+  ok('내용 없는 컷은 버린다', normalizePlan({ cuts: [{ scene: 'S1', secs: 3 }] }).cuts.length === 0)
+  ok('대사만 있어도 컷이다', normalizePlan({ cuts: [{ dialogue: '들어와' }] }).cuts.length === 1)
+  ok('모르는 카메라는 MS로', normalizePlan({ cuts: [{ action: 'a', camera: '"><script>' }] }).cuts[0].camera === 'MS')
+  ok('아는 카메라는 대문자로 통과', normalizePlan({ cuts: [{ action: 'a', camera: 'cu' }] }).cuts[0].camera === 'CU')
+  ok('카메라 목록은 정본이다', CAMERAS.includes('MS') && CAMERAS.includes('ECU'))
+  ok('초는 0.5~30초 사이로 자른다', (() => {
+    const secs = (v) => normalizePlan({ cuts: [{ action: 'a', secs: v }] }).cuts[0].secs
+    return secs(999) === 30 && secs(-4) === 2 && secs('x') === 2 && secs(0.01) === 0.5 && secs(2.44) === 2.4
+  })())
+  ok('길이 상한으로 자른다', (() => {
+    const p = normalizePlan({ title: 'ㄱ'.repeat(200), cuts: [{ action: 'ㄴ'.repeat(900) }] })
+    return p.title.length === 60 && p.cuts[0].action.length === 300
+  })())
+  ok('beats도 cuts로 읽는다', normalizePlan({ beats: [{ summary: '문을 연다' }] }).cuts[0].action === '문을 연다')
+  ok('등장 인물은 6명까지, 중복 없이', (() => {
+    const cast = ['가온', '가온', '노을', '바다', '한결', '하나', '둘', '셋']
+    return normalizePlan({ cuts: [{ action: 'a', cast }] }).cuts[0].cast.length === 6
+  })())
+  ok('줄바꿈은 한 칸으로 눕힌다', normalizePlan({ cuts: [{ action: '가\n\n나' }] }).cuts[0].action === '가 나')
+
+  ok('회차 없는 판은 본편', epLabel(null) === '본편' && epLabel(undefined) === '본편')
+  ok('회차는 번호와 제목', epLabel({ epNo: 3, title: '첫 손님' }) === '3회 · 첫 손님')
+  ok('제목 없는 회차는 번호만', epLabel({ epNo: 2, title: '' }) === '2회')
+  ok('번호 없으면 1회', epLabel({ title: '시작' }) === '1회 · 시작')
+  ok('스핀오프는 번호를 쓰지 않는다', epLabel({ epNo: 4, spinoff: true, title: '노을의 여행' }) === '스핀오프 · 노을의 여행')
+  ok('제목 없는 스핀오프', epLabel({ spinoff: true }) === '스핀오프')
+
+  ok('따옴표 든 id는 버린다', scrub({ id: 'p1" onmouseover="alert(1)' }).id === '')
+  ok('정상 id는 통과', scrub({ id: 'seed-cut-1' }).id === 'seed-cut-1')
+  ok('알림 id(#)도 통과', scrub({ id: 'abc123#u2' }).id === 'abc123#u2')
+  ok('색이 아니면 버린다', scrub({ color: 'red;background:url(javascript:1)' }).color === '')
+  ok('정상 색은 통과', scrub({ color: '#E3A93C' }).color === '#E3A93C')
+  ok('javascript: 이미지 주소는 버린다', scrub({ src: 'javascript:alert(1)' }).src === '')
+  ok('외부 이미지 주소는 버린다', scrub({ src: 'https://evil.example/x.png' }).src === '')
+  ok('우리 이미지 경로는 통과', scrub({ src: '/img/a1.png' }).src === '/img/a1.png')
+  ok('인라인 이미지는 통과', scrub({ src: 'data:image/jpeg;base64,AAAA' }).src === 'data:image/jpeg;base64,AAAA')
+  ok('모르는 상태는 초안으로', scrub({ status: '"><script>' }).status === 'draft')
+  ok('아는 상태는 유지', scrub({ status: 'in_review' }).status === 'in_review')
+  ok('모르는 역할은 리뷰어로', scrub({ role: 'admin"' }).role === 'reviewer')
+  ok('좌표는 숫자로', (() => {
+    const p = scrub({ cursor: { x: '10px" onload="x', y: 3 } })
+    return p.cursor.x === 0 && p.cursor.y === 3
+  })())
+  ok('생성 시각도 숫자로', scrub({ genAt: '99999999999999999" x' }).genAt === 0)
+  ok('회차 번호도 숫자로', scrub({ epNo: '3" onload="x' }).epNo === 0)
+  ok('획의 점도 숫자로', (() => {
+    const m = scrub({ mark: [[0.1, 'a'], [2, 3]] }).mark
+    return m[0][1] === 0 && m[1][0] === 2
+  })())
+  ok('자유 텍스트는 건드리지 않는다 (esc의 몫)',
+    scrub({ body: '<b>메모</b>', name: '김하나' }).body === '<b>메모</b>')
+  ok('원본을 바꾸지 않는다', (() => {
+    const src = { color: 'red' }
+    return scrub(src).color === '' && src.color === 'red'
+  })())
+  ok('_ts 장부는 그대로 통과', (() => {
+    const s = scrub({ _ts: { src: 1700, x: 1800 } })
+    return s._ts.src === 1700 && s._ts.x === 1800
+  })())
+
+  const mineRec = { action: '남자가 문을 연다', _by: { action: 'u2' } }
+  ok('남이 내 문장을 덮으면 잃은 문장을 돌려준다',
+    lostEdit(mineRec, 'action', '여자가 문을 연다', 'u3', 'u2') === '남자가 문을 연다')
+  ok('내가 내 것을 고치는 건 손실이 아니다', lostEdit(mineRec, 'action', 'x', 'u2', 'u2') === null)
+  ok('남이 남의 것을 덮는 건 내 손실이 아니다',
+    lostEdit({ action: 'a', _by: { action: 'u4' } }, 'action', 'b', 'u3', 'u2') === null)
+  ok('같은 값은 손실이 아니다', lostEdit(mineRec, 'action', '남자가 문을 연다', 'u3', 'u2') === null)
+  ok('숫자 칸은 되돌려줄 문장이 없다',
+    lostEdit({ secs: 3, _by: { secs: 'u2' } }, 'secs', 5, 'u3', 'u2') === null)
+  ok('장부가 없으면 아무것도 주장하지 않는다', lostEdit({ action: 'a' }, 'action', 'b', 'u3', 'u2') === null)
+
+  ok('승인 통보는 뱃지를 켜지 않는다', !isActionable({ kind: 'status', status: 'approved' }))
+  ok('수정 요청은 뱃지를 켠다', isActionable({ kind: 'status', status: 'changes_requested' }))
+  ok('멘션은 뱃지를 켠다', isActionable({ kind: 'mention' }))
+
+  const seenPanels = { a: { id: 'a', _ts: { action: 50 } }, b: { id: 'b', _ts: { action: 300, secs: 120 } } }
+  ok('바뀐 컷만 고른다', changedSince(seenPanels, 100).join() === 'b')
+  ok('첫 방문이면 아무것도 새롭지 않다', changedSince(seenPanels, 0).length === 0)
+  ok('오래된 것부터 준다',
+    changedSince({ x: { id: 'x', _ts: { a: 400 } }, y: { id: 'y', _ts: { a: 200 } } }, 100).join() === 'y,x')
+
+  out.insertAdjacentHTML('beforeend',
+    `\n<span class="${failed ? 'fail' : 'pass'}">${failed ? failed + '개 실패' : '전부 통과'}</span>\n`)
+</script>
