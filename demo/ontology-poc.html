@@ -75,8 +75,11 @@
   .wb-box .item .p { color: #d2a8ff; }
   .wb-box .item .nt { color: #6e7681; }
 
+  .placeholder { text-align: center; color: #484f58; padding: 16px; font-size: 12px; }
+
   .cmp { width: 100%; border-collapse: collapse; font-size: 9.5px; margin-top: 6px; }
   .cmp th { background: #21262d; color: #8b949e; padding: 4px 5px; border: 1px solid #30363d; font-weight: 500; text-align: left; }
+  .cmp tr > th:first-child { white-space: nowrap; }
   .cmp td { padding: 4px 5px; border: 1px solid #21262d; color: #c9d1d9; vertical-align: top; }
   .cmp td.on { background: #1c1014; color: #ffb3a0; }
 </style>
@@ -105,7 +108,7 @@
       <div class="panel-scroll" id="seeds-list"></div>
     </div>
     <div id="panel-story" class="panel">
-      <div class="panel-scroll" id="story-panel" style="text-align:center;color:#484f58">스토리 생성 버튼을 눌러주세요</div>
+      <div class="panel-scroll" id="story-panel"><div class="placeholder">스토리 생성 버튼을 눌러주세요</div></div>
     </div>
   </div>
 </div>
@@ -580,12 +583,12 @@ function renderStory() {
     <div class="outcome"><span class="k">${k}</span><span class="v">${v}</span></div>`).join("");
 
   const wbNodes = (b.writeback.nodes||[]).map(n => `
-    <div class="item"><span class="nt">+ ${n.kind}</span> ${n.name}
+    <div class="item"><span class="nt">${n.kind}</span> ${n.name}
       ${n.t!==undefined?`<span class="p">t=${n.t}</span>`:""}
       <div class="p">${n.desc||""}</div></div>`).join("");
 
   const wbEdges = b.writeback.edges.map(e => `
-    <div class="item"><span class="nt">+ edge</span>
+    <div class="item"><span class="nt">edge</span>
       ${e.s} <b>${e.p}</b> ${e.o}${e.note?` <span class="p">(${e.note})</span>`:""}
     </div>`).join("");
 
