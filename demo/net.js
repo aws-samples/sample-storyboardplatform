@@ -64,20 +64,34 @@ const S_PRESENCE = `subscription OnBeat($boardId: ID!) {
   onPresence(boardId: $boardId) { boardId actor body }
 }`
 
+const gqlPost = async (cfg, query, variables) => {
+  const res = await fetch(cfg.graphqlUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: await idToken() },
+    body: JSON.stringify({ query, variables }),
+  })
+  const json = await res.json()
+  if (json.errors?.length) throw new Error(json.errors[0].message)
+  return json.data
+}
+
+/**
+ * plan 쿼리만 쓰는 최소 클라이언트. story-graph.html 처럼 보드 동기화(구독·프레즌스)는
+ * 필요 없고 Bedrock 호출만 하는 화면에서 쓴다.
+ *
+ * @returns {{plan: Function}|null} 설정이 없으면 null — 부르는 쪽은 로컬 모드로 내려간다
+ */
+export function planClient() {
+  const cfg = window.SB_CONFIG
+  if (!cfg?.graphqlUrl) return null
+  return { plan: async (spec) => JSON.parse((await gqlPost(cfg, Q_PLAN, { spec: JSON.stringify(spec) })).plan) }
+}
+
 async function awsTransport(cfg, h) {
   const boardId = new URL(location.href).searchParams.get('board') || cfg.boardId || 'demo'
   let latency = 0
 
-  const post = async (query, variables) => {
-    const res = await fetch(cfg.graphqlUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: await idToken() },
-      body: JSON.stringify({ query, variables }),
-    })
-    const json = await res.json()
-    if (json.errors?.length) throw new Error(json.errors[0].message)
-    return json.data
-  }
+  const post = (query, variables) => gqlPost(cfg, query, variables)
 
   const retry = async (fn, left = 3) => {
     for (let i = 0; ; i++) {

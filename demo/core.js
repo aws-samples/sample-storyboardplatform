@@ -210,6 +210,22 @@ export function fmtDur(secs) {
   return h < 24 ? `${h}시간` : `${Math.floor(h / 24)}일`
 }
 
+/**
+ * 앞말의 받침을 보고 조사를 고른다. 인물 이름이 한국어라서 자동 생성 문장에 필요하다.
+ * 한글이 아니면(영문 이름·id) 받침 있는 쪽으로 읽는다.
+ *
+ * @param {string} word - 조사가 붙을 앞말
+ * @param {string} withJong - 받침이 있을 때 (은, 이, 을, 과)
+ * @param {string} noJong - 받침이 없을 때 (는, 가, 를, 와)
+ * @returns {string} 고른 조사
+ */
+export function josa(word, withJong, noJong) {
+  const ch = String(word ?? '').trim().slice(-1)
+  const code = ch ? ch.codePointAt(0) : 0
+  if (code < 0xac00 || code > 0xd7a3) return withJong
+  return (code - 0xac00) % 28 ? withJong : noJong
+}
+
 export const POSES = ['정면', '3/4', '측면', '후면', '전신', '표정']
 
 export const FEEDBACK_TAGS = ['구도', '조명', '배경', '의상', '표정', '비율']
@@ -590,6 +606,156 @@ export function mergeGraphs(...parts) {
   const nodes = [...byId.values()]
   const ids = new Set(byId.keys())
   return { nodes, edges: [...byKey.values()].filter((e) => ids.has(e.s) && ids.has(e.o)) }
+}
+
+const BRANCH_IDS = ['A', 'B', 'C', 'D']
+
+/** 역기입 엣지 목록을 정리한다. s·o 는 id 든 이름이든 그대로 둔다 — 얹을 때 store 가 옮긴다 */
+const wbEdges = (list, warnings, label) => {
+  const out = []
+  for (const e of asList(list)) {
+    if (!e || typeof e !== 'object') { warnings.push(`${label}: 엣지가 객체가 아니다 — 버린다`); continue }
+    const s = clip(e.s ?? e.from ?? e.subject, 60)
+    const o = clip(e.o ?? e.to ?? e.object, 60)
+    const p = clip(e.p ?? e.rel ?? e.pred, 40).toLowerCase().replace(/[^a-z0-9_]+/g, '_')
+    if (!REL_OK.has(p)) { warnings.push(`${label}: 어휘에 없는 술어 "${p || '없음'}" — 엣지를 버린다`); continue }
+    if (!s || !o) { warnings.push(`${label}: ${p} 엣지의 s/o 가 비었다 — 버린다`); continue }
+    const edge = { s, p, o }
+    const note = clip(e.note ?? e.cause, 120)
+    if (note) edge.note = note
+    const props = asProps(e.props)
+    const t = tensionOf(props.tension ?? e.tension)
+    if (t === null) delete props.tension
+    else props.tension = t
+    if (Object.keys(props).length) edge.props = props
+    out.push(edge)
+  }
+  return out
+}
+
+/**
+ * 모델이 만든 분기 스토리를 검사하고 mock/stories.json 모양으로 맞춘다.
+ * normalizeGraph 와 같은 자리에서 같은 일을 한다: 뷰어에 올릴 수 있는 것만 통과시키고,
+ * 버린 것은 warnings 로 남겨 화면에 띄운다.
+ *
+ * 받아 주는 별칭 (지시서 스키마 ↔ mock/stories.json 스키마)
+ *   label ← title / tone ← subtitle / premise ← summary / outcome ← consequence
+ *   writeback.nodes ← add_nodes / writeback.edges ← add_edges / writeback.remove_edges ← remove
+ *
+ * beats 는 문자열(mock/stories.json)과 {scene, action, secs, cast} 객체를 모두 받는다.
+ * 객체로 온 것은 구조를 지켜 준다 — 다음 단계에서 컷으로 펼칠 때 쓴다.
+ *
+ * @param {Object} raw - 모델이 준 {title, logline, pivot, branches}
+ * @param {Object} [opts]
+ * @param {number} [opts.maxBranches=4] 분기 상한
+ * @param {number} [opts.maxBeats=8] 분기 하나의 비트 상한
+ * @returns {{title: string, logline: string, pivot: {title: string, body: string},
+ *            branches: Array, warnings: Array<string>}}
+ */
+export function normalizeStory(raw, { maxBranches = 4, maxBeats = 8 } = {}) {
+  const warnings = []
+  const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}
+  if (src !== raw) warnings.push('스토리가 객체가 아니다 — 빈 스토리로 둔다')
+  const rawBranches = src.branches ?? src.options ?? src.paths
+  if (!Array.isArray(rawBranches)) warnings.push('branches 배열이 없다')
+
+  const branches = []
+  for (const b of asList(rawBranches)) {
+    if (!b || typeof b !== 'object') { warnings.push('분기가 객체가 아니다 — 버린다'); continue }
+    if (branches.length >= maxBranches) { warnings.push(`분기가 ${maxBranches}개를 넘어 나머지를 잘랐다`); break }
+    const id = clip(b.id, 2).toUpperCase() || BRANCH_IDS[branches.length] || String(branches.length + 1)
+    const label = clip(b.label ?? b.title, 40)
+    const premise = clip(b.premise ?? b.summary ?? b.desc, 800)
+
+    const beats = []
+    for (const t of asList(b.beats ?? b.cuts)) {
+      if (beats.length >= maxBeats) { warnings.push(`${id}: 비트가 ${maxBeats}개를 넘어 나머지를 잘랐다`); break }
+      if (typeof t === 'string' || typeof t === 'number') {
+        const line = clip(t, 400)
+        if (line) beats.push(line)
+        continue
+      }
+      if (!t || typeof t !== 'object') { warnings.push(`${id}: 비트가 문자열도 객체도 아니다 — 버린다`); continue }
+      const action = clip(t.action ?? t.summary ?? t.text, 400)
+      if (!action) { warnings.push(`${id}: action 없는 비트를 버린다`); continue }
+      const beat = { action }
+      const scene = clip(t.scene, 24)
+      if (scene) beat.scene = scene
+      const secs = Number(t.secs ?? t.duration)
+      if (Number.isFinite(secs) && secs > 0) beat.secs = secsOf(secs)
+      const cast = [...new Set(asList(t.cast).map((n) => clip(n, 20)).filter(Boolean))].slice(0, 6)
+      if (cast.length) beat.cast = cast
+      beats.push(beat)
+    }
+
+    const outcome = {}
+    for (const [k, v] of Object.entries(asProps(b.outcome ?? b.consequence))) {
+      const key = clip(k, 24)
+      const val = clip(v && typeof v === 'object' ? Object.values(v).join(' ') : v, 160)
+      if (!key || !val) { warnings.push(`${id}: 결과 "${key || k}" 를 읽지 못해 버린다`); continue }
+      outcome[key] = val
+    }
+
+    const wb = asProps(b.writeback)
+    const nodes = []
+    for (const n of asList(wb.nodes ?? wb.add_nodes)) {
+      const name = clip(n?.name ?? n?.label, 60)
+      const kind = clip(n?.kind ?? n?.type, 20)
+      if (!name) { warnings.push(`${id} 역기입: 이름 없는 노드를 버린다`); continue }
+      if (!KIND_OK.has(kind)) {
+        warnings.push(`${id} 역기입: 모르는 kind "${kind || '없음'}" (${name}) — 노드를 버린다`)
+        continue
+      }
+      const node = { name, kind }
+      const nid = clip(n.id, 48)
+      if (nid) node.id = nid
+      const t = Number(n.t ?? n.props?.t)
+      if (Number.isFinite(t)) node.t = t
+      const desc = clip(n.desc ?? n.brief ?? n.props?.desc, 300)
+      if (desc) node.desc = desc
+      const claim = clip(n.claim ?? n.props?.claim, 300)
+      if (claim) node.claim = claim
+      nodes.push(node)
+    }
+
+    const writeback = {
+      nodes,
+      edges: wbEdges(wb.edges ?? wb.add_edges, warnings, `${id} 역기입`),
+      remove_edges: wbEdges(wb.remove_edges ?? wb.remove ?? wb.removeEdges, warnings, `${id} 역기입 삭제`),
+    }
+
+    if (!label && !premise && !beats.length) { warnings.push(`${id}: 빈 분기를 버린다`); continue }
+    if (!label) warnings.push(`${id}: label 이 없어 "분기 ${id}" 로 둔다`)
+    if (!premise) warnings.push(`${id}: 전개 요약(premise)이 없다`)
+    if (!beats.length) warnings.push(`${id}: 비트가 없다`)
+
+    branches.push({
+      id,
+      label: label || `분기 ${id}`,
+      tone: clip(b.tone ?? b.subtitle, 60),
+      premise,
+      beats,
+      outcome,
+      writeback,
+    })
+  }
+
+  if (!branches.length) warnings.push('쓸 수 있는 분기가 하나도 없다')
+
+  const pivot = asProps(src.pivot)
+  const out = {
+    title: clip(src.title, 80),
+    logline: clip(src.logline, 400),
+    pivot: {
+      title: clip(pivot.title ?? src.pivotTitle, 120),
+      body: clip(pivot.body ?? pivot.desc ?? src.pivotBody, 800),
+    },
+    branches,
+    warnings,
+  }
+  const probe = clip(src.probe, 40)
+  if (probe) out.probe = probe
+  return out
 }
 
 export function epLabel(ep) {

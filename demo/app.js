@@ -2305,6 +2305,8 @@ function renderMe() {
   const pl = byId('planBtn')
   pl.hidden = !canPlan(me.role)
   if (pl.hidden) openPlan(false)
+  // 관계 그래프 화면(story-graph.html)은 따로 뜨는 페이지다. 기획 권한과 같이 다룬다
+  byId('graphBtn').hidden = !canPlan(me.role)
 }
 
 function renderGpu() {

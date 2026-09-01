@@ -1,12 +1,12 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>core.js · graph-schema.js · story.js 자체 검사</title>
+<title>core.js · graph-schema.js · graph-engine.js · graph-probes.js · story.js 자체 검사</title>
 <style>
   body { font: 14px/1.6 ui-monospace, Menlo, monospace; background: #16181C; color: #E8E4DA; padding: 32px; }
   .pass { color: #6FCF97 } .fail { color: #FF6B5E; font-weight: 700 }
   h1 { font-size: 16px; letter-spacing: .12em; text-transform: uppercase; color: #E3A93C }
 </style>
-<h1>core.js · graph-schema.js · story.js 자체 검사</h1>
+<h1>core.js · graph-schema.js · graph-engine.js · graph-probes.js · story.js 자체 검사</h1>
 <pre id="out"></pre>
 <script type="module">
   const {
@@ -18,10 +18,16 @@
     lostEdit, isActionable, changedSince, liveVer, deadVer,
     canGrantRole, workload, NEEDS, ROLES, ACTIONS,
     tally, stalls, retakes, flow, pace, actorPace, firstPass, reviewLag, fmtDur,
-    normalizeGraph, validateAgainstCanon, mergeGraphs,
+    normalizeGraph, validateAgainstCanon, mergeGraphs, normalizeStory, josa,
   } = await import(`./core.js?t=${Date.now()}`)
   const { GRAPH_SCHEMA, deriveEdges, romanizeId, edgeKey } = await import(`./graph-schema.js?t=${Date.now()}`)
-  const { extractGraphPrompt, scriptToText, chunkText } = await import(`./story.js?t=${Date.now()}`)
+  const { createGraphStore } = await import(`./graph-engine.js?t=${Date.now()}`)
+  const { findSeeds, PROBES, probeSecretLeverage, probeLoveTriangle, probeUnresolvedTension,
+    probeChekovObject, probeStrangersSharedPast, probeSeveredBond, probeContestedGoal,
+    probeBetrayalPotential, probeIdentityCrisis, probeForbiddenBond, probePowerVacuum,
+  } = await import(`./graph-probes.js?t=${Date.now()}`)
+  const { extractGraphPrompt, scriptToText, chunkText, contextPackPrompt, branchPrompt,
+    freeDirectionPrompt, localBranches } = await import(`./story.js?t=${Date.now()}`)
 
   const out = document.getElementById('out')
   let failed = 0
@@ -632,6 +638,302 @@
       && !t.includes('<')
   })())
 
+  // ── graph-engine.js: 인메모리 그래프 저장소 ────────────────────────────────
+  ok('빈 그래프도 저장소가 만들어진다', (() => {
+    const st = createGraphStore({ nodes: [], edges: [] })
+    const s = st.stats()
+    return s.nodes === 0 && s.assertedEdges === 0 && s.derivedEdges === 0 && st.warnings.length === 0
+  })())
+  ok('빈 그래프에서는 씨앗이 없다', findSeeds(createGraphStore({ nodes: [], edges: [] })).length === 0)
+  ok('노드 1개짜리 그래프도 크래시 없이 다뤄진다', (() => {
+    const st = createGraphStore(G([N('a', 'Character', '가온')], []))
+    return st.stats().nodes === 1 && st.getNeighbors('a').length === 0
+      && st.getEdgesFrom('a').length === 0 && findSeeds(st).length === 0
+  })())
+  ok('없는 노드를 물어도 null 이다', createGraphStore(G([], [])).getNode('nope') === null)
+  ok('kind 로 노드를 고른다', (() => {
+    const st = createGraphStore(G([N('a', 'Character'), N('f', 'Faction')], []))
+    return st.getNodes({ kind: 'Character' }).length === 1 && st.getNodes().length === 2
+  })())
+  ok('엣지는 방향 상관없이 두 노드 사이에서 찾힌다', (() => {
+    const st = createGraphStore(G([N('a', 'Character'), N('b', 'Character')], [E('a', 'loves', 'b')]))
+    return st.getEdgesBetween('a', 'b').length === st.getEdgesBetween('b', 'a').length
+      && st.getEdgesFrom('a').length === 1 && st.getEdgesTo('a').length === 1
+  })())
+  ok('2-hop 이웃까지 넓힌다', (() => {
+    const st = createGraphStore(G([N('a', 'Character'), N('b', 'Character'), N('c', 'Character')],
+      [E('a', 'knows', 'b'), E('b', 'knows', 'c')]))
+    return st.getNeighbors('a').length === 1 && st.getNeighbors('a', { depth: 2 }).length === 2
+  })())
+  ok('서브그래프는 준 노드 사이 엣지만 담는다', (() => {
+    const st = createGraphStore(G([N('a', 'Character'), N('b', 'Character'), N('c', 'Character')],
+      [E('a', 'knows', 'b'), E('b', 'knows', 'c')]))
+    const sub = st.getSubgraph(['a', 'b', 'nope'])
+    return sub.nodes.length === 2 && sub.edges.length === 1
+  })())
+  ok('역기입: 노드·엣지를 얹으면 통계가 움직인다', (() => {
+    const st = createGraphStore(G([N('a', 'Character', '가온')], []))
+    st.addNodes([{ kind: 'Object', name: '낡은 열쇠' }])
+    st.addEdges([{ s: '가온', p: 'uses', o: '낡은 열쇠' }])
+    const s = st.stats()
+    return s.nodes === 2 && s.assertedEdges === 1
+  })())
+  ok('역기입: 엣지를 지우면 그 엣지에서 나온 추론도 사라진다', (() => {
+    const st = createGraphStore(G([N('a', 'Character'), N('b', 'Character')], [E('a', 'loves', 'b')]))
+    const before = st.stats().derivedEdges
+    st.removeEdges([{ s: 'a', p: 'loves', o: 'b' }])
+    return before === 1 && st.stats().assertedEdges === 0 && st.stats().derivedEdges === 0
+  })())
+  ok('역기입: 같은 엣지를 두 번 넣지 않는다', (() => {
+    const st = createGraphStore(G([N('a', 'Character'), N('b', 'Character')], [E('a', 'knows', 'b')]))
+    const r = st.addEdges([{ s: 'a', p: 'knows', o: 'b' }])
+    return r.added.length === 0 && r.warnings.length >= 1 && st.stats().assertedEdges === 1
+  })())
+  ok('역기입: 어휘에 없는 술어는 경고와 함께 버린다', (() => {
+    const st = createGraphStore(G([N('a', 'Character'), N('b', 'Character')], []))
+    const r = st.addEdges([{ s: 'a', p: 'hates', o: 'b' }])
+    return r.added.length === 0 && r.warnings.some((w) => w.includes('술어'))
+  })())
+  ok('getEdges 는 명시·추론을 따로 낼 수 있다', (() => {
+    const st = createGraphStore(G([N('a', 'Character'), N('b', 'Character')], [E('a', 'loves', 'b')]))
+    return st.getEdges().length === 2 && st.getEdges({ asserted: true }).length === 1
+      && st.getEdges({ asserted: false }).length === 1
+  })())
+  ok('toJSON 은 명시 엣지를 먼저 담는다', (() => {
+    const st = createGraphStore(G([N('a', 'Character'), N('b', 'Character')], [E('a', 'loves', 'b')]))
+    const g = st.toJSON()
+    return g.edges.length === 2 && g.edges[0].asserted === true && g.edges[1].asserted === false
+  })())
+
+  // ── graph-probes.js: 씨앗 탐지기 12종 ──────────────────────────────────────
+  ok('탐지기 12종이 다 등록돼 있다', Object.keys(PROBES).length === 12)
+  ok('드라마성 탐지기는 가중치 1.2 다',
+    ['secret_leverage', 'love_triangle', 'betrayal_potential', 'forbidden_bond']
+      .every((k) => PROBES[k].weight === 1.2))
+  ok('비밀 레버리지: 아는 이와 모르는 이가 갈리면 잡는다', (() => {
+    const st = createGraphStore(G(
+      [N('a', 'Character', '가온'), N('b', 'Character', '노을'), N('c', 'Character', '바다'),
+        N('s', 'Secret', '비밀', { claim: '가온은 다른 사람이다' })],
+      [E('a', 'conceals', 's'), E('b', 'knows', 's'), E('s', 'hidden_from', 'c')]))
+    const seeds = probeSecretLeverage(st)
+    return seeds.length === 1 && seeds[0].probe === 'secret_leverage'
+      && seeds[0].focus.includes('s') && seeds[0].score > 1
+  })())
+  ok('비밀 레버리지: 아무도 모르는 비밀은 씨앗이 아니다', (() => {
+    const st = createGraphStore(G([N('a', 'Character'), N('s', 'Secret', '비밀')], [E('a', 'conceals', 's')]))
+    return probeSecretLeverage(st).length === 0
+  })())
+  ok('삼각: 같은 사람을 둘이 마음에 두면 잡는다', (() => {
+    const st = createGraphStore(G([N('a', 'Character', '가온'), N('b', 'Character', '노을'), N('c', 'Character', '바다')],
+      [E('a', 'loves', 'c'), E('b', 'loves', 'c')]))
+    const seeds = probeLoveTriangle(st)
+    return seeds.length >= 1 && ['a', 'b', 'c'].every((id) => seeds[0].focus.includes(id))
+  })())
+  ok('삼각: 서로 사랑하는 둘만으로는 삼각이 아니다', (() => {
+    const st = createGraphStore(G([N('a', 'Character'), N('b', 'Character')],
+      [E('a', 'loves', 'b'), E('b', 'loves', 'a')]))
+    return probeLoveTriangle(st).length === 0
+  })())
+  ok('회수 안 된 사물: 쓰이지 않은 물건만 잡는다', (() => {
+    const held = createGraphStore(G([N('a', 'Character'), N('o', 'Object', '열쇠')], [E('a', 'located_in', 'o')]))
+    const used = createGraphStore(G([N('a', 'Character'), N('o', 'Object', '열쇠')], [E('a', 'uses', 'o')]))
+    return probeChekovObject(held).length === 1 && probeChekovObject(used).length === 0
+  })())
+  ok('같은 과거·남인 사이: 관계가 없는 두 참여자를 잡는다', (() => {
+    const base = [N('a', 'Character', '가온'), N('b', 'Character', '노을'), N('e', 'Event', '첫 손님', { t: -2 })]
+    const far = createGraphStore(G(base, [E('a', 'participated_in', 'e'), E('b', 'participated_in', 'e')]))
+    const near = createGraphStore(G(base,
+      [E('a', 'participated_in', 'e'), E('b', 'participated_in', 'e'), E('a', 'knows', 'b')]))
+    return probeStrangersSharedPast(far).length === 1 && probeStrangersSharedPast(near).length === 0
+  })())
+  ok('끊어진 사제: 긴장 높은 사제는 잡고, 함께 겪은 사건이 있으면 넘긴다', (() => {
+    const nodes = [N('m', 'Character', '스승'), N('s', 'Character', '제자'), N('e', 'Event', '화해', { t: -1 })]
+    const cut = createGraphStore(G(nodes, [E('m', 'mentor_of', 's', { tension: 0.9 })]))
+    const met = createGraphStore(G(nodes, [E('m', 'mentor_of', 's', { tension: 0.9 }),
+      E('m', 'participated_in', 'e'), E('s', 'participated_in', 'e')]))
+    return probeSeveredBond(cut).length === 1 && probeSeveredBond(met).length === 0
+  })())
+  ok('겹친 목표: props.want 이 같으면 잡는다', (() => {
+    const st = createGraphStore(G([N('a', 'Character', '가온', { want: '빵집 유지' }),
+      N('b', 'Character', '노을', { want: '빵집 유지' })], []))
+    const seeds = probeContestedGoal(st)
+    return seeds.length === 1 && seeds[0].focus.includes('a') && seeds[0].focus.includes('b')
+  })())
+  ok('정체성 갈등: 서로 적인 두 곳에 속하면 잡는다', (() => {
+    const st = createGraphStore(G([N('a', 'Character', '가온'), N('f1', 'Faction', '새벽조'), N('f2', 'Faction', '낮조')],
+      [E('a', 'member_of', 'f1'), E('a', 'member_of', 'f2'), E('f1', 'rival_of', 'f2', { tension: 0.6 })]))
+    return probeIdentityCrisis(st).some((x) => x.focus.includes('f1') && x.focus.includes('f2'))
+  })())
+  ok('금지된 관계: 소속이 적이면 잡는다', (() => {
+    const st = createGraphStore(G([N('a', 'Character', '가온'), N('b', 'Character', '노을'),
+      N('f1', 'Faction', '새벽조'), N('f2', 'Faction', '낮조')],
+      [E('a', 'loves', 'b'), E('a', 'member_of', 'f1'), E('b', 'member_of', 'f2'),
+        E('f1', 'rival_of', 'f2', { tension: 0.7 })]))
+    const seeds = probeForbiddenBond(st)
+    return seeds.length >= 1 && seeds[0].score > 1
+  })())
+  ok('권력 공백: 이끄는 엣지가 없는 집단을 잡는다', (() => {
+    const none = createGraphStore(G([N('a', 'Character'), N('f', 'Faction', '새벽조')], [E('a', 'member_of', 'f')]))
+    const led = createGraphStore(G([N('a', 'Character'), N('b', 'Character'), N('f', 'Faction', '새벽조')],
+      [E('a', 'member_of', 'f'), E('b', 'manages', 'f')]))
+    return probePowerVacuum(none).length === 1 && probePowerVacuum(led).length === 0
+  })())
+  ok('배신 가능: 섬기는 주인의 적과 얽히면 잡는다', (() => {
+    const st = createGraphStore(G([N('a', 'Character', '가온'), N('b', 'Character', '노을'), N('c', 'Character', '바다')],
+      [E('a', 'serves', 'b', { tension: 0.7 }), E('b', 'rival_of', 'c', { tension: 0.8 }), E('a', 'knows', 'c')]))
+    const seeds = probeBetrayalPotential(st)
+    return seeds.length === 1 && seeds[0].focus.length === 3 && seeds[0].score > 1
+  })())
+  ok('해소 안 된 긴장: 함께 겪은 사건이 있으면 넘긴다', (() => {
+    const nodes = [N('a', 'Character'), N('b', 'Character'), N('e', 'Event', '충돌', { t: 0 })]
+    const open = createGraphStore(G(nodes, [E('a', 'distrusts', 'b', { tension: 0.8 })]))
+    const done = createGraphStore(G(nodes, [E('a', 'distrusts', 'b', { tension: 0.8 }),
+      E('a', 'participated_in', 'e'), E('b', 'participated_in', 'e')]))
+    return probeUnresolvedTension(open).length === 1 && probeUnresolvedTension(done).length === 0
+  })())
+  ok('스코어는 0~2 안에 있고 내림차순으로 온다', (() => {
+    const st = createGraphStore(G([N('a', 'Character', '가온'), N('b', 'Character', '노을'), N('c', 'Character', '바다'),
+      N('s', 'Secret', '비밀', { claim: '가온은 다른 사람이다' }), N('e', 'Event', '정전', { t: 0 })],
+      [E('a', 'conceals', 's'), E('b', 'knows', 's'), E('s', 'hidden_from', 'c'),
+        E('a', 'loves', 'b'), E('c', 'loves', 'b'), E('a', 'participated_in', 'e')]))
+    const seeds = findSeeds(st)
+    return seeds.length >= 3 && seeds.every((x) => x.score >= 0 && x.score <= 2)
+      && seeds.every((x, i) => i === 0 || seeds[i - 1].score >= x.score)
+  })())
+  ok('상한을 주면 그만큼만 온다', (() => {
+    const st = createGraphStore(G([N('a', 'Character'), N('b', 'Character'), N('c', 'Character'),
+      N('e1', 'Event', '하나', { t: 0 }), N('e2', 'Event', '둘', { t: -1 })],
+      [E('a', 'participated_in', 'e1'), E('b', 'participated_in', 'e2'),
+        E('a', 'distrusts', 'b', { tension: 0.9 })]))
+    return findSeeds(st, { limit: 2 }).length === 2 && findSeeds(st).length > 2
+  })())
+  ok('짧은 대본 그래프(빵집)도 씨앗까지 굴러간다', (() => {
+    // "새벽에 문 여는 동네 빵집. 주인은 첫 손님이 오기까지 셔터를 두 번 올린다."
+    const st = createGraphStore(G(
+      [N('gaon', 'Character', '가온', { role: '빵집 주인' }), N('noeul', 'Character', '노을', { role: '첫 손님' }),
+        N('bakery', 'Location', '동네 빵집'), N('open', 'Event', '문 여는 새벽', { t: 0 })],
+      [E('gaon', 'located_in', 'bakery'), E('gaon', 'participated_in', 'open'),
+        E('noeul', 'participated_in', 'open'), E('gaon', 'distrusts', 'noeul', { tension: 0.6 })]))
+    const seeds = findSeeds(st)
+    const ids = new Set(st.getNodes().map((n) => n.id))
+    return st.stats().nodes === 4 && seeds.length >= 1
+      && seeds.every((x) => x.focus.every((f) => ids.has(f)) && typeof x.title === 'string' && x.title.length > 0)
+  })())
+
+  // ── normalizeStory: 분기 스토리 검증 ───────────────────────────────────────
+  ok('분기가 없으면 경고를 남긴다', normalizeStory({}).warnings.length >= 2)
+  ok('객체가 아니면 빈 스토리에 경고', normalizeStory([]).warnings.length >= 2)
+  ok('id 가 없으면 A·B·C 로 붙인다', (() => {
+    const st = normalizeStory({ branches: [{ label: '가', beats: ['하나'] }, { label: '나', beats: ['둘'] }] })
+    return st.branches.map((b) => b.id).join('') === 'AB'
+  })())
+  ok('분기는 4개까지만 남긴다', (() => {
+    const many = Array.from({ length: 6 }, (_, i) => ({ label: `분기${i}`, beats: ['하나'] }))
+    const st = normalizeStory({ branches: many })
+    return st.branches.length === 4 && st.warnings.some((w) => w.includes('넘어'))
+  })())
+  ok('역기입의 모르는 kind·술어는 경고와 함께 버린다', (() => {
+    const st = normalizeStory({ branches: [{ label: '가', beats: ['하나'], writeback: {
+      nodes: [{ name: '무엇', kind: 'Weird' }, { name: '사건', kind: 'Event', t: 0 }],
+      edges: [{ s: '가온', p: 'nope', o: '노을' }, { s: '가온', p: 'loves', o: '노을' }],
+    } }] })
+    const wb = st.branches[0].writeback
+    return wb.nodes.length === 1 && wb.edges.length === 1
+      && st.warnings.filter((w) => w.includes('버린다')).length >= 2
+  })())
+  ok('지시서 스키마(summary·consequence·add_edges)도 받아 준다', (() => {
+    const st = normalizeStory({ branches: [{
+      label: '가', subtitle: '방식', summary: '이렇게 흐른다',
+      beats: [{ scene: 'S1 빵집', action: '셔터를 올린다', secs: 3, cast: ['가온'] }],
+      consequence: { 가온: '문을 연다' },
+      writeback: {
+        add_nodes: [{ name: '개점', kind: 'Event' }],
+        add_edges: [{ s: '가온', p: 'located_in', o: '동네 빵집' }],
+        remove_edges: [{ s: '가온', p: 'distrusts', o: '노을' }],
+      },
+    }] })
+    const b = st.branches[0]
+    return b.tone === '방식' && b.premise === '이렇게 흐른다' && b.outcome['가온'] === '문을 연다'
+      && b.beats[0].action === '셔터를 올린다' && b.beats[0].secs === 3
+      && b.writeback.nodes.length === 1 && b.writeback.edges.length === 1 && b.writeback.remove_edges.length === 1
+  })())
+  ok('조사는 받침을 보고 고른다',
+    josa('루미', '은', '는') === '는' && josa('한결', '은', '는') === '은' && josa('Rumi', '이', '가') === '이')
+
+  // ── 분기 생성: 로컬 폴백과 프롬프트 ────────────────────────────────────────
+  const seedStore = createGraphStore(G(
+    [N('gaon', 'Character', '가온', { role: '빵집 주인' }), N('noeul', 'Character', '노을', { role: '단골' }),
+      N('bada', 'Character', '바다'), N('s1', 'Secret', '가게의 사정', { claim: '가온은 가게를 넘길 생각이다' })],
+    [E('gaon', 'conceals', 's1'), E('bada', 'knows', 's1'), E('s1', 'hidden_from', 'noeul'),
+      E('gaon', 'loves', 'noeul', { tension: 0.6 })]))
+  const seed0 = findSeeds(seedStore)[0]
+  ok('씨앗이 하나는 나온다', !!seed0 && typeof seed0.probe === 'string')
+  ok('로컬 폴백은 분기 3개를 만든다', (() => {
+    const st = localBranches(seed0, seedStore)
+    return st.branches.length === 3 && st.local === true && st.branches.every((b) => b.beats.length >= 3)
+  })())
+  ok('로컬 폴백의 역기입 술어는 어휘 안에 있다', (() => {
+    const st = localBranches(seed0, seedStore)
+    return st.branches.every((b) => [...b.writeback.edges, ...b.writeback.remove_edges]
+      .every((e) => GRAPH_SCHEMA.edgeRels.includes(e.p)))
+  })())
+  ok('로컬 폴백의 분기별 역기입이 서로 다르다', (() => {
+    const st = localBranches(seed0, seedStore)
+    const keys = st.branches.map((b) => b.writeback.nodes.map((n) => n.name).join(','))
+    return new Set(keys).size === 3
+  })())
+  ok('없는 엣지를 지우라는 계획은 걸러낸다', (() => {
+    const st = localBranches(seed0, seedStore)
+    return st.branches.every((b) => b.writeback.remove_edges.every((e) => {
+      const s = seedStore.getNodes().find((n) => n.name === e.s)?.id || e.s
+      const o = seedStore.getNodes().find((n) => n.name === e.o)?.id || e.o
+      return seedStore.getEdgesFrom(s).some((x) => x.p === e.p && x.o === o)
+    }))
+  })())
+  ok('씨앗이 없어도(자유 입력) 분기 3개가 나온다', (() => {
+    const st = localBranches(null, seedStore, [], '노을이 먼저 알아챈다')
+    return st.branches.length === 3 && st.logline.includes('노을이 먼저 알아챈다')
+  })())
+  ok('빈 그래프 + 자유 입력도 크래시 없이 분기를 만든다', (() => {
+    const st = localBranches(null, createGraphStore({ nodes: [], edges: [] }), [], '아무 방향')
+    return st.branches.length === 3
+  })())
+  ok('컨텍스트 팩에 인물·관계·비밀이 들어간다', (() => {
+    const ctx = contextPackPrompt(seed0, seedStore)
+    return ctx.includes('[인물]') && ctx.includes('가온') && ctx.includes('[관계]')
+      && ctx.includes('[비밀]') && ctx.includes('가온은 가게를 넘길 생각이다') && ctx.includes('[전체 규모]')
+  })())
+  ok('컨텍스트 팩은 명시와 추론을 구분해 적는다', (() => {
+    const ctx = contextPackPrompt(seed0, seedStore)
+    return ctx.includes('[명시]') && ctx.includes('[추론')
+  })())
+  ok('씨앗이 없으면 그래프 전체를 컨텍스트로 쓴다', (() => {
+    const ctx = contextPackPrompt(null, seedStore)
+    return ctx.includes('기획자가 방향을 직접 준다') && ctx.includes('가온') && ctx.includes('노을')
+  })())
+  ok('컨텍스트 팩은 빈 그래프에서도 문자열을 준다',
+    typeof contextPackPrompt(null, createGraphStore({ nodes: [], edges: [] })) === 'string')
+  ok('분기 프롬프트는 JSON 하나만 요구한다', (() => {
+    const p = branchPrompt(seed0, contextPackPrompt(seed0, seedStore), seedStore.toJSON())
+    return p.includes('코드펜스') && p.includes('"branches"') && p.includes('"writeback"')
+      && p.includes('"remove_edges"')
+  })())
+  ok('분기 프롬프트는 분기 3개와 비트 3~5개를 못 박는다', (() => {
+    const p = branchPrompt(seed0, '', null)
+    return p.includes('정확히 3개') && p.includes('3~5개')
+  })())
+  ok('분기 프롬프트는 술어 어휘를 다 적고 파생 전용은 막는다', (() => {
+    const p = branchPrompt(seed0, '', null)
+    return GRAPH_SCHEMA.assertableRels.every((r) => p.includes(r))
+      && GRAPH_SCHEMA.derivedRels.every((r) => p.includes(r)) && p.includes('쓰지 않는다')
+  })())
+  ok('자유 입력 프롬프트는 기획자의 방향을 먼저 둔다', (() => {
+    const p = freeDirectionPrompt('노을이 먼저 알아챈다', seed0, '', null)
+    return p.includes('[기획자의 방향]') && p.includes('노을이 먼저 알아챈다')
+      && p.indexOf('노을이 먼저 알아챈다') < p.indexOf('규칙')
+  })())
+  ok('자유 입력 프롬프트는 방향이 비어도 만들어진다', freeDirectionPrompt('', null, '', null).includes('비어 있다'))
+
   // ── mock/graph.json 과의 호환: 추출 결과를 그대로 뷰어에 넣을 수 있는가 ──────
   const grab = async (p) => {
     const r = await fetch(`${p}?t=${Date.now()}`)
@@ -696,6 +998,79 @@
       const ids = new Set(built.nodes.map((n) => n.id))
       return seeds.every((s) => s.focus.every((f) => ids.has(f)))
     })())
+
+    // ── canon 을 저장소에 올려 씨앗과 분기까지 굴려 본다 ──────────────────────
+    const store = createGraphStore(canon)
+    ok('canon 저장소 통계가 14 / 18 / 4 다', (() => {
+      const st = store.stats()
+      return st.nodes === 14 && st.assertedEdges === 18 && st.derivedEdges === 4
+    })(), JSON.stringify(store.stats()))
+    ok('추론 엣지를 canon 과 같은 것으로 다시 만든다', (() => {
+      const want = new Set(canon.edges.filter((e) => !e.asserted).map(edgeKey))
+      const got = new Set(store.toJSON().edges.filter((e) => !e.asserted).map(edgeKey))
+      return want.size === got.size && [...want].every((k) => got.has(k))
+    })())
+    ok('rumi 는 Character 다', store.getNode('rumi').kind === 'Character')
+    ok('rumi 에서 나가는 엣지가 3개 이상이다', store.getEdgesFrom('rumi').length >= 3,
+      String(store.getEdgesFrom('rumi').length))
+    ok('loves 엣지가 잡힌다', store.getEdgesByPredicate('loves').length >= 1)
+    ok('rumi 의 1-hop 이웃에 jinu 가 있다',
+      store.getNeighbors('rumi', { depth: 1 }).some((n) => n.id === 'jinu'))
+    ok('세 노드 서브그래프에 그 사이 엣지가 담긴다', (() => {
+      const sub = store.getSubgraph(['rumi', 'celine', 'gwima'])
+      return sub.nodes.length === 3
+        && sub.edges.some((e) => e.s === 'celine' && e.p === 'mentor_of' && e.o === 'rumi')
+        && sub.edges.every((e) => ['rumi', 'celine', 'gwima'].includes(e.s))
+    })())
+    ok('canon 을 그대로 내보내면 엣지 22개다', store.toJSON().edges.length === 22)
+
+    const liveSeeds = findSeeds(store)
+    ok('탐지기가 씨앗을 4개 이상 찾는다', liveSeeds.length >= 4, String(liveSeeds.length))
+    ok('씨앗 모양이 mock/seeds.json 과 같다', (() => {
+      const want = Object.keys(seeds[0]).sort().join(',')
+      return liveSeeds.every((s) => Object.keys(s).sort().join(',') === want)
+    })(), Object.keys(liveSeeds[0]).sort().join(','))
+    ok('모든 씨앗의 probe 가 등록된 탐지기다', liveSeeds.every((s) => !!PROBES[s.probe]))
+    ok('모든 씨앗의 초점이 실제 노드다', (() => {
+      const ids = new Set(canon.nodes.map((n) => n.id))
+      return liveSeeds.every((s) => s.focus.length > 0 && s.focus.every((f) => ids.has(f)))
+    })())
+    ok('비밀 레버리지 씨앗이 루미의 문양을 가리킨다',
+      liveSeeds.some((s) => s.probe === 'secret_leverage' && s.focus.includes('s_rumi_patterns')
+        && s.focus.includes('celine') && s.focus.includes('gwima')))
+    ok('삼각 씨앗이 루미·진우를 함께 잡는다',
+      liveSeeds.some((s) => s.probe === 'love_triangle' && s.focus.includes('rumi') && s.focus.includes('jinu')))
+    ok('값 안 치른 사건으로 혼문 균열과 진우의 거래를 잡는다', (() => {
+      const got = liveSeeds.filter((s) => s.probe === 'dangling_consequence')
+      return got.some((s) => s.focus.includes('honmoon_crack')) && got.some((s) => s.focus.includes('jinu_deal'))
+    })())
+    ok('가장 높은 씨앗은 mock/seeds.json 과 같은 점수대다',
+      liveSeeds[0].score >= 1.2 && liveSeeds[0].score <= 2, String(liveSeeds[0].score))
+    ok('목 씨앗도 같은 모양이다',
+      seeds.every((s) => typeof s.probe === 'string' && typeof s.score === 'number' && Array.isArray(s.focus)))
+
+    ok('mock/stories.json 이 normalizeStory 를 그대로 통과한다', (() => {
+      const got = stories.map((st) => normalizeStory(st))
+      return got.every((st) => st.warnings.length === 0 && st.branches.length === 3
+        && st.branches.every((b) => b.beats.length >= 3 && Object.keys(b.outcome).length > 0
+          && b.writeback.nodes.length >= 1 && b.writeback.edges.length >= 1))
+    })())
+    ok('로컬 폴백이 목 스토리 묶음에서 맞는 것을 골라 온다', (() => {
+      const pool = seeds.map((s, i) => ({ ...stories[i], probe: s.probe, focus: s.focus }))
+      const want = stories[seeds.findIndex((s) => s.probe === 'secret_leverage')].title
+      const hit = localBranches(liveSeeds.find((s) => s.probe === 'secret_leverage'), store, pool)
+      return hit.title === want && hit.branches.length === 3
+    })())
+    ok('맞는 것이 없으면 임시 분기를 만든다', (() => {
+      const odd = liveSeeds.find((s) => s.probe === 'power_vacuum') || liveSeeds.at(-1)
+      const st = localBranches(odd, store, [])
+      return st.branches.length === 3 && st.local === true
+    })())
+    ok('컨텍스트 팩이 canon 의 씨앗 주변만 담는다', (() => {
+      const ctx = contextPackPrompt(liveSeeds[0], store)
+      return ctx.includes('[씨앗]') && ctx.includes('[구조적 결함]') && ctx.length < 4000
+    })())
+
   } catch (err) {
     ok(`mock/fixtures 를 읽지 못했다 — HTTP 로 열어야 한다 (${err.message})`, false)
   }

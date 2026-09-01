@@ -3,18 +3,63 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Story Graph · 케이팝 데몬 헌터스</title>
+<title>Story Graph · 대본에서 씨앗과 분기까지</title>
 <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; background: #0d1117; color: #e6edf3; height: 100vh; overflow: hidden; }
-  .app { display: grid; grid-template-columns: 1fr 380px; grid-template-rows: 52px 1fr; height: 100vh; }
-  .topbar { grid-column: 1 / -1; background: #161b22; border-bottom: 1px solid #30363d; display: flex; align-items: center; padding: 0 20px; gap: 16px; }
-  .topbar h1 { font-size: 14px; font-weight: 600; color: #e6edf3; }
-  .topbar .badge { font-size: 11px; background: #21262d; border: 1px solid #30363d; border-radius: 12px; padding: 2px 10px; color: #8b949e; }
+  .app { display: grid; grid-template-columns: 1fr 400px; grid-template-rows: 52px 1fr; height: 100vh; }
+  .topbar { grid-column: 1 / -1; background: #161b22; border-bottom: 1px solid #30363d; display: flex; align-items: center; padding: 0 20px; gap: 10px; }
+  .topbar h1 { font-size: 14px; font-weight: 600; color: #e6edf3; margin-right: 6px; }
+  .badge { font-size: 11px; background: #21262d; border: 1px solid #30363d; border-radius: 12px; padding: 2px 10px; color: #8b949e; white-space: nowrap; }
+  .badge--live { background: #071a0c; border-color: #1a7f37; color: #3fb950; }
+  .grow { flex: 1; }
   .graph-area { position: relative; overflow: hidden; background: #0d1117; }
   .sidebar { background: #161b22; border-left: 1px solid #30363d; display: flex; flex-direction: column; overflow: hidden; }
   #network { width: 100%; height: 100%; }
+
+  button { font-family: inherit; }
+  .btn { padding: 9px 12px; background: #238636; border: 1px solid #2ea043; border-radius: 6px; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; transition: background .15s; }
+  .btn:hover:not(:disabled) { background: #2ea043; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn--line { background: #21262d; border-color: #30363d; color: #c9d1d9; font-weight: 500; }
+  .btn--line:hover:not(:disabled) { background: #30363d; border-color: #58a6ff; }
+  .btn--wide { width: 100%; }
+  .btn--mini { padding: 4px 9px; font-size: 11px; }
+
+  textarea { width: 100%; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; font-family: inherit; font-size: 11.5px; line-height: 1.6; padding: 8px; resize: vertical; }
+  textarea:focus { outline: none; border-color: #58a6ff; }
+
+  /* 그래프 위에 얹는 카드 */
+  .card { position: absolute; z-index: 5; background: #161b22ee; border: 1px solid #30363d; border-radius: 8px; padding: 12px; backdrop-filter: blur(3px); }
+  .card h3 { font-size: 11px; font-weight: 600; color: #8b949e; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .card--input { top: 12px; left: 12px; width: 330px; }
+  .card--input.drop { border-color: #58a6ff; background: #0d2137ee; }
+  .card--node { bottom: 12px; left: 12px; width: 330px; max-height: 44%; overflow-y: auto; }
+  .card__row { display: flex; gap: 6px; margin-top: 8px; }
+  .hint { font-size: 10.5px; color: #6e7681; line-height: 1.55; margin-top: 6px; }
+  .warn { font-size: 10.5px; color: #e3b341; line-height: 1.55; margin-top: 6px; }
+  .err { font-size: 11px; color: #f85149; line-height: 1.6; margin-top: 6px; }
+  .legend { position: absolute; z-index: 5; right: 12px; bottom: 12px; display: flex; flex-wrap: wrap; gap: 4px 10px; max-width: 300px; justify-content: flex-end; }
+  .legend span { font-size: 10px; color: #8b949e; display: flex; align-items: center; gap: 4px; }
+  .legend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .legend i.dia { border-radius: 0; transform: rotate(45deg); }
+  .legend i.line { width: 14px; height: 0; border-top: 1px solid #c9d1d9; border-radius: 0; }
+  .legend i.dash { width: 14px; height: 0; border-top: 1px dashed #6e7681; border-radius: 0; }
+  .canvas-msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; color: #484f58; font-size: 12.5px; line-height: 1.8; padding: 40px; pointer-events: none; }
+
+  .kv { display: grid; grid-template-columns: 58px 1fr; gap: 2px 8px; font-size: 11px; }
+  .kv .k { color: #6e7681; }
+  .kv .v { color: #c9d1d9; word-break: break-all; }
+  .edge-line { font-size: 10.5px; color: #c9d1d9; line-height: 1.7; }
+  .edge-line b { color: #d2a8ff; font-weight: 500; }
+  .edge-line.der { color: #6e7681; }
+
+  /* 사이드바 */
+  .stats-bar { display: flex; gap: 14px; padding: 8px 12px; border-bottom: 1px solid #30363d; background: #161b22; flex-shrink: 0; }
+  .stat { display: flex; flex-direction: column; gap: 1px; }
+  .stat .n { font-size: 16px; font-weight: 700; color: #e6edf3; }
+  .stat .l { font-size: 10px; color: #8b949e; }
   .tabs { display: flex; border-bottom: 1px solid #30363d; background: #161b22; flex-shrink: 0; }
   .tab { padding: 12px 16px; font-size: 12px; cursor: pointer; color: #8b949e; border-bottom: 2px solid transparent; transition: all .15s; user-select: none; }
   .tab:hover { color: #e6edf3; }
@@ -25,25 +70,19 @@
   .panel-scroll::-webkit-scrollbar { width: 4px; }
   .panel-scroll::-webkit-scrollbar-track { background: transparent; }
   .panel-scroll::-webkit-scrollbar-thumb { background: #30363d; border-radius: 2px; }
-  .seed-card { background: #21262d; border: 1px solid #30363d; border-radius: 8px; padding: 12px; margin-bottom: 8px; cursor: pointer; transition: all .15s; }
+
+  .seed-card { background: #21262d; border: 1px solid #30363d; border-radius: 8px; padding: 12px; margin-bottom: 8px; transition: all .15s; }
   .seed-card:hover { border-color: #58a6ff; background: #1c2128; }
+  .seed-card.on { border-color: #f78166; }
   .seed-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
   .probe-tag { font-size: 10px; background: #0d2137; border: 1px solid #1f6feb; color: #79c0ff; border-radius: 10px; padding: 1px 8px; white-space: nowrap; }
   .seed-score { font-size: 11px; color: #8b949e; margin-left: auto; }
-  .seed-title { font-size: 12px; font-weight: 600; color: #e6edf3; margin-bottom: 4px; }
-  .seed-rationale { font-size: 11px; color: #8b949e; line-height: 1.5; }
-  .gen-btn { width: 100%; padding: 10px; background: #238636; border: 1px solid #2ea043; border-radius: 6px; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; transition: background .15s; margin-top: 4px; }
-  .gen-btn:hover { background: #2ea043; }
-  .story-content { padding: 16px; font-size: 12px; line-height: 1.7; }
-  .story-content h1 { font-size: 16px; font-weight: 700; color: #e6edf3; margin-bottom: 12px; }
-  .story-content h2 { font-size: 13px; font-weight: 600; color: #79c0ff; margin: 14px 0 6px; }
-  .story-content p { color: #c9d1d9; margin-bottom: 8px; }
-  .stats-bar { display: flex; gap: 16px; padding: 8px 12px; border-bottom: 1px solid #30363d; background: #161b22; flex-shrink: 0; }
-  .stat { display: flex; flex-direction: column; gap: 1px; }
-  .stat .n { font-size: 16px; font-weight: 700; color: #e6edf3; }
-  .stat .l { font-size: 10px; color: #8b949e; }
+  .seed-title { font-size: 12px; font-weight: 600; color: #e6edf3; margin-bottom: 4px; cursor: pointer; }
+  .seed-rationale { font-size: 11px; color: #8b949e; line-height: 1.5; margin-bottom: 8px; }
+  .seed-focus { font-size: 10px; color: #6e7681; margin-bottom: 8px; }
 
-  /* 스토리 분기 UI */
+  .story-content { padding: 16px; font-size: 12px; line-height: 1.7; }
+  .story-content h1 { font-size: 16px; font-weight: 700; color: #e6edf3; margin-bottom: 10px; }
   .seed-info { background: #0d2137; border: 1px solid #1f6feb; border-radius: 6px; padding: 9px 11px; margin-bottom: 12px; font-size: 10.5px; color: #79c0ff; line-height: 1.6; }
   .logline { color: #c9d1d9; font-size: 12px; line-height: 1.75; margin-bottom: 12px; }
   .pivot-box { background: #1c1400; border: 1px solid #9e6a03; border-radius: 6px; padding: 9px 11px; margin-bottom: 12px; font-size: 10.5px; line-height: 1.6; }
@@ -72,28 +111,75 @@
   .wb-box { background: #071a0c; border: 1px solid #1a7f37; border-radius: 6px; padding: 9px 11px; font-size: 10px; line-height: 1.6; }
   .wb-box .item { color: #c9d1d9; padding: 1px 0; }
   .wb-box .item::before { content: "+ "; color: #3fb950; }
+  .wb-box .item.cut::before { content: "− "; color: #f85149; }
+  .wb-box .item.cut { color: #8b949e; text-decoration: line-through; }
   .wb-box .item .p { color: #d2a8ff; }
   .wb-box .item .nt { color: #6e7681; }
+  .wb-sum { font-size: 10.5px; color: #8b949e; margin-bottom: 6px; }
+  .wb-sum b { color: #3fb950; font-weight: 600; }
+  .wb-sum i { color: #f85149; font-style: normal; font-weight: 600; }
 
-  .placeholder { text-align: center; color: #484f58; padding: 16px; font-size: 12px; }
-  .load-error { padding: 24px; color: #f85149; font-size: 12px; line-height: 1.7; }
+  .free-box { background: #161b22; border: 1px dashed #30363d; border-radius: 6px; padding: 10px; margin-top: 14px; }
+  .free-box h4 { font-size: 11px; color: #c9d1d9; margin-bottom: 6px; }
+
+  .placeholder { text-align: center; color: #484f58; padding: 22px 16px; font-size: 12px; line-height: 1.8; }
+  .load-error { padding: 20px; color: #f85149; font-size: 12px; line-height: 1.8; }
+  .spin { display: inline-block; width: 11px; height: 11px; border: 2px solid #30363d; border-top-color: #58a6ff; border-radius: 50%; animation: sp .7s linear infinite; vertical-align: -1px; }
+  @keyframes sp { to { transform: rotate(360deg) } }
+  .busy { display: flex; align-items: center; gap: 8px; color: #8b949e; font-size: 11.5px; padding: 16px 4px; }
 
   .cmp { width: 100%; border-collapse: collapse; font-size: 9.5px; margin-top: 6px; }
   .cmp th { background: #21262d; color: #8b949e; padding: 4px 5px; border: 1px solid #30363d; font-weight: 500; text-align: left; }
   .cmp tr > th:first-child { white-space: nowrap; }
   .cmp td { padding: 4px 5px; border: 1px solid #21262d; color: #c9d1d9; vertical-align: top; }
   .cmp td.on { background: #1c1014; color: #ffb3a0; }
+  details.warns { margin-top: 10px; font-size: 10.5px; color: #e3b341; }
+  details.warns ul { margin: 6px 0 0 14px; color: #8b949e; line-height: 1.6; }
 </style>
 </head>
 <body>
 <div class="app">
   <div class="topbar">
     <h1>Story Graph</h1>
-    <span class="badge">케이팝 데몬 헌터스</span>
+    <span class="badge" id="modeBadge">모드 확인 중</span>
+    <span class="badge" id="srcBadge">graph: mock/graph.json</span>
+    <div class="grow"></div>
+    <button class="btn btn--line btn--mini" id="inputToggle">대본 입력 접기</button>
   </div>
+
   <div class="graph-area">
     <div id="network"></div>
+    <div class="canvas-msg" id="canvasMsg" hidden></div>
+
+    <section class="card card--input" id="inputCard">
+      <h3>대본 · 시놉시스</h3>
+      <textarea id="scriptIn" rows="7" spellcheck="false"
+        placeholder="시놉시스나 대본을 붙여 넣거나 .txt / .fdx 파일을 이 카드로 끌어다 놓습니다.
+예: 새벽에 문 여는 동네 빵집. 주인은 첫 손님이 오기까지..."></textarea>
+      <div class="card__row">
+        <button class="btn" id="extractBtn">그래프 추출</button>
+        <button class="btn btn--line" id="mockBtn">목데이터로 되돌리기</button>
+      </div>
+      <div class="hint" id="inputHint">최소 8자 이상. 추출은 Bedrock 연결이 필요합니다.</div>
+    </section>
+
+    <section class="card card--node" id="nodeCard" hidden>
+      <h3>노드 <button class="btn btn--line btn--mini" id="nodeClose" style="margin-left:auto">닫기</button></h3>
+      <div id="nodeBody"></div>
+    </section>
+
+    <div class="legend">
+      <span><i style="background:#4A90D9"></i>인물</span>
+      <span><i style="background:#E3A93C"></i>집단</span>
+      <span><i style="background:#27AE60"></i>장소</span>
+      <span><i style="background:#E67E22"></i>사건</span>
+      <span><i class="dia" style="background:#9B59B6"></i>비밀</span>
+      <span><i style="background:#F1C40F"></i>사물</span>
+      <span><i class="line"></i>명시</span>
+      <span><i class="dash"></i>추론</span>
+    </div>
   </div>
+
   <div class="sidebar">
     <div class="stats-bar">
       <div class="stat"><div class="n" id="s-nodes">-</div><div class="l">노드</div></div>
@@ -106,212 +192,501 @@
       <div class="tab" data-tab="story">스토리</div>
     </div>
     <div id="panel-seeds" class="panel active">
-      <div class="panel-scroll" id="seeds-list"></div>
+      <div class="panel-scroll" id="seedsList"></div>
     </div>
     <div id="panel-story" class="panel">
-      <div class="panel-scroll" id="story-panel"><div class="placeholder">스토리 생성 버튼을 눌러주세요</div></div>
+      <div class="panel-scroll" id="storyPanel"><div class="placeholder">씨앗을 골라 스토리를 생성합니다.</div></div>
     </div>
   </div>
 </div>
 
-<script>
-// 데이터는 전부 mock/ 에 있다. 이 파일은 렌더링만 한다.
-//   mock/graph.json    노드와 엣지. 나중에 Neptune 쿼리로 바뀌는 자리 (issue #2)
-//   mock/seeds.json    패턴 탐지기가 뽑은 씨앗. 나중에 탐지기 실행 결과로 바뀐다
-//   mock/stories.json  씨앗별 분기 스토리. 나중에 Bedrock 생성 결과로 바뀐다
-let WORLD = {nodes: [], edges: []};
-let SEEDS = [];
-let STORIES = [];
+<script src="./aws-config.js"></script>
+<script type="module">
+// 대본 → 그래프 → 씨앗 → 분기까지를 한 화면에서 돌린다.
+//   그래프  mock/graph.json 을 읽거나, 대본에서 planGraph 로 뽑는다
+//   씨앗    graph-probes.js 의 탐지기 12종 (?seeds=mock 이면 mock/seeds.json)
+//   분기    planBranches / planFreeBranches. Bedrock 이 없으면 로컬 폴백
+// 조회는 전부 graph-engine.js 의 GraphStore 를 거친다. Neptune 이 붙으면 그 파일만 바뀐다.
+import { createGraphStore } from './graph-engine.js'
+import { findSeeds, PROBES } from './graph-probes.js'
+import { planGraph, planBranches, planFreeBranches, scriptToText } from './story.js'
+import { planClient } from './net.js'
 
-function buildNetwork() {
-  const H = new Set();
-  const nodes = new vis.DataSet(WORLD.nodes.map(n => {
-    const colors = {Character:"#58a6ff",Faction:"#e3b341",Location:"#7ee787",Event:"#ffa657",Secret:"#d2a8ff"};
-    return {
-      id: n.id,
-      label: n.name,
-      color: {background: colors[n.kind]||"#58a6ff", border: colors[n.kind]||"#58a6ff"},
-      font: {size: 12},
-      size: n.kind==="Character" ? 22 : 14,
-      shape: n.kind==="Secret" ? "diamond" : "dot"
-    };
-  }));
+const $ = (id) => document.getElementById(id)
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 
-  const edges = new vis.DataSet(WORLD.edges.map(e => ({
+const params = new URLSearchParams(location.search)
+const GRAPH_SRC = params.get('graph') || 'mock/graph.json'
+const SEED_SRC = params.get('seeds') === 'mock' ? 'mock' : 'probes'
+const SEEDS_SHOWN = 12
+
+const NET = planClient()
+const KIND_COLOR = {
+  Character: '#4A90D9', Faction: '#E3A93C', Location: '#27AE60',
+  Event: '#E67E22', Secret: '#9B59B6', Object: '#F1C40F',
+}
+
+let STORE = null
+let SEEDS = []
+let STORIES = new Map() // 분기 스토리 캐시. 키는 씨앗 인덱스, 자유 입력은 'free'
+let POOL = []           // 로컬 폴백용 목데이터 스토리 묶음
+let MOCK_SEEDS = []
+let CUR = { seed: -1, branch: 0 }
+let VIS = null
+let showAllSeeds = false
+
+// ── 데이터 읽기 ───────────────────────────────────────────────────────────────
+async function loadJson(path) {
+  const res = await fetch(`${path}?t=${Date.now()}`, { cache: 'no-store' })
+  if (!res.ok) throw new Error(`${path} ${res.status}`)
+  return res.json()
+}
+
+// 목데이터 셋. graph 는 ?graph= 로 갈아끼울 수 있고, seeds/stories 는 로컬 폴백용이다.
+// 없어도 화면은 돌아간다 — 탐지기가 씨앗을 만들고, 분기는 임시 분기로 채운다.
+async function loadMock() {
+  const graph = await loadJson(GRAPH_SRC)
+  if (!Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) {
+    throw new Error(`${GRAPH_SRC}: nodes/edges 배열이 없다`)
+  }
+  let seeds = []
+  let stories = []
+  try {
+    ;[seeds, stories] = await Promise.all([loadJson('mock/seeds.json'), loadJson('mock/stories.json')])
+    if (!Array.isArray(seeds) || !Array.isArray(stories)) throw new Error('seeds.json / stories.json: 배열이 아니다')
+    if (seeds.length !== stories.length) throw new Error(`씨앗 ${seeds.length}개인데 스토리 ${stories.length}개다`)
+  } catch (err) {
+    console.warn('[story-graph] 목 씨앗·스토리를 읽지 못했다 — 탐지기와 임시 분기로 돈다', err.message)
+    seeds = []
+    stories = []
+  }
+  return { graph, seeds, stories }
+}
+
+/** 그래프 하나를 판에 올린다. 목데이터든 추출 결과든 여기 한 곳을 지난다 */
+function build(graph, { keepSeeds = null } = {}) {
+  STORE = createGraphStore(graph)
+  SEEDS = keepSeeds || findSeeds(STORE)
+  STORIES = new Map()
+  CUR = { seed: -1, branch: 0 }
+  showAllSeeds = false
+  renderStats()
+  renderNetwork()
+  renderSeeds()
+  renderFreeOnly(SEEDS.length
+    ? '씨앗을 골라 스토리를 생성합니다. 방향이 이미 있다면 아래에 바로 적어도 됩니다.'
+    : '탐지된 씨앗이 없습니다. 방향을 직접 주면 그래프 전체를 컨텍스트로 분기를 만듭니다.')
+}
+
+// ── 그래프 그리기 ─────────────────────────────────────────────────────────────
+function renderStats() {
+  const s = STORE ? STORE.stats() : { nodes: 0, assertedEdges: 0, derivedEdges: 0 }
+  $('s-nodes').textContent = s.nodes
+  $('s-asserted').textContent = s.assertedEdges
+  $('s-derived').textContent = s.derivedEdges
+  $('s-seeds').textContent = SEEDS.length
+}
+
+function renderNetwork() {
+  const g = STORE.toJSON()
+  const msg = $('canvasMsg')
+  if (!g.nodes.length) {
+    msg.hidden = false
+    msg.innerHTML = '그래프가 비어 있습니다.<br>왼쪽 카드에 대본을 넣고 <b>그래프 추출</b>을 누르거나,<br>목데이터로 되돌려 둘러보세요.'
+  } else {
+    msg.hidden = true
+  }
+
+  const nodes = new vis.DataSet(g.nodes.map((n) => ({
+    id: n.id,
+    label: n.name,
+    title: `${n.kind} · ${n.name}`,
+    color: { background: KIND_COLOR[n.kind] || '#4A90D9', border: KIND_COLOR[n.kind] || '#4A90D9' },
+    font: { size: 12, color: '#e6edf3' },
+    size: n.kind === 'Character' ? 22 : 14,
+    shape: n.kind === 'Secret' ? 'diamond' : 'dot',
+  })))
+  const edges = new vis.DataSet(g.edges.map((e, i) => ({
+    id: i,
     from: e.s,
     to: e.o,
     label: e.p,
-    color: e.asserted ? "#e6edf3" : "#30363d",
+    color: { color: e.asserted ? '#c9d1d9' : '#484f58' },
     dashes: !e.asserted,
-    font: {size: 9}
-  })));
+    width: e.asserted ? 1.2 : 1,
+    font: { size: 9, color: e.asserted ? '#8b949e' : '#6e7681', strokeWidth: 0 },
+  })))
 
-  const container = document.getElementById("network");
-  const network = new vis.Network(container, {nodes, edges}, {
-    physics: {stabilization: {iterations: 200}},
-    interaction: {hover: true}
-  });
+  if (VIS) VIS.destroy()
+  $('network').innerHTML = '' // 로드 실패 안내가 남아 있을 수 있다
+  VIS = new vis.Network($('network'), { nodes, edges }, {
+    physics: { stabilization: { iterations: 200 } },
+    interaction: { hover: true },
+    nodes: { borderWidth: 0 },
+  })
+  VIS.on('click', (p) => (p.nodes.length ? showNode(p.nodes[0]) : hideNode()))
 }
+
+function highlight(ids) {
+  if (!VIS) return
+  const live = ids.filter((id) => STORE.getNode(id))
+  if (!live.length) return
+  VIS.selectNodes(live)
+  VIS.fit({ nodes: live, animation: { duration: 300 } })
+}
+
+function showNode(id) {
+  const n = STORE.getNode(id)
+  if (!n) return
+  const props = Object.entries(n.props || {})
+    .map(([k, v]) => `<span class="k">${esc(k)}</span><span class="v">${esc(v)}</span>`).join('')
+  const line = (e, dir) => {
+    const other = dir === 'out' ? e.o : e.s
+    const arrow = dir === 'out' ? '→' : '←'
+    const t = e.props?.tension === undefined ? '' : ` (긴장 ${e.props.tension})`
+    return `<div class="edge-line${e.asserted ? '' : ' der'}">${arrow} <b>${esc(e.p)}</b> `
+      + `${esc(STORE.getNode(other)?.name || other)}${t}${e.asserted ? '' : ' · 추론'}</div>`
+  }
+  const out = STORE.getEdgesFrom(id).map((e) => line(e, 'out')).join('')
+  const inc = STORE.getEdgesTo(id).map((e) => line(e, 'in')).join('')
+  $('nodeBody').innerHTML = `
+    <div class="kv">
+      <span class="k">이름</span><span class="v">${esc(n.name)}</span>
+      <span class="k">kind</span><span class="v">${esc(n.kind)}</span>
+      <span class="k">id</span><span class="v">${esc(n.id)}</span>
+      ${props}
+    </div>
+    ${out || inc ? '<div class="sec-label">엣지</div>' : '<div class="hint">붙어 있는 엣지가 없습니다.</div>'}
+    ${out}${inc}`
+  $('nodeCard').hidden = false
+}
+
+const hideNode = () => { $('nodeCard').hidden = true }
+
+// ── 씨앗 ─────────────────────────────────────────────────────────────────────
+const probeLabel = (id) => PROBES[id]?.label || id
 
 function renderSeeds() {
-  const html = SEEDS.map((s,i) => `
-    <div class="seed-card">
+  const list = $('seedsList')
+  if (!SEEDS.length) {
+    list.innerHTML = `<div class="placeholder">탐지된 씨앗이 없습니다.<br>
+      대본에 인물 간 갈등이나 비밀을 더 넣으면 더 풍부한 스토리 씨앗을 찾습니다.<br>
+      씨앗 없이 <b>스토리</b> 탭의 자유 입력으로 바로 분기를 만들 수도 있습니다.</div>`
+    return
+  }
+  const shown = showAllSeeds ? SEEDS : SEEDS.slice(0, SEEDS_SHOWN)
+  const cards = shown.map((s, i) => `
+    <div class="seed-card ${i === CUR.seed ? 'on' : ''}">
       <div class="seed-meta">
-        <span class="probe-tag">${s.probe}</span>
-        <span class="seed-score">▲${s.score.toFixed(2)}</span>
+        <span class="probe-tag">${esc(probeLabel(s.probe))}</span>
+        <span class="seed-score">▲${Number(s.score).toFixed(2)}</span>
       </div>
-      <div class="seed-title">${s.title}</div>
-      <div class="seed-rationale">${s.desc}</div>
-      <button class="gen-btn" onclick="showStory(${i})">스토리 생성</button>
-    </div>
-  `).join("");
-  document.getElementById("seeds-list").innerHTML = html;
+      <div class="seed-title" data-focus="${i}">${esc(s.title)}</div>
+      <div class="seed-rationale">${esc(s.desc)}</div>
+      <div class="seed-focus">초점: ${esc((s.focus || []).map((id) => STORE.getNode(id)?.name || id).join(', '))}</div>
+      <button class="btn btn--wide" data-seed="${i}">스토리 생성</button>
+    </div>`).join('')
+  const more = SEEDS.length > shown.length
+    ? `<button class="btn btn--line btn--wide" id="moreSeeds">더 보기 (+${SEEDS.length - shown.length})</button>`
+    : ''
+  list.innerHTML = cards + more
+  list.querySelectorAll('[data-seed]').forEach((b) => {
+    b.onclick = () => pickSeed(Number(b.dataset.seed))
+  })
+  list.querySelectorAll('[data-focus]').forEach((el) => {
+    el.onclick = () => highlight(SEEDS[Number(el.dataset.focus)].focus || [])
+  })
+  if (more) $('moreSeeds').onclick = () => { showAllSeeds = true; renderSeeds() }
 }
 
-let CUR = {seed: 0, branch: 0};
-
-function showStory(i) {
-  CUR = {seed: i, branch: 0};
-  renderStory();
-  document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
-  document.querySelectorAll(".tab")[1].classList.add("active");
-  document.querySelectorAll(".panel").forEach(p=>p.classList.remove("active"));
-  document.getElementById("panel-story").classList.add("active");
+const openTab = (name) => {
+  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name))
+  document.querySelectorAll('.panel').forEach((p) => p.classList.toggle('active', p.id === `panel-${name}`))
 }
 
-function selectBranch(bi) {
-  CUR.branch = bi;
-  renderStory();
+/** 지금 보고 있는 스토리의 캐시 키. 씨앗을 안 골랐으면 자유 입력 자리다 */
+const curKey = () => (CUR.seed >= 0 ? String(CUR.seed) : 'free')
+
+async function pickSeed(i) {
+  CUR = { seed: i, branch: 0 }
+  renderSeeds()
+  openTab('story')
+  highlight(SEEDS[i].focus || [])
+  if (STORIES.has(String(i))) return renderStory()
+  await generate(() => planBranches(NET, SEEDS[i], STORE, { pool: POOL }), String(i), '분기를 만들고 있습니다')
+}
+
+/** 분기 생성 한 번. 성공하면 캐시에 넣고 그린다. 실패하면 재시도 버튼을 남긴다 */
+async function generate(run, key, msg) {
+  $('storyPanel').innerHTML = `<div class="busy"><span class="spin"></span>${esc(msg)}${NET ? '' : ' (로컬 모드)'}</div>`
+  try {
+    STORIES.set(key, await run())
+    renderStory()
+  } catch (err) {
+    console.warn('[story-graph] 분기 생성 실패', err)
+    $('storyPanel').innerHTML = `<div class="story-content">
+      <div class="err">${esc(err.message || '서버 연결에 실패했습니다.')}</div>
+      <div class="hint">다시 시도하거나, 아래 자유 입력으로 방향을 주고 새로 만들 수 있습니다.</div>
+      <div class="card__row"><button class="btn" id="retryGen">다시 시도</button></div>
+      ${freeBox()}</div>`
+    $('retryGen').onclick = () => generate(run, key, msg)
+    bindFree()
+  }
+}
+
+// ── 스토리 · 분기 ────────────────────────────────────────────────────────────
+const beatText = (b) => {
+  if (typeof b === 'string') return b
+  const head = b.scene ? `${b.scene} — ` : ''
+  const tail = [b.secs ? `${b.secs}초` : null, (b.cast || []).join(', ') || null].filter(Boolean).join(' · ')
+  return `${head}${b.action || ''}${tail ? ` (${tail})` : ''}`
+}
+
+const wbCount = (b) => ({
+  n: b.writeback.nodes.length,
+  e: b.writeback.edges.length,
+  x: b.writeback.remove_edges.length,
+})
+
+function warnBlock(warnings) {
+  if (!warnings?.length) return ''
+  return `<details class="warns"><summary>검증 경고 ${warnings.length}건</summary>
+    <ul>${warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></details>`
+}
+
+function freeBox() {
+  return `<div class="free-box">
+      <h4>혹은 직접 입력</h4>
+      <textarea id="freeIn" rows="3" spellcheck="false"
+        placeholder="원하는 스토리 방향을 적습니다. 예: 미라가 먼저 비밀을 알아내고, 루미를 감싸는 쪽으로."></textarea>
+      <div class="card__row"><button class="btn btn--line btn--wide" id="freeBtn">이 방향으로 다시 생성</button></div>
+      <div class="hint">탐지기가 제안한 분기가 마음에 들지 않을 때 방향을 직접 줍니다.
+        씨앗을 고르지 않아도 동작합니다.</div>
+    </div>`
+}
+
+/** 아직 고른 씨앗이 없을 때의 스토리 패널. 자유 입력은 씨앗이 0개여도 쓸 수 있어야 한다 */
+function renderFreeOnly(msg) {
+  $('storyPanel').innerHTML = `<div class="story-content">
+    <div class="placeholder">${esc(msg)}</div>
+    ${freeBox()}</div>`
+  bindFree()
+}
+
+function bindFree() {
+  const btn = $('freeBtn')
+  if (!btn) return
+  btn.onclick = () => {
+    const text = $('freeIn').value.trim()
+    if (text.length < 4) { $('freeIn').focus(); return }
+    // 씨앗을 골랐으면 그 씨앗의 분기를 방향대로 다시 만들고, 안 골랐으면 자유 입력 자리에 넣는다
+    const seed = CUR.seed >= 0 ? SEEDS[CUR.seed] : null
+    CUR = { ...CUR, branch: 0 }
+    generate(() => planFreeBranches(NET, text, seed, STORE, { pool: POOL }), curKey(),
+      '기획자의 방향으로 다시 만들고 있습니다')
+  }
 }
 
 function renderStory() {
-  const seed = SEEDS[CUR.seed];
-  const st = STORIES[CUR.seed];
-  const b = st.branches[CUR.branch];
+  const st = STORIES.get(curKey())
+  if (!st) return
+  const seed = CUR.seed >= 0 ? SEEDS[CUR.seed] : null
+  if (!st.branches.length) {
+    $('storyPanel').innerHTML = `<div class="story-content">
+      <div class="err">쓸 수 있는 분기를 받지 못했습니다. 다시 생성해 주세요.</div>
+      ${warnBlock(st.warnings)}${freeBox()}</div>`
+    bindFree()
+    return
+  }
+  const bi = Math.min(CUR.branch, st.branches.length - 1)
+  const b = st.branches[bi]
 
-  const chips = st.branches.map((x,bi) => `
-    <button class="branch-chip ${bi===CUR.branch?"on":""}" onclick="selectBranch(${bi})">
-      <span class="bid">${x.id}</span>${x.label}
-    </button>`).join("");
+  const chips = st.branches.map((x, n) => `
+    <button class="branch-chip ${n === bi ? 'on' : ''}" data-branch="${n}">
+      <span class="bid">${esc(x.id)}</span>${esc(x.label)}
+    </button>`).join('')
 
-  const beats = b.beats.map((t,n) => `
-    <div class="beat"><span class="no">${n+1}</span><span>${t}</span></div>`).join("");
+  const beats = b.beats.map((t, n) => `
+    <div class="beat"><span class="no">${n + 1}</span><span>${esc(beatText(t))}</span></div>`).join('')
 
-  const outcome = Object.entries(b.outcome).map(([k,v]) => `
-    <div class="outcome"><span class="k">${k}</span><span class="v">${v}</span></div>`).join("");
+  const outcome = Object.entries(b.outcome).map(([k, v]) => `
+    <div class="outcome"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join('')
+    || '<div class="hint">이 분기의 결과가 비어 있습니다.</div>'
 
-  const wbNodes = (b.writeback.nodes||[]).map(n => `
-    <div class="item"><span class="nt">${n.kind}</span> ${n.name}
-      ${n.t!==undefined?`<span class="p">t=${n.t}</span>`:""}
-      <div class="p">${n.desc||""}</div></div>`).join("");
+  const wbNodes = b.writeback.nodes.map((n) => `
+    <div class="item"><span class="nt">${esc(n.kind)}</span> ${esc(n.name)}
+      ${n.t === undefined ? '' : `<span class="p">t=${esc(n.t)}</span>`}
+      ${n.desc ? `<div class="p">${esc(n.desc)}</div>` : ''}</div>`).join('')
+  const wbEdge = (e, cut) => `
+    <div class="item${cut ? ' cut' : ''}"><span class="nt">edge</span>
+      ${esc(e.s)} <b>${esc(e.p)}</b> ${esc(e.o)}${e.note ? ` <span class="p">(${esc(e.note)})</span>` : ''}</div>`
+  const wbEdges = b.writeback.edges.map((e) => wbEdge(e, false)).join('')
+  const wbCuts = b.writeback.remove_edges.map((e) => wbEdge(e, true)).join('')
+  const c = wbCount(b)
 
-  const wbEdges = b.writeback.edges.map(e => `
-    <div class="item"><span class="nt">edge</span>
-      ${e.s} <b>${e.p}</b> ${e.o}${e.note?` <span class="p">(${e.note})</span>`:""}
-    </div>`).join("");
-
-  // 분기 비교표: 모든 분기의 결과 키를 합집합으로
-  const keys = [...new Set(st.branches.flatMap(x => Object.keys(x.outcome)))];
+  const keys = [...new Set(st.branches.flatMap((x) => Object.keys(x.outcome)))]
   const cmp = `
     <table class="cmp">
-      <tr><th></th>${st.branches.map(x=>`<th>${x.id}. ${x.label}</th>`).join("")}</tr>
-      ${keys.map(k => `<tr><th>${k}</th>${st.branches.map((x,bi)=>
-        `<td class="${bi===CUR.branch?"on":""}">${x.outcome[k]||"-"}</td>`).join("")}</tr>`).join("")}
-      <tr><th>역기입 엣지</th>${st.branches.map((x,bi)=>
-        `<td class="${bi===CUR.branch?"on":""}">${x.writeback.edges.length}개</td>`).join("")}</tr>
-    </table>`;
+      <tr><th></th>${st.branches.map((x) => `<th>${esc(x.id)}. ${esc(x.label)}</th>`).join('')}</tr>
+      ${keys.map((k) => `<tr><th>${esc(k)}</th>${st.branches.map((x, n) =>
+        `<td class="${n === bi ? 'on' : ''}">${esc(x.outcome[k] || '-')}</td>`).join('')}</tr>`).join('')}
+      <tr><th>역기입</th>${st.branches.map((x, n) => {
+        const q = wbCount(x)
+        return `<td class="${n === bi ? 'on' : ''}">+${q.n}노드 +${q.e}엣지 −${q.x}</td>`
+      }).join('')}</tr>
+    </table>`
 
-  document.getElementById("story-panel").innerHTML = `
+  $('storyPanel').innerHTML = `
     <div class="story-content">
-      <div class="seed-info">
-        <span class="probe-tag">${seed.probe}</span>
-        <span class="seed-score">▲${seed.score.toFixed(2)}</span>
-        <span>초점: ${seed.focus.join(", ")}</span>
-      </div>
-      <h1>${st.title}</h1>
-      <div class="logline">${st.logline}</div>
-
-      <div class="pivot-box">
-        <div class="ttl">${st.pivot.title}</div>
-        <div class="bd">${st.pivot.body}</div>
-      </div>
+      ${seed ? `<div class="seed-info">
+        <span class="probe-tag">${esc(probeLabel(seed.probe))}</span>
+        <span class="seed-score">▲${Number(seed.score).toFixed(2)}</span>
+        <span>초점: ${esc((seed.focus || []).map((id) => STORE.getNode(id)?.name || id).join(', '))}</span>
+      </div>` : '<div class="seed-info">씨앗 없이 기획자의 방향으로 만든 분기입니다.</div>'}
+      ${st.local ? '<div class="warn">로컬 모드 결과입니다. Bedrock 에 연결하면 같은 자리에 생성 결과가 들어옵니다.</div>' : ''}
+      <h1>${esc(st.title || '제목 없음')}</h1>
+      <div class="logline">${esc(st.logline)}</div>
+      ${st.pivot.title || st.pivot.body ? `<div class="pivot-box">
+        <div class="ttl">${esc(st.pivot.title)}</div>
+        <div class="bd">${esc(st.pivot.body)}</div></div>` : ''}
 
       <div class="sec-label">분기 ${st.branches.length}개</div>
       <div class="branch-chips">${chips}</div>
 
-      <div class="branch-head">${b.id}. ${b.label}</div>
-      <div class="branch-tone">${b.tone}</div>
-      <div class="branch-premise">${b.premise}</div>
+      <div class="branch-head">${esc(b.id)}. ${esc(b.label)}</div>
+      ${b.tone ? `<div class="branch-tone">${esc(b.tone)}</div>` : ''}
+      <div class="branch-premise">${esc(b.premise)}</div>
 
       <div class="sec-label">비트</div>
-      <div class="beats">${beats}</div>
+      <div class="beats">${beats || '<div class="hint">비트가 없습니다.</div>'}</div>
 
       <div class="sec-label">이 분기의 결과</div>
       ${outcome}
 
       <div class="sec-label">그래프 역기입</div>
-      <div class="wb-box">${wbNodes}${wbEdges}</div>
+      <div class="wb-sum">+ 노드 <b>${c.n}</b> · + 엣지 <b>${c.e}</b> · − 엣지 <i>${c.x}</i></div>
+      <div class="wb-box">${wbNodes}${wbEdges}${wbCuts || ''}</div>
+      <div class="card__row"><button class="btn btn--wide" id="expandBtn">이 분기로 대본 생성</button></div>
+      <div class="hint" id="expandNote">선택한 분기를 컷으로 펼치고 역기입을 확정하는 단계는 다음 스텝에서 붙습니다.</div>
 
       <div class="sec-label">분기 비교</div>
       ${cmp}
-    </div>`;
+      ${warnBlock(st.warnings)}
+      ${freeBox()}
+    </div>`
+
+  document.querySelectorAll('[data-branch]').forEach((el) => {
+    el.onclick = () => { CUR.branch = Number(el.dataset.branch); renderStory() }
+  })
+  $('expandBtn').onclick = () => expandToScript(seed, st, b)
+  bindFree()
 }
 
-document.querySelectorAll(".tab").forEach(t => {
-  t.onclick = () => {
-    document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
-    t.classList.add("active");
-    document.querySelectorAll(".panel").forEach(p=>p.classList.remove("active"));
-    document.getElementById("panel-"+t.dataset.tab).classList.add("active");
-  };
-});
-
-function renderStats() {
-  document.getElementById("s-nodes").textContent = WORLD.nodes.length;
-  document.getElementById("s-asserted").textContent = WORLD.edges.filter(e=>e.asserted).length;
-  document.getElementById("s-derived").textContent = WORLD.edges.filter(e=>!e.asserted).length;
-  document.getElementById("s-seeds").textContent = SEEDS.length;
+/**
+ * 다음 단계(대본 확장 + 역기입 확정)로 넘기는 자리.
+ * 지금은 넘길 것을 콘솔에 찍고 화면에 요약만 남긴다.
+ */
+function expandToScript(seed, story, branch) {
+  const c = wbCount(branch)
+  const payload = { seed, title: story.title, branch, graph: STORE.toJSON() }
+  console.info('[story-graph] 다음 단계로 넘길 것', payload)
+  $('expandNote').innerHTML = `<span style="color:#3fb950">${esc(branch.id)}. ${esc(branch.label)}</span> 를 골랐습니다 — `
+    + `비트 ${branch.beats.length}개, 역기입 + 노드 ${c.n} · + 엣지 ${c.e} · − 엣지 ${c.x}. `
+    + '대본 확장은 다음 스텝에서 붙습니다 (넘길 내용은 콘솔에 찍었습니다).'
 }
 
-async function loadJson(path) {
-  const res = await fetch(path, {cache: "no-store"});
-  if (!res.ok) throw new Error(`${path} ${res.status}`);
-  return res.json();
-}
-
-// 그래프만 소스를 갈아끼울 수 있다. ?graph=fixtures/extracted-graph.json 으로 열면
-// mock/graph.json 대신 그 파일을 읽는다. 텍스트에서 뽑은 그래프(story.js planGraph)가
-// 뷰어를 깨지 않는지 확인하는 자리다.
-const GRAPH_SRC = new URLSearchParams(location.search).get("graph") || "mock/graph.json";
-
-// 목데이터 셋을 한 번에 읽는다. 실제 구현에서는 graph가 Neptune 쿼리, seeds가 탐지기 실행,
-// stories가 Bedrock 생성으로 각각 바뀌므로 여기서만 갈아끼우면 된다.
-async function loadMock() {
-  const [graph, seeds, stories] = await Promise.all([
-    loadJson(GRAPH_SRC), loadJson("mock/seeds.json"), loadJson("mock/stories.json")
-  ]);
-  if (!Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) throw new Error(`${GRAPH_SRC}: nodes/edges 배열이 없다`);
-  if (!Array.isArray(seeds) || !Array.isArray(stories)) throw new Error("seeds.json / stories.json: 배열이 아니다");
-  if (seeds.length !== stories.length) throw new Error(`씨앗 ${seeds.length}개인데 스토리 ${stories.length}개다`);
-  return {graph, seeds, stories};
-}
-
-loadMock().then(d => {
-  WORLD = d.graph;
-  SEEDS = d.seeds;
-  STORIES = d.stories;
-  renderStats();
-  buildNetwork();
-  renderSeeds();
-  if (GRAPH_SRC !== "mock/graph.json") {
-    document.querySelector(".topbar").insertAdjacentHTML("beforeend",
-      `<span class="badge">graph: ${GRAPH_SRC}</span>`);
+// ── 대본에서 그래프 뽑기 ──────────────────────────────────────────────────────
+async function extract() {
+  const raw = $('scriptIn').value
+  const text = scriptToText(raw, $('scriptIn').dataset.name || '')
+  const hint = $('inputHint')
+  if (text.trim().length < 8) {
+    hint.className = 'err'
+    hint.textContent = '대본이 너무 짧습니다. 8자 이상 넣어주세요.'
+    return
   }
-}).catch(err => {
-  document.getElementById("network").innerHTML =
-    `<div class="load-error">목데이터를 불러오지 못했다: ${err.message}<br>파일 경로가 아니라 HTTP로 열어야 한다. 예: python3 -m http.server 8000 --directory demo</div>`;
-  document.getElementById("seeds-list").innerHTML = `<div class="placeholder">데이터 로드 실패</div>`;
-});
+  if (!NET) {
+    hint.className = 'err'
+    hint.textContent = '그래프 추출에는 Bedrock 연결이 필요합니다. 목데이터로는 아래 흐름을 그대로 볼 수 있습니다.'
+    return
+  }
+  $('extractBtn').disabled = true
+  hint.className = 'hint'
+  hint.innerHTML = '<span class="spin"></span> 그래프를 뽑고 있습니다. 대본이 길면 조각으로 나눠 읽습니다.'
+  try {
+    // 새 대본은 빈 판에서 뽑는다. 지금 그래프를 canon 으로 주면 남의 작품 id 를 물려받는다
+    const g = await planGraph(NET, text)
+    build(g)
+    $('srcBadge').textContent = `graph: 대본 추출 (노드 ${g.nodes.length})`
+    const bad = [...(g.warnings || []), ...(g.conflicts || []).map((c) => `${c.level}: ${c.msg}`)]
+    hint.className = bad.length ? 'warn' : 'hint'
+    hint.innerHTML = bad.length
+      ? `추출했습니다. 걸린 것 ${bad.length}건:<br>${bad.slice(0, 6).map(esc).join('<br>')}`
+      : `추출했습니다. 노드 ${g.nodes.length} · 씨앗 ${SEEDS.length}개.`
+  } catch (err) {
+    console.warn('[story-graph] 추출 실패', err)
+    hint.className = 'err'
+    hint.innerHTML = `${esc(err.message || '서버 연결에 실패했습니다.')}<br>잠시 뒤 그래프 추출을 다시 눌러 주세요.`
+  } finally {
+    $('extractBtn').disabled = false
+  }
+}
+
+// ── 시동 ─────────────────────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach((t) => { t.onclick = () => openTab(t.dataset.tab) })
+$('nodeClose').onclick = hideNode
+$('extractBtn').onclick = extract
+$('inputToggle').onclick = () => {
+  const card = $('inputCard')
+  card.hidden = !card.hidden
+  $('inputToggle').textContent = card.hidden ? '대본 입력 펼치기' : '대본 입력 접기'
+}
+
+const drop = $('inputCard')
+drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('drop') })
+drop.addEventListener('dragleave', () => drop.classList.remove('drop'))
+drop.addEventListener('drop', async (e) => {
+  e.preventDefault()
+  drop.classList.remove('drop')
+  const file = e.dataTransfer?.files?.[0]
+  if (!file) return
+  if (!/\.(txt|fdx|md|fountain)$/i.test(file.name)) {
+    $('inputHint').className = 'err'
+    $('inputHint').textContent = '.txt 또는 .fdx 파일만 읽습니다.'
+    return
+  }
+  $('scriptIn').value = await file.text()
+  $('scriptIn').dataset.name = file.name
+  $('inputHint').className = 'hint'
+  $('inputHint').textContent = `${file.name} 을 읽었습니다. 그래프 추출을 눌러주세요.`
+})
+
+$('modeBadge').textContent = NET ? 'Bedrock 연결' : '로컬 모드 (mock)'
+$('modeBadge').className = NET ? 'badge badge--live' : 'badge'
+$('srcBadge').textContent = `graph: ${GRAPH_SRC}${SEED_SRC === 'mock' ? ' · seeds: mock' : ''}`
+
+function fail(err) {
+  $('network').innerHTML = `<div class="load-error">목데이터를 불러오지 못했습니다: ${esc(err.message)}<br>
+    파일 경로가 아니라 HTTP 로 열어야 합니다. 예: python3 -m http.server 8000 --directory demo<br>
+    <button class="btn" id="retryLoad" style="margin-top:10px">다시 시도</button></div>`
+  $('seedsList').innerHTML = '<div class="placeholder">데이터 로드 실패</div>'
+  $('retryLoad').onclick = boot
+}
+
+async function boot() {
+  try {
+    const d = await loadMock()
+    MOCK_SEEDS = d.seeds
+    POOL = d.seeds.map((s, i) => ({ ...d.stories[i], probe: s.probe, focus: s.focus }))
+    build(d.graph, { keepSeeds: SEED_SRC === 'mock' ? d.seeds : null })
+  } catch (err) {
+    fail(err)
+  }
+}
+
+$('mockBtn').onclick = boot
+boot()
 </script>
 </body>
 </html>
