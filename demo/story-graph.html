@@ -273,19 +273,24 @@ function renderStats() {
   document.getElementById("s-seeds").textContent = SEEDS.length;
 }
 
-async function loadJson(name) {
-  const res = await fetch(`mock/${name}`, {cache: "no-store"});
-  if (!res.ok) throw new Error(`mock/${name} ${res.status}`);
+async function loadJson(path) {
+  const res = await fetch(path, {cache: "no-store"});
+  if (!res.ok) throw new Error(`${path} ${res.status}`);
   return res.json();
 }
+
+// 그래프만 소스를 갈아끼울 수 있다. ?graph=fixtures/extracted-graph.json 으로 열면
+// mock/graph.json 대신 그 파일을 읽는다. 텍스트에서 뽑은 그래프(story.js planGraph)가
+// 뷰어를 깨지 않는지 확인하는 자리다.
+const GRAPH_SRC = new URLSearchParams(location.search).get("graph") || "mock/graph.json";
 
 // 목데이터 셋을 한 번에 읽는다. 실제 구현에서는 graph가 Neptune 쿼리, seeds가 탐지기 실행,
 // stories가 Bedrock 생성으로 각각 바뀌므로 여기서만 갈아끼우면 된다.
 async function loadMock() {
   const [graph, seeds, stories] = await Promise.all([
-    loadJson("graph.json"), loadJson("seeds.json"), loadJson("stories.json")
+    loadJson(GRAPH_SRC), loadJson("mock/seeds.json"), loadJson("mock/stories.json")
   ]);
-  if (!Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) throw new Error("graph.json: nodes/edges 배열이 없다");
+  if (!Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) throw new Error(`${GRAPH_SRC}: nodes/edges 배열이 없다`);
   if (!Array.isArray(seeds) || !Array.isArray(stories)) throw new Error("seeds.json / stories.json: 배열이 아니다");
   if (seeds.length !== stories.length) throw new Error(`씨앗 ${seeds.length}개인데 스토리 ${stories.length}개다`);
   return {graph, seeds, stories};
@@ -298,6 +303,10 @@ loadMock().then(d => {
   renderStats();
   buildNetwork();
   renderSeeds();
+  if (GRAPH_SRC !== "mock/graph.json") {
+    document.querySelector(".topbar").insertAdjacentHTML("beforeend",
+      `<span class="badge">graph: ${GRAPH_SRC}</span>`);
+  }
 }).catch(err => {
   document.getElementById("network").innerHTML =
     `<div class="load-error">목데이터를 불러오지 못했다: ${err.message}<br>파일 경로가 아니라 HTTP로 열어야 한다. 예: python3 -m http.server 8000 --directory demo</div>`;

@@ -1,12 +1,12 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>core.js 자체 검사</title>
+<title>core.js · graph-schema.js · story.js 자체 검사</title>
 <style>
   body { font: 14px/1.6 ui-monospace, Menlo, monospace; background: #16181C; color: #E8E4DA; padding: 32px; }
   .pass { color: #6FCF97 } .fail { color: #FF6B5E; font-weight: 700 }
   h1 { font-size: 16px; letter-spacing: .12em; text-transform: uppercase; color: #E3A93C }
 </style>
-<h1>core.js 자체 검사</h1>
+<h1>core.js · graph-schema.js · story.js 자체 검사</h1>
 <pre id="out"></pre>
 <script type="module">
   const {
@@ -18,7 +18,10 @@
     lostEdit, isActionable, changedSince, liveVer, deadVer,
     canGrantRole, workload, NEEDS, ROLES, ACTIONS,
     tally, stalls, retakes, flow, pace, actorPace, firstPass, reviewLag, fmtDur,
+    normalizeGraph, validateAgainstCanon, mergeGraphs,
   } = await import(`./core.js?t=${Date.now()}`)
+  const { GRAPH_SCHEMA, deriveEdges, romanizeId, edgeKey } = await import(`./graph-schema.js?t=${Date.now()}`)
+  const { extractGraphPrompt, scriptToText, chunkText } = await import(`./story.js?t=${Date.now()}`)
 
   const out = document.getElementById('out')
   let failed = 0
@@ -445,6 +448,257 @@
   ok('첫 방문이면 아무것도 새롭지 않다', changedSince(seenPanels, 0).length === 0)
   ok('오래된 것부터 준다',
     changedSince({ x: { id: 'x', _ts: { a: 400 } }, y: { id: 'y', _ts: { a: 200 } } }, 100).join() === 'y,x')
+
+  // ── 관계 그래프: 어휘·정규화·파생·추출 프롬프트 ──────────────────────────
+  out.insertAdjacentHTML('beforeend', '\n<b>관계 그래프</b>\n')
+
+  ok('루미는 rumi 로 옮긴다', romanizeId('루미') === 'rumi')
+  ok('진우는 jinu 로 옮긴다', romanizeId('진우') === 'jinu')
+  ok('띄어쓰기는 밑줄이 된다', romanizeId('아이돌 시상식장').includes('_'))
+  ok('영문은 소문자로 남는다', romanizeId('Saja Boys') === 'saja_boys')
+  ok('id 로 못 쓸 글자는 떨군다', /^[a-z0-9_]*$/.test(romanizeId('루미(22)!')))
+
+  const G = (nodes, edges) => ({ nodes, edges })
+  const N = (id, kind, name = id, props = {}) => ({ id, kind, name, props })
+  const E = (s, p, o, props) => ({ s, p, o, asserted: true, ...(props ? { props } : {}) })
+
+  ok('객체가 아니면 빈 그래프에 경고', (() => {
+    const g = normalizeGraph('nope')
+    return g.nodes.length === 0 && g.edges.length === 0 && g.warnings.length >= 1
+  })())
+  ok('nodes/edges 가 없으면 경고를 남긴다', normalizeGraph({}).warnings.length >= 2)
+  ok('모르는 kind 인 노드는 버린다', (() => {
+    const g = normalizeGraph(G([N('a', 'Character'), N('t', 'Theme')], []))
+    return g.nodes.length === 1 && g.warnings.some((w) => w.includes('Theme'))
+  })())
+  ok('이름 없는 노드는 버린다', normalizeGraph(G([{ id: 'a', kind: 'Character' }], [])).nodes.length === 0)
+  ok('id 가 없으면 이름에서 만든다', (() => {
+    const g = normalizeGraph(G([{ kind: 'Character', name: '루미' }], []))
+    return g.nodes[0].id === 'rumi' && g.warnings.some((w) => w.includes('id 가 없어'))
+  })())
+  ok('중복 id 는 처음 것만 남기고 props 를 합친다', (() => {
+    const g = normalizeGraph(G([N('a', 'Character', '가', { age: 20 }), N('a', 'Character', '가', { role: '리더' })], []))
+    return g.nodes.length === 1 && g.nodes[0].props.age === 20 && g.nodes[0].props.role === '리더'
+  })())
+  ok('props 가 없으면 빈 객체가 된다', (() => {
+    const g = normalizeGraph(G([{ id: 'a', kind: 'Character', name: '가' }], []))
+    return typeof g.nodes[0].props === 'object' && Object.keys(g.nodes[0].props).length === 0
+  })())
+  ok('없는 노드를 가리키는 엣지는 버린다', (() => {
+    const g = normalizeGraph(G([N('a', 'Character')], [E('a', 'loves', 'ghost')]))
+    return g.edges.length === 0 && g.warnings.some((w) => w.includes('없는 노드'))
+  })())
+  ok('모르는 술어는 버린다',
+    normalizeGraph(G([N('a', 'Character'), N('b', 'Character')], [E('a', 'hates', 'b')])).edges.length === 0)
+  ok('자기 자신을 가리키는 엣지는 버린다',
+    normalizeGraph(G([N('a', 'Character')], [E('a', 'loves', 'a')])).edges.length === 0)
+  ok('같은 엣지가 두 번 오면 하나만 남는다',
+    normalizeGraph(G([N('a', 'Character'), N('b', 'Character')],
+      [E('a', 'loves', 'b'), E('a', 'loves', 'b')])).edges.length === 1)
+  ok('from/to/rel 로 와도 s/p/o 로 읽는다', (() => {
+    const g = normalizeGraph(G([N('a', 'Character'), N('b', 'Character')], [{ from: 'a', rel: 'loves', to: 'b' }]))
+    return g.edges.length === 1 && g.edges[0].s === 'a' && g.edges[0].p === 'loves' && g.edges[0].asserted === true
+  })())
+  ok('id 대신 이름으로 온 참조를 되돌린다', (() => {
+    const g = normalizeGraph(G([N('celine', 'Character', '셀린'), N('rumi', 'Character', '루미')],
+      [{ s: '셀린', p: 'mentor_of', o: '루미' }]))
+    return g.edges[0]?.s === 'celine' && g.edges[0]?.o === 'rumi' && g.warnings.some((w) => w.includes('이름이다'))
+  })())
+  ok('파생 전용 술어를 명시로 주면 추론으로 내린다', (() => {
+    const g = normalizeGraph(G([N('a', 'Character'), N('b', 'Character')], [E('a', 'has_leverage_over', 'b')]))
+    return g.edges[0]?.asserted === false && !!g.edges[0]?.derived
+  })())
+  ok('tension 은 0~1 로 자른다', (() => {
+    const g = normalizeGraph(G([N('a', 'Character'), N('b', 'Character')],
+      [E('a', 'loves', 'b', { tension: 3 }), E('b', 'loves', 'a', { tension: 'x' })]))
+    return g.edges[0].props.tension === 1 && g.edges[1].props?.tension === undefined
+  })())
+
+  // 파생 규칙
+  const twoWay = normalizeGraph(G([N('a', 'Character'), N('b', 'Character')],
+    [E('a', 'loves', 'b'), E('b', 'loves', 'a')]))
+  ok('서로 사랑하면 짝사랑은 만들지 않는다', deriveEdges(twoWay.nodes, twoWay.edges).length === 0)
+  ok('한쪽만 사랑하면 짝사랑당함을 남긴다', (() => {
+    const d = deriveEdges([N('a', 'Character'), N('b', 'Character')], [E('a', 'loves', 'b')])
+    return d.length === 1 && d[0].s === 'b' && d[0].p === 'unrequited_love' && d[0].props.derived_by === 'inverse_affection'
+  })())
+  ok('형제는 양방향으로 채운다', (() => {
+    const d = deriveEdges([N('a', 'Character'), N('b', 'Character')], [E('a', 'kin_of', 'b', { type: 'sibling' })])
+    return d.length === 1 && d[0].s === 'b' && d[0].props.type === 'sibling'
+  })())
+  ok('부모 관계는 방향을 뒤집지 않는다',
+    deriveEdges([N('a', 'Character'), N('b', 'Character')], [E('a', 'kin_of', 'b', { type: 'parent' })]).length === 0)
+  ok('남의 비밀을 알면 약점을 쥔다', (() => {
+    const d = deriveEdges([N('a', 'Character'), N('c', 'Character'), N('s', 'Secret')],
+      [E('a', 'knows', 's'), E('c', 'conceals', 's')])
+    return d.some((e) => e.s === 'a' && e.p === 'has_leverage_over' && e.o === 'c' && e.props.derived_by === 'secret_leverage')
+  })())
+  ok('자기 비밀로는 자기 약점을 쥐지 않는다',
+    deriveEdges([N('c', 'Character'), N('s', 'Secret')], [E('c', 'knows', 's'), E('c', 'conceals', 's')]).length === 0)
+  ok('소속의 적대는 구성원에게 내려온다', (() => {
+    const d = deriveEdges([N('a', 'Character'), N('f1', 'Faction'), N('f2', 'Faction')],
+      [E('a', 'member_of', 'f1'), E('f1', 'rival_of', 'f2', { tension: 0.6 })])
+    return d.some((e) => e.s === 'a' && e.p === 'potential_rival_of' && e.o === 'f2' && e.props.via === 'f1')
+  })())
+  ok('표적의 보호자도 위협 범위에 든다', (() => {
+    const d = deriveEdges([N('x', 'Character'), N('b', 'Character'), N('c', 'Character')],
+      [E('x', 'targets', 'b'), E('b', 'protects', 'c')])
+    return d.some((e) => e.s === 'x' && e.p === 'threatens' && e.o === 'c')
+  })())
+  ok('섬기는 자의 애정은 주인에게 경쟁자를 만든다', (() => {
+    const d = deriveEdges([N('a', 'Character'), N('m', 'Character'), N('c', 'Character')],
+      [E('a', 'serves', 'm'), E('a', 'loves', 'c')])
+    return d.some((e) => e.s === 'm' && e.p === 'rival_of' && e.o === 'c' && e.props.derived_by === 'love_chain')
+  })())
+  ok('참여자 없는 현재 사건은 비밀을 가진 쪽을 의심한다', (() => {
+    const d = deriveEdges([N('a', 'Character'), N('s', 'Secret'), N('e', 'Event', 'e', { t: 0 })],
+      [E('a', 'conceals', 's')])
+    return d.some((x) => x.s === 'a' && x.p === 'participated_in' && x.o === 'e' && x.props.derived_by === 'secret_suspicion')
+  })())
+  ok('참여자가 이미 있는 사건은 의심하지 않는다',
+    deriveEdges([N('a', 'Character'), N('b', 'Character'), N('s', 'Secret'), N('e', 'Event', 'e', { t: 0 })],
+      [E('a', 'conceals', 's'), E('b', 'participated_in', 'e')])
+      .every((x) => x.p !== 'participated_in'))
+  ok('이미 있는 엣지는 파생으로 다시 만들지 않는다',
+    deriveEdges([N('a', 'Character'), N('b', 'Character')],
+      [E('a', 'loves', 'b'), E('b', 'unrequited_love', 'a')]).length === 0)
+  ok('파생 엣지는 모두 asserted:false 이고 derived_by 가 박힌다', (() => {
+    const d = deriveEdges([N('a', 'Character'), N('b', 'Character'), N('c', 'Character'), N('s', 'Secret')],
+      [E('a', 'loves', 'b'), E('a', 'serves', 'c'), E('b', 'knows', 's'), E('c', 'conceals', 's')])
+    return d.length > 0 && d.every((e) => e.asserted === false && !!e.derived && !!e.props.derived_by)
+  })())
+
+  // 확립된 사실과의 대조
+  const canonPair = G([N('a', 'Character', '가'), N('b', 'Character', '나')], [E('a', 'kin_of', 'b', { type: 'sibling' })])
+  ok('같은 그래프는 모순이 없다', validateAgainstCanon(canonPair, canonPair).compatible)
+  ok('친족 종류가 바뀌면 모순이다', (() => {
+    const v = validateAgainstCanon(G(canonPair.nodes, [E('a', 'kin_of', 'b', { type: 'parent' })]), canonPair)
+    return !v.compatible && v.conflicts.some((c) => c.kind === 'edge_type')
+  })())
+  ok('같은 id 에 다른 kind 는 모순이다',
+    !validateAgainstCanon(G([N('a', 'Faction', '가')], []), canonPair).compatible)
+  ok('같은 id 에 다른 이름은 모순이다',
+    !validateAgainstCanon(G([N('a', 'Character', '다')], []), canonPair).compatible)
+  ok('이름은 같고 id 가 갈리면 경고까지', (() => {
+    const v = validateAgainstCanon(G([N('a2', 'Character', '가')], []), canonPair)
+    return v.compatible && v.conflicts.some((c) => c.kind === 'alias_split')
+  })())
+  ok('사건 시점이 어긋나면 모순이다', !validateAgainstCanon(
+    G([N('e', 'Event', '사건', { t: 0 })], []), G([N('e', 'Event', '사건', { t: -400 })], [])).compatible)
+  ok('모르는 사람이 갑자기 알게 되면 모순이다', (() => {
+    const canon = G([N('m', 'Character', '미라'), N('s', 'Secret', '비밀')], [E('s', 'hidden_from', 'm')])
+    const v = validateAgainstCanon(G(canon.nodes, [E('m', 'knows', 's')]), canon)
+    return !v.compatible && v.conflicts.some((c) => c.kind === 'secret_contradiction')
+  })())
+
+  ok('조각을 합치면 중복이 빠진다', (() => {
+    const m = mergeGraphs(
+      G([N('a', 'Character', '가', { age: 20 })], [E('a', 'member_of', 'f')]),
+      G([N('a', 'Character', '가', { role: '리더' }), N('f', 'Faction', '팀')], [E('a', 'member_of', 'f')]))
+    return m.nodes.length === 2 && m.edges.length === 1 && m.nodes[0].props.age === 20 && m.nodes[0].props.role === '리더'
+  })())
+
+  // 추출 프롬프트
+  const prompt = extractGraphPrompt('루미는 진우를 사랑한다.', { title: '케데헌', known: [N('rumi', 'Character', '루미')] })
+  ok('프롬프트에 원문이 들어간다', prompt.includes('루미는 진우를 사랑한다.'))
+  ok('프롬프트는 JSON 하나만 요구한다', prompt.includes('코드펜스'))
+  ok('프롬프트가 graph.json 모양을 그대로 보여준다',
+    prompt.includes('"kind":"Character"') && prompt.includes('"p":"loves"') && prompt.includes('"asserted":true'))
+  ok('프롬프트에 kind 목록이 다 있다', GRAPH_SCHEMA.nodeKinds.every((k) => prompt.includes(k)))
+  ok('프롬프트에 술어 목록이 다 있다', GRAPH_SCHEMA.assertableRels.every((p) => prompt.includes(p)))
+  ok('파생 전용 술어는 쓰지 말라고 적는다',
+    GRAPH_SCHEMA.derivedRels.every((p) => prompt.includes(p)) && prompt.includes('여기서 쓰지 않는다'))
+  ok('이미 있는 노드의 id 를 다시 쓰게 한다', prompt.includes('rumi (Character) 루미'))
+  ok('조각 번호는 여러 조각일 때만 붙는다',
+    !extractGraphPrompt('가', { part: { i: 1, n: 1 } }).includes('조각으로 나눈 것')
+    && extractGraphPrompt('가', { part: { i: 2, n: 3 } }).includes('3조각으로 나눈 것 중 2번째'))
+
+  ok('짧은 글은 조각내지 않는다', chunkText('한 줄이다').length === 1)
+  ok('빈 글은 조각이 없다', chunkText('   ').length === 0)
+  ok('긴 글은 빈 줄에서 갈린다', (() => {
+    const parts = chunkText(Array.from({ length: 40 }, (_, i) => `문단 ${i} ${'가'.repeat(50)}`).join('\n\n'), 500)
+    return parts.length > 1 && parts.every((p) => p.length <= 500)
+  })())
+
+  ok('평문 대본은 그대로 둔다', scriptToText('S1. 무대\n루미: 간다') === 'S1. 무대\n루미: 간다')
+  ok('fdx 는 지시문과 대사만 남긴다', (() => {
+    const fdx = `<?xml version="1.0"?><FinalDraft>
+      <Paragraph Type="Scene Heading"><Text>INT. 무대 - 밤</Text></Paragraph>
+      <Paragraph Type="Action"><Text>루미가 마이크를 &amp; 잡는다.</Text></Paragraph>
+      <Paragraph Type="Character"><Text>루미</Text></Paragraph>
+      <Paragraph Type="Dialogue"><Text>내가 </Text><Text>부른다</Text></Paragraph></FinalDraft>`
+    const t = scriptToText(fdx, 'a.fdx')
+    return t.includes('INT. 무대 - 밤') && t.includes('마이크를 & 잡는다') && t.includes('루미: 내가 부른다')
+      && !t.includes('<')
+  })())
+
+  // ── mock/graph.json 과의 호환: 추출 결과를 그대로 뷰어에 넣을 수 있는가 ──────
+  const grab = async (p) => {
+    const r = await fetch(`${p}?t=${Date.now()}`)
+    if (!r.ok) throw new Error(`${p} ${r.status}`)
+    return r.json()
+  }
+  try {
+    const [canon, rawExtract, built, seeds, stories] = await Promise.all([
+      grab('mock/graph.json'), grab('fixtures/kdh-extract-raw.json'), grab('fixtures/extracted-graph.json'),
+      grab('mock/seeds.json'), grab('mock/stories.json'),
+    ])
+
+    ok('canon 의 kind 가 모두 어휘 안에 있다', canon.nodes.every((n) => GRAPH_SCHEMA.nodeKinds.includes(n.kind)))
+    ok('canon 의 술어가 모두 어휘 안에 있다', canon.edges.every((e) => GRAPH_SCHEMA.edgeRels.includes(e.p)))
+    ok('canon 을 정규화해도 그대로다', (() => {
+      const g = normalizeGraph(canon)
+      return g.nodes.length === canon.nodes.length && g.edges.length === canon.edges.length && g.warnings.length === 0
+    })())
+
+    const g = normalizeGraph(rawExtract)
+    const derived = deriveEdges(g.nodes, g.edges)
+    const extracted = { nodes: g.nodes, edges: [...g.edges, ...derived] }
+
+    ok('추출 원본의 흠은 경고로 남는다', g.warnings.length >= 5)
+    ok('추출 결과 노드 수가 canon 과 같다', extracted.nodes.length === canon.nodes.length,
+      `${extracted.nodes.length} / ${canon.nodes.length}`)
+    ok('canon 노드가 하나도 빠지지 않았다', (() => {
+      const got = new Set(extracted.nodes.map((n) => n.id))
+      return canon.nodes.every((n) => got.has(n.id))
+    })())
+    ok('canon 엣지가 하나도 빠지지 않았다', (() => {
+      const got = new Set(extracted.edges.map(edgeKey))
+      const miss = canon.edges.filter((e) => !got.has(edgeKey(e)))
+      return miss.length === 0
+    })())
+    ok('canon 에 없는 엣지를 만들지 않았다', (() => {
+      const want = new Set(canon.edges.map(edgeKey))
+      return extracted.edges.every((e) => want.has(edgeKey(e)))
+    })())
+    ok('명시 18 / 파생 4 로 canon 과 같다',
+      extracted.edges.filter((e) => e.asserted).length === canon.edges.filter((e) => e.asserted).length
+      && extracted.edges.filter((e) => !e.asserted).length === canon.edges.filter((e) => !e.asserted).length,
+      `${extracted.edges.filter((e) => e.asserted).length} / ${extracted.edges.filter((e) => !e.asserted).length}`)
+    ok('추출 결과는 canon 과 모순이 없다', validateAgainstCanon(extracted, canon).compatible)
+    ok('파생 엣지는 모두 규칙 이름을 달고 있다',
+      derived.length === 4 && derived.every((e) => !!e.props.derived_by),
+      derived.map((e) => e.props.derived_by).join(' '))
+    ok('빌드해 둔 fixtures/extracted-graph.json 이 지금 결과와 같다',
+      JSON.stringify({ nodes: built.nodes, edges: built.edges }) === JSON.stringify(extracted))
+
+    // story-graph.html 의 loadMock() 이 하는 검사 그대로
+    ok('loadMock 검사를 통과한다 (nodes/edges 배열)',
+      Array.isArray(built.nodes) && Array.isArray(built.edges))
+    ok('loadMock 검사를 통과한다 (씨앗 수 = 스토리 수)',
+      Array.isArray(seeds) && Array.isArray(stories) && seeds.length === stories.length)
+    ok('뷰어 카운트가 14 / 22 / 4 / 4 다', (() => {
+      const a = built.edges.filter((e) => e.asserted).length
+      const d = built.edges.filter((e) => !e.asserted).length
+      return built.nodes.length === 14 && built.edges.length === 22 && d === 4 && seeds.length === 4 && a === 18
+    })())
+    ok('씨앗이 가리키는 노드가 추출 결과에 다 있다', (() => {
+      const ids = new Set(built.nodes.map((n) => n.id))
+      return seeds.every((s) => s.focus.every((f) => ids.has(f)))
+    })())
+  } catch (err) {
+    ok(`mock/fixtures 를 읽지 못했다 — HTTP 로 열어야 한다 (${err.message})`, false)
+  }
 
   out.insertAdjacentHTML('beforeend',
     `\n<span class="${failed ? 'fail' : 'pass'}">${failed ? failed + '개 실패' : '전부 통과'}</span>\n`)
