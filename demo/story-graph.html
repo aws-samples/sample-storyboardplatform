@@ -25,23 +25,30 @@
   .panel-scroll::-webkit-scrollbar { width: 4px; }
   .panel-scroll::-webkit-scrollbar-track { background: transparent; }
   .panel-scroll::-webkit-scrollbar-thumb { background: #30363d; border-radius: 2px; }
-  .seed-card { background: #21262d; border: 1px solid #30363d; border-radius: 8px; padding: 12px; margin-bottom: 8px; cursor: pointer; transition: all .15s; }
+  .seed-card { background: #21262d; border: 1px solid #30363d; border-radius: 8px; padding: 12px; margin-bottom: 8px; transition: all .15s; }
   .seed-card:hover { border-color: #58a6ff; background: #1c2128; }
   .seed-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
   .probe-tag { font-size: 10px; background: #0d2137; border: 1px solid #1f6feb; color: #79c0ff; border-radius: 10px; padding: 1px 8px; white-space: nowrap; }
   .seed-score { font-size: 11px; color: #8b949e; margin-left: auto; }
   .seed-title { font-size: 12px; font-weight: 600; color: #e6edf3; margin-bottom: 4px; }
   .seed-rationale { font-size: 11px; color: #8b949e; line-height: 1.5; }
-  .gen-btn { width: 100%; padding: 10px; background: #238636; border: 1px solid #2ea043; border-radius: 6px; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; transition: background .15s; margin-top: 4px; }
+  .seed-calc { font-size: 9.5px; color: #6e7681; margin-top: 5px; font-family: ui-monospace, SFMono-Regular, monospace; }
+  .gen-btn { width: 100%; padding: 10px; background: #238636; border: 1px solid #2ea043; border-radius: 6px; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; transition: background .15s; margin-top: 8px; }
   .gen-btn:hover { background: #2ea043; }
+  .gen-btn[disabled] { background: #21262d; border-color: #30363d; color: #6e7681; cursor: not-allowed; }
   .story-content { padding: 16px; font-size: 12px; line-height: 1.7; }
   .story-content h1 { font-size: 16px; font-weight: 700; color: #e6edf3; margin-bottom: 12px; }
-  .story-content h2 { font-size: 13px; font-weight: 600; color: #79c0ff; margin: 14px 0 6px; }
-  .story-content p { color: #c9d1d9; margin-bottom: 8px; }
   .stats-bar { display: flex; gap: 16px; padding: 8px 12px; border-bottom: 1px solid #30363d; background: #161b22; flex-shrink: 0; }
   .stat { display: flex; flex-direction: column; gap: 1px; }
   .stat .n { font-size: 16px; font-weight: 700; color: #e6edf3; }
   .stat .l { font-size: 10px; color: #8b949e; }
+
+  /* 그래프 위에 얹는 컨트롤 */
+  .graph-ctl { position: absolute; top: 12px; left: 12px; z-index: 5; display: flex; flex-direction: column; gap: 6px; }
+  .graph-ctl label { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: #8b949e; background: #161b22cc; border: 1px solid #30363d; border-radius: 5px; padding: 5px 9px; cursor: pointer; user-select: none; }
+  .graph-ctl input { accent-color: #f78166; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 9.5px; color: #6e7681; background: #161b22cc; border: 1px solid #30363d; border-radius: 5px; padding: 6px 9px; max-width: 300px; }
+  .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 3px; vertical-align: -1px; }
 
   /* 스토리 분기 UI */
   .seed-info { background: #0d2137; border: 1px solid #1f6feb; border-radius: 6px; padding: 9px 11px; margin-bottom: 12px; font-size: 10.5px; color: #79c0ff; line-height: 1.6; }
@@ -72,8 +79,11 @@
   .wb-box { background: #071a0c; border: 1px solid #1a7f37; border-radius: 6px; padding: 9px 11px; font-size: 10px; line-height: 1.6; }
   .wb-box .item { color: #c9d1d9; padding: 1px 0; }
   .wb-box .item::before { content: "+ "; color: #3fb950; }
+  .wb-box .item.bad::before { content: "! "; color: #d29922; }
+  .wb-box .item.bad { color: #8b949e; }
   .wb-box .item .p { color: #d2a8ff; }
   .wb-box .item .nt { color: #6e7681; }
+  .wb-box .why { color: #d29922; }
 
   .placeholder { text-align: center; color: #484f58; padding: 16px; font-size: 12px; }
   .load-error { padding: 24px; color: #f85149; font-size: 12px; line-height: 1.7; }
@@ -83,6 +93,24 @@
   .cmp tr > th:first-child { white-space: nowrap; }
   .cmp td { padding: 4px 5px; border: 1px solid #21262d; color: #c9d1d9; vertical-align: top; }
   .cmp td.on { background: #1c1014; color: #ffb3a0; }
+
+  /* 규칙 패널 */
+  .rule { background: #21262d; border: 1px solid #30363d; border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; font-size: 10.5px; line-height: 1.55; }
+  .rule.zero { opacity: .5; }
+  .rule .rid { color: #79c0ff; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 10px; }
+  .rule .cnt { float: right; color: #3fb950; font-weight: 600; }
+  .rule.zero .cnt { color: #6e7681; }
+  .rule .rd { color: #8b949e; margin-top: 2px; }
+  .rule .rw { color: #6e7681; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 9.5px; margin-top: 3px; }
+  .kv { display: grid; grid-template-columns: 96px 1fr; gap: 3px 8px; font-size: 10.5px; margin-bottom: 10px; }
+  .kv .k { color: #8b949e; }
+  .kv .v { color: #e6edf3; }
+  .derived-list { font-size: 10px; line-height: 1.7; font-family: ui-monospace, SFMono-Regular, monospace; color: #c9d1d9; }
+  .derived-list .by { color: #79c0ff; }
+  .gate { background: #1c1400; border: 1px solid #9e6a03; border-radius: 6px; padding: 9px 11px; font-size: 10.5px; line-height: 1.6; color: #c9d1d9; }
+  .gate b { color: #e3b341; }
+  .gate .row { display: flex; justify-content: space-between; }
+  .note { font-size: 10px; color: #6e7681; line-height: 1.6; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -92,156 +120,223 @@
     <span class="badge">케이팝 데몬 헌터스</span>
   </div>
   <div class="graph-area">
+    <div class="graph-ctl">
+      <label><input type="checkbox" id="tg-derived" checked> 규칙이 만든 엣지 표시</label>
+      <div class="legend" id="legend"></div>
+    </div>
     <div id="network"></div>
   </div>
   <div class="sidebar">
     <div class="stats-bar">
       <div class="stat"><div class="n" id="s-nodes">-</div><div class="l">노드</div></div>
       <div class="stat"><div class="n" id="s-asserted">-</div><div class="l">명시 엣지</div></div>
-      <div class="stat"><div class="n" id="s-derived">-</div><div class="l">추론</div></div>
+      <div class="stat"><div class="n" id="s-derived">-</div><div class="l">규칙 산출</div></div>
       <div class="stat"><div class="n" id="s-seeds">-</div><div class="l">씨앗</div></div>
     </div>
     <div class="tabs">
       <div class="tab active" data-tab="seeds">씨앗</div>
       <div class="tab" data-tab="story">스토리</div>
+      <div class="tab" data-tab="rules">규칙</div>
     </div>
     <div id="panel-seeds" class="panel active">
       <div class="panel-scroll" id="seeds-list"></div>
     </div>
     <div id="panel-story" class="panel">
-      <div class="panel-scroll" id="story-panel"><div class="placeholder">스토리 생성 버튼을 눌러주세요</div></div>
+      <div class="panel-scroll" id="story-panel"><div class="placeholder">씨앗에서 스토리 생성 버튼을 눌러주세요</div></div>
+    </div>
+    <div id="panel-rules" class="panel">
+      <div class="panel-scroll" id="rules-panel"></div>
     </div>
   </div>
 </div>
 
-<script>
-// 데이터는 전부 mock/ 에 있다. 이 파일은 렌더링만 한다.
-//   mock/graph.json    노드와 엣지. 나중에 Neptune 쿼리로 바뀌는 자리 (issue #2)
-//   mock/seeds.json    패턴 탐지기가 뽑은 씨앗. 나중에 탐지기 실행 결과로 바뀐다
-//   mock/stories.json  씨앗별 분기 스토리. 나중에 Bedrock 생성 결과로 바뀐다
-let WORLD = {nodes: [], edges: []};
-let SEEDS = [];
-let STORIES = [];
+<script type="module">
+// 이 파일은 렌더링만 한다.
+//   rules.js           술어 스키마, 규칙, 탐지기. 계산은 전부 여기서 한다
+//   mock/graph.json    명시 엣지만. 나중에 Neptune 쿼리로 바뀌는 자리 (issue #2)
+//   mock/stories.json  씨앗 id로 키잉된 분기 스토리. 나중에 Bedrock 생성 결과로 바뀐다
+import { NODE_KINDS, EDGE_KINDS, RULES, apply, validate, probes, checkWriteback } from './rules.js'
+
+const KIND_COLOR = {
+  Character: '#58a6ff', Faction: '#e3b341', Location: '#7ee787',
+  Event: '#ffa657', Secret: '#d2a8ff', Object: '#a5a5f5',
+}
+
+let WORLD = { nodes: [], edges: [] }
+let SEEDS = []
+let STORIES = {}
+let TRACE = { fired: {}, rounds: 0 }
+let CUR = { seedId: null, branch: 0 }
+let edgesDS = null
+
+const esc = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+const $ = (id) => document.getElementById(id)
+const nameOf = (id) => WORLD.nodes.find((n) => n.id === id)?.name || id
 
 function buildNetwork() {
-  const H = new Set();
-  const nodes = new vis.DataSet(WORLD.nodes.map(n => {
-    const colors = {Character:"#58a6ff",Faction:"#e3b341",Location:"#7ee787",Event:"#ffa657",Secret:"#d2a8ff"};
+  // 캐릭터는 이름을 원 안에 넣는다. 읽는 대상이 이름이라서 가장 크게 보여야 한다.
+  // 나머지 종류는 모양으로 구분되므로 점으로 두고, 라벨을 밝은색 + 어두운 외곽선으로 깐다.
+  const nodes = new vis.DataSet(WORLD.nodes.map((n) => {
+    const color = KIND_COLOR[n.kind] || '#58a6ff'
+    if (n.kind === 'Character') {
+      return {
+        id: n.id, label: n.name, shape: 'circle',
+        color: { background: color, border: color, highlight: { background: color, border: '#ffffff' } },
+        font: { size: 13, color: '#0d1117', face: 'inherit', bold: { color: '#0d1117' } },
+        margin: 9,
+      }
+    }
     return {
-      id: n.id,
-      label: n.name,
-      color: {background: colors[n.kind]||"#58a6ff", border: colors[n.kind]||"#58a6ff"},
-      font: {size: 12},
-      size: n.kind==="Character" ? 22 : 14,
-      shape: n.kind==="Secret" ? "diamond" : "dot"
-    };
-  }));
+      id: n.id, label: n.name,
+      shape: n.kind === 'Secret' ? 'diamond' : 'dot',
+      size: n.kind === 'Event' ? 16 : 14,
+      color: { background: color, border: color, highlight: { background: color, border: '#ffffff' } },
+      font: { size: 12, color: '#e6edf3', strokeWidth: 4, strokeColor: '#0d1117', face: 'inherit' },
+    }
+  }))
 
-  const edges = new vis.DataSet(WORLD.edges.map(e => ({
-    from: e.s,
-    to: e.o,
-    label: e.p,
-    color: e.asserted ? "#e6edf3" : "#30363d",
+  edgesDS = new vis.DataSet(WORLD.edges.map((e, i) => ({
+    id: i,
+    from: e.s, to: e.o, label: e.p,
+    color: { color: e.asserted ? '#8b949e' : '#3d5a80', highlight: '#f78166' },
     dashes: !e.asserted,
-    font: {size: 9}
-  })));
+    width: e.asserted ? 1 : 1.5,
+    hidden: false,
+    font: { size: 9, color: e.asserted ? '#8b949e' : '#79c0ff', strokeWidth: 4, strokeColor: '#0d1117', face: 'ui-monospace, monospace' },
+    arrows: { to: { scaleFactor: 0.5 } },
+  })))
 
-  const container = document.getElementById("network");
-  const network = new vis.Network(container, {nodes, edges}, {
-    physics: {stabilization: {iterations: 200}},
-    interaction: {hover: true}
-  });
+  const net = new vis.Network($('network'), { nodes, edges: edgesDS }, {
+    physics: {
+      stabilization: { iterations: 300 },
+      barnesHut: { springLength: 175, gravitationalConstant: -6000, avoidOverlap: 0.25 },
+    },
+    interaction: { hover: true },
+  })
+  net.once('stabilizationIterationsDone', () => net.fit({ animation: false }))
+}
+
+function toggleDerived(show) {
+  edgesDS.update(WORLD.edges.map((e, i) => ({ id: i, hidden: !show && !e.asserted })))
+}
+
+function renderLegend() {
+  const used = [...new Set(WORLD.nodes.map((n) => n.kind))]
+  $('legend').innerHTML = used
+    .map((k) => `<span><i style="background:${KIND_COLOR[k] || '#58a6ff'}"></i>${esc(k)}</span>`)
+    .join('')
+}
+
+function renderStats() {
+  $('s-nodes').textContent = WORLD.nodes.length
+  $('s-asserted').textContent = WORLD.edges.filter((e) => e.asserted).length
+  $('s-derived').textContent = WORLD.edges.filter((e) => !e.asserted).length
+  $('s-seeds').textContent = SEEDS.length
 }
 
 function renderSeeds() {
-  const html = SEEDS.map((s,i) => `
+  $('seeds-list').innerHTML = SEEDS.map((s) => {
+    const p = s.parts
+    const calc = `${p.base.toFixed(2)} 기본 + ${p.focus.toFixed(2)} 초점 + ${p.tension.toFixed(2)} 긴장`
+      + `${p.derived ? ` + ${p.derived.toFixed(2)} 규칙산출` : ''}${p.extra ? ` + ${p.extra.toFixed(2)} 가산` : ''}`
+    const has = !!STORIES[s.id]
+    return `
     <div class="seed-card">
       <div class="seed-meta">
-        <span class="probe-tag">${s.probe}</span>
-        <span class="seed-score">▲${s.score.toFixed(2)}</span>
+        <span class="probe-tag">${esc(s.probe)}</span>
+        <span class="seed-score">▲${s.total.toFixed(2)}</span>
       </div>
-      <div class="seed-title">${s.title}</div>
-      <div class="seed-rationale">${s.desc}</div>
-      <button class="gen-btn" onclick="showStory(${i})">스토리 생성</button>
-    </div>
-  `).join("");
-  document.getElementById("seeds-list").innerHTML = html;
+      <div class="seed-title">${esc(s.title)}</div>
+      <div class="seed-rationale">${esc(s.desc)}</div>
+      <div class="seed-calc">${calc}</div>
+      <button class="gen-btn" data-seed="${esc(s.id)}" ${has ? '' : 'disabled'}>
+        ${has ? '스토리 생성' : '스토리 목데이터 없음'}
+      </button>
+    </div>`
+  }).join('')
 }
 
-let CUR = {seed: 0, branch: 0};
-
-function showStory(i) {
-  CUR = {seed: i, branch: 0};
-  renderStory();
-  document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
-  document.querySelectorAll(".tab")[1].classList.add("active");
-  document.querySelectorAll(".panel").forEach(p=>p.classList.remove("active"));
-  document.getElementById("panel-story").classList.add("active");
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name))
+  document.querySelectorAll('.panel').forEach((p) => p.classList.toggle('active', p.id === 'panel-' + name))
 }
 
-function selectBranch(bi) {
-  CUR.branch = bi;
-  renderStory();
+function showStory(seedId) {
+  CUR = { seedId, branch: 0 }
+  renderStory()
+  showTab('story')
 }
 
 function renderStory() {
-  const seed = SEEDS[CUR.seed];
-  const st = STORIES[CUR.seed];
-  const b = st.branches[CUR.branch];
+  const seed = SEEDS.find((s) => s.id === CUR.seedId)
+  const st = STORIES[CUR.seedId]
+  if (!seed || !st) {
+    $('story-panel').innerHTML = `<div class="placeholder">이 씨앗에는 스토리 목데이터가 없다</div>`
+    return
+  }
+  const b = st.branches[CUR.branch]
 
-  const chips = st.branches.map((x,bi) => `
-    <button class="branch-chip ${bi===CUR.branch?"on":""}" onclick="selectBranch(${bi})">
-      <span class="bid">${x.id}</span>${x.label}
-    </button>`).join("");
+  const chips = st.branches.map((x, bi) => `
+    <button class="branch-chip ${bi === CUR.branch ? 'on' : ''}" data-branch="${bi}">
+      <span class="bid">${esc(x.id)}</span>${esc(x.label)}
+    </button>`).join('')
 
-  const beats = b.beats.map((t,n) => `
-    <div class="beat"><span class="no">${n+1}</span><span>${t}</span></div>`).join("");
+  const beats = b.beats.map((t, n) => `
+    <div class="beat"><span class="no">${n + 1}</span><span>${esc(t)}</span></div>`).join('')
 
-  const outcome = Object.entries(b.outcome).map(([k,v]) => `
-    <div class="outcome"><span class="k">${k}</span><span class="v">${v}</span></div>`).join("");
+  const outcome = Object.entries(b.outcome).map(([k, v]) => `
+    <div class="outcome"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join('')
 
-  const wbNodes = (b.writeback.nodes||[]).map(n => `
-    <div class="item"><span class="nt">${n.kind}</span> ${n.name}
-      ${n.t!==undefined?`<span class="p">t=${n.t}</span>`:""}
-      <div class="p">${n.desc||""}</div></div>`).join("");
+  const wbNodes = (b.writeback.nodes || []).map((n) => `
+    <div class="item"><span class="nt">${esc(n.kind)}</span> ${esc(n.name)}
+      ${n.t !== undefined ? `<span class="p">t=${esc(n.t)}</span>` : ''}
+      <div class="p">${esc(n.desc || '')}</div></div>`).join('')
 
-  const wbEdges = b.writeback.edges.map(e => `
-    <div class="item"><span class="nt">edge</span>
-      ${e.s} <b>${e.p}</b> ${e.o}${e.note?` <span class="p">(${e.note})</span>`:""}
-    </div>`).join("");
+  // 역기입 게이트: 이 분기가 쓰려는 엣지 중 스키마를 통과하는 것만 그래프에 들어간다.
+  const gate = checkWriteback(WORLD.nodes, b.writeback)
+  const why = new Map(gate.problems.map((p) => [`${p.edge.s} ${p.edge.p} ${p.edge.o}`, p]))
+  const wbEdges = b.writeback.edges.map((e) => {
+    const bad = why.get(`${e.s} ${e.p} ${e.o}`)
+    return `
+    <div class="item ${bad ? 'bad' : ''}"><span class="nt">edge</span>
+      ${esc(e.s)} <b>${esc(e.p)}</b> ${esc(e.o)}${e.note ? ` <span class="p">(${esc(e.note)})</span>` : ''}
+      ${bad ? `<span class="why">← ${esc(CODE_KO[bad.code] || bad.code)}</span>` : ''}
+    </div>`
+  }).join('')
 
-  // 분기 비교표: 모든 분기의 결과 키를 합집합으로
-  const keys = [...new Set(st.branches.flatMap(x => Object.keys(x.outcome)))];
+  const keys = [...new Set(st.branches.flatMap((x) => Object.keys(x.outcome)))]
   const cmp = `
     <table class="cmp">
-      <tr><th></th>${st.branches.map(x=>`<th>${x.id}. ${x.label}</th>`).join("")}</tr>
-      ${keys.map(k => `<tr><th>${k}</th>${st.branches.map((x,bi)=>
-        `<td class="${bi===CUR.branch?"on":""}">${x.outcome[k]||"-"}</td>`).join("")}</tr>`).join("")}
-      <tr><th>역기입 엣지</th>${st.branches.map((x,bi)=>
-        `<td class="${bi===CUR.branch?"on":""}">${x.writeback.edges.length}개</td>`).join("")}</tr>
-    </table>`;
+      <tr><th></th>${st.branches.map((x) => `<th>${esc(x.id)}. ${esc(x.label)}</th>`).join('')}</tr>
+      ${keys.map((k) => `<tr><th>${esc(k)}</th>${st.branches.map((x, bi) =>
+        `<td class="${bi === CUR.branch ? 'on' : ''}">${esc(x.outcome[k] || '-')}</td>`).join('')}</tr>`).join('')}
+      <tr><th>역기입 엣지</th>${st.branches.map((x, bi) => {
+        const g = checkWriteback(WORLD.nodes, x.writeback)
+        return `<td class="${bi === CUR.branch ? 'on' : ''}">${g.passed}/${g.total} 통과</td>`
+      }).join('')}</tr>
+    </table>`
 
-  document.getElementById("story-panel").innerHTML = `
+  $('story-panel').innerHTML = `
     <div class="story-content">
       <div class="seed-info">
-        <span class="probe-tag">${seed.probe}</span>
-        <span class="seed-score">▲${seed.score.toFixed(2)}</span>
-        <span>초점: ${seed.focus.join(", ")}</span>
+        <span class="probe-tag">${esc(seed.probe)}</span>
+        <span class="seed-score">▲${seed.total.toFixed(2)}</span>
+        <span>초점: ${seed.focus.map((id) => esc(nameOf(id))).join(', ')}</span>
       </div>
-      <h1>${st.title}</h1>
-      <div class="logline">${st.logline}</div>
+      <h1>${esc(st.title)}</h1>
+      <div class="logline">${esc(st.logline)}</div>
 
       <div class="pivot-box">
-        <div class="ttl">${st.pivot.title}</div>
-        <div class="bd">${st.pivot.body}</div>
+        <div class="ttl">${esc(st.pivot.title)}</div>
+        <div class="bd">${esc(st.pivot.body)}</div>
       </div>
 
       <div class="sec-label">분기 ${st.branches.length}개</div>
       <div class="branch-chips">${chips}</div>
 
-      <div class="branch-head">${b.id}. ${b.label}</div>
-      <div class="branch-tone">${b.tone}</div>
-      <div class="branch-premise">${b.premise}</div>
+      <div class="branch-head">${esc(b.id)}. ${esc(b.label)}</div>
+      <div class="branch-tone">${esc(b.tone)}</div>
+      <div class="branch-premise">${esc(b.premise)}</div>
 
       <div class="sec-label">비트</div>
       <div class="beats">${beats}</div>
@@ -249,60 +344,120 @@ function renderStory() {
       <div class="sec-label">이 분기의 결과</div>
       ${outcome}
 
-      <div class="sec-label">그래프 역기입</div>
+      <div class="sec-label">그래프 역기입 · 게이트 ${gate.passed}/${gate.total} 통과</div>
       <div class="wb-box">${wbNodes}${wbEdges}</div>
 
       <div class="sec-label">분기 비교</div>
       ${cmp}
-    </div>`;
+    </div>`
 }
 
-document.querySelectorAll(".tab").forEach(t => {
-  t.onclick = () => {
-    document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
-    t.classList.add("active");
-    document.querySelectorAll(".panel").forEach(p=>p.classList.remove("active"));
-    document.getElementById("panel-"+t.dataset.tab).classList.add("active");
-  };
-});
-
-function renderStats() {
-  document.getElementById("s-nodes").textContent = WORLD.nodes.length;
-  document.getElementById("s-asserted").textContent = WORLD.edges.filter(e=>e.asserted).length;
-  document.getElementById("s-derived").textContent = WORLD.edges.filter(e=>!e.asserted).length;
-  document.getElementById("s-seeds").textContent = SEEDS.length;
+const CODE_KO = {
+  undeclared_predicate: '선언되지 않은 술어',
+  unresolved_node: '노드를 찾을 수 없음',
+  domain: '정의역 위반',
+  range: '치역 위반',
 }
 
+function renderRules() {
+  const violations = validate(WORLD.nodes, WORLD.edges.filter((e) => e.asserted))
+
+  const ruleRows = RULES.map((r) => {
+    const n = TRACE.fired[r.id] || 0
+    const when = r.when.map((p) => `(${p.join(' ')})`).join(' ∧ ')
+    return `
+    <div class="rule ${n ? '' : 'zero'}">
+      <span class="cnt">${n}개</span>
+      <span class="rid">${esc(r.id)}</span>
+      <div class="rd">${esc(r.desc)}</div>
+      <div class="rw">${esc(when)} → (${esc(r.then.join(' '))})</div>
+    </div>`
+  }).join('')
+
+  const derived = WORLD.edges.filter((e) => !e.asserted).map((e) => `
+    <div>${esc(e.s)} <b>${esc(e.p)}</b> ${esc(e.o)} <span class="by">← ${esc(e.derived_by)}</span></div>`).join('')
+
+  // 모든 분기의 역기입을 게이트에 통과시켜본 결과. 생성물이 스키마를 얼마나 벗어나는지가 이 숫자다.
+  const all = { total: 0, passed: 0, codes: {} }
+  for (const st of Object.values(STORIES)) {
+    for (const b of st.branches) {
+      const g = checkWriteback(WORLD.nodes, b.writeback)
+      all.total += g.total
+      all.passed += g.passed
+      for (const p of g.problems) {
+        const k = `${CODE_KO[p.code]}: ${p.detail}`
+        all.codes[k] = (all.codes[k] || 0) + 1
+      }
+    }
+  }
+  const codeRows = Object.entries(all.codes).sort((a, b) => b[1] - a[1])
+    .map(([k, v]) => `<div class="row"><span>${esc(k)}</span><span>${v}개</span></div>`).join('')
+
+  $('rules-panel').innerHTML = `
+    <div class="sec-label">스키마</div>
+    <div class="kv">
+      <span class="k">노드 종류</span><span class="v">${Object.keys(NODE_KINDS).length}개</span>
+      <span class="k">선언된 술어</span><span class="v">${Object.keys(EDGE_KINDS).length}개</span>
+      <span class="k">명시 엣지 위반</span><span class="v">${violations.length}건</span>
+    </div>
+
+    <div class="sec-label">규칙 ${RULES.length}개 · ${TRACE.rounds}라운드에 수렴</div>
+    ${ruleRows}
+    <div class="note">발화 0회인 규칙은 지금 그래프에 해당 패턴이 없다는 뜻이다. 역기입으로 그래프가 자라면 발화한다.</div>
+
+    <div class="sec-label">규칙이 만든 엣지 ${WORLD.edges.filter((e) => !e.asserted).length}개</div>
+    <div class="derived-list">${derived}</div>
+
+    <div class="sec-label">역기입 게이트</div>
+    <div class="gate">
+      <div class="row"><span>스토리 ${Object.keys(STORIES).length}개의 역기입 엣지</span><b>${all.passed}/${all.total} 통과</b></div>
+      ${codeRows}
+    </div>
+    <div class="note">통과하지 못한 엣지는 검토 대기다. 사람이 술어를 스키마에 추가할지, 엣지를 버릴지 판단한다. 스키마는 자동으로 자라지 않는다.</div>`
+}
+
+// ── 로드 ──────────────────────────────────────────────────────────────────
 async function loadJson(name) {
-  const res = await fetch(`mock/${name}`, {cache: "no-store"});
-  if (!res.ok) throw new Error(`mock/${name} ${res.status}`);
-  return res.json();
+  const res = await fetch(`mock/${name}`, { cache: 'no-store' })
+  if (!res.ok) throw new Error(`mock/${name} ${res.status}`)
+  return res.json()
 }
 
-// 목데이터 셋을 한 번에 읽는다. 실제 구현에서는 graph가 Neptune 쿼리, seeds가 탐지기 실행,
-// stories가 Bedrock 생성으로 각각 바뀌므로 여기서만 갈아끼우면 된다.
-async function loadMock() {
-  const [graph, seeds, stories] = await Promise.all([
-    loadJson("graph.json"), loadJson("seeds.json"), loadJson("stories.json")
-  ]);
-  if (!Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) throw new Error("graph.json: nodes/edges 배열이 없다");
-  if (!Array.isArray(seeds) || !Array.isArray(stories)) throw new Error("seeds.json / stories.json: 배열이 아니다");
-  if (seeds.length !== stories.length) throw new Error(`씨앗 ${seeds.length}개인데 스토리 ${stories.length}개다`);
-  return {graph, seeds, stories};
+async function boot() {
+  const [graph, stories] = await Promise.all([loadJson('graph.json'), loadJson('stories.json')])
+  if (!Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) throw new Error('graph.json: nodes/edges 배열이 없다')
+
+  const bad = validate(graph.nodes, graph.edges)
+  if (bad.length) throw new Error(`graph.json 스키마 위반 ${bad.length}건: ${bad[0].detail}`)
+
+  const applied = apply(graph.nodes, graph.edges)
+  WORLD = { nodes: graph.nodes, edges: applied.edges }
+  TRACE = { fired: applied.fired, rounds: applied.rounds }
+  SEEDS = probes(graph.nodes, applied.edges)
+  STORIES = stories
+
+  renderStats()
+  renderLegend()
+  renderSeeds()
+  renderRules()
+  buildNetwork()
 }
 
-loadMock().then(d => {
-  WORLD = d.graph;
-  SEEDS = d.seeds;
-  STORIES = d.stories;
-  renderStats();
-  buildNetwork();
-  renderSeeds();
-}).catch(err => {
-  document.getElementById("network").innerHTML =
-    `<div class="load-error">목데이터를 불러오지 못했다: ${err.message}<br>파일 경로가 아니라 HTTP로 열어야 한다. 예: python3 -m http.server 8000 --directory demo</div>`;
-  document.getElementById("seeds-list").innerHTML = `<div class="placeholder">데이터 로드 실패</div>`;
-});
+document.querySelectorAll('.tab').forEach((t) => { t.onclick = () => showTab(t.dataset.tab) })
+$('tg-derived').onchange = (e) => toggleDerived(e.target.checked)
+$('seeds-list').addEventListener('click', (e) => {
+  const btn = e.target.closest('.gen-btn')
+  if (btn && !btn.disabled) showStory(btn.dataset.seed)
+})
+$('story-panel').addEventListener('click', (e) => {
+  const chip = e.target.closest('.branch-chip')
+  if (chip) { CUR.branch = Number(chip.dataset.branch); renderStory() }
+})
+
+boot().catch((err) => {
+  $('network').innerHTML = `<div class="load-error">데이터를 불러오지 못했다: ${esc(err.message)}<br>파일 경로가 아니라 HTTP로 열어야 한다. 예: python3 -m http.server 8000 --directory demo</div>`
+  $('seeds-list').innerHTML = `<div class="placeholder">데이터 로드 실패</div>`
+})
 </script>
 </body>
 </html>
