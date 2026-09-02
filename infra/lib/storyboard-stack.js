@@ -11,6 +11,8 @@ const {
   aws_dynamodb: dynamodb,
   aws_ec2: ec2,
   aws_iam: iam,
+  aws_lambda: lambda,
+  aws_neptune: neptune,
   aws_s3: s3,
   aws_s3_assets: s3assets,
   aws_s3_deployment: s3deploy,
@@ -18,12 +20,17 @@ const {
 
 const HERE = __dirname
 const DEMO = path.join(HERE, '..', '..', 'demo')
+const GRAPH_FN = path.join(HERE, '..', 'graph')
 const read = (...p) => fs.readFileSync(path.join(HERE, '..', ...p), 'utf8')
 
 const GPU_TYPE = 'g6e.2xlarge'
 const GPU_AZS = ['us-east-1a', 'us-east-1b', 'us-east-1c', 'us-east-1d']
 const MODEL = 'chroma'
 const CF_ORIGINS = 'pl-3b927c52'
+const NEPTUNE_VERSION = '1.3.4.0'
+const NEPTUNE_PORT = 8182
+// 데모용 NCU 폭. 최소로 놔둬도 쓰지 않는 동안에는 거의 붙지 않는다
+const NEPTUNE_NCU = { min: 1, max: 8 }
 
 class StoryboardStack extends Stack {
   constructor(scope, id, props) {
@@ -107,6 +114,78 @@ class StoryboardStack extends Stack {
     })
 
     const net = ec2.Vpc.fromLookup(this, 'Net', { isDefault: true })
+
+    // ── 관계 그래프 (Neptune Serverless) ─────────────────────────────────────
+    // 브라우저의 graph-engine.js 가 조회를 들고 있고, 사실은 여기에 남는다.
+    // 기본 VPC 를 그대로 쓴다 — 서브넷 그룹은 AZ 두 곳 이상이 필요하다.
+    const slug = id.toLowerCase()
+
+    const neptuneSubnets = new neptune.CfnDBSubnetGroup(this, 'GraphSubnets', {
+      dbSubnetGroupDescription: 'storyboard graph',
+      dbSubnetGroupName: `${slug}-graph-subnets`,
+      subnetIds: net.publicSubnets.map((s) => s.subnetId),
+    })
+
+    const neptuneSg = new ec2.SecurityGroup(this, 'NeptuneSg', { vpc: net, description: 'storyboard neptune' })
+
+    const graph = new neptune.CfnDBCluster(this, 'Graph', {
+      dbClusterIdentifier: `${slug}-graph`,
+      engineVersion: NEPTUNE_VERSION,
+      serverlessScalingConfiguration: {
+        minCapacity: NEPTUNE_NCU.min,
+        maxCapacity: NEPTUNE_NCU.max,
+      },
+      vpcSecurityGroupIds: [neptuneSg.securityGroupId],
+      dbSubnetGroupName: neptuneSubnets.dbSubnetGroupName,
+      iamAuthEnabled: false, // 데모용. 프로덕션에서는 켜고 Lambda 에 SigV4 서명을 붙인다
+      storageEncrypted: true,
+      deletionProtection: false,
+    })
+    graph.node.addDependency(neptuneSubnets)
+    graph.applyRemovalPolicy(RemovalPolicy.DESTROY)
+
+    // Serverless 여도 인스턴스는 최소 한 대 있어야 한다
+    const graphInstance = new neptune.CfnDBInstance(this, 'GraphInstance', {
+      dbClusterIdentifier: graph.dbClusterIdentifier,
+      dbInstanceClass: 'db.serverless',
+      dbInstanceIdentifier: `${slug}-graph-instance`,
+    })
+    graphInstance.node.addDependency(graph)
+    graphInstance.applyRemovalPolicy(RemovalPolicy.DESTROY)
+
+    // Gremlin 을 도는 Lambda. 이 스택의 첫 Lambda 다.
+    // 기본 VPC 에는 Private 서브넷이 없으므로 Public 에 넣는다 — 인터넷으로 나가지는
+    // 못하지만(NAT 없음) 같은 VPC 안의 Neptune 은 닿는다. 이 함수는 그것만 필요하다.
+    const graphFnSg = new ec2.SecurityGroup(this, 'GraphFnSg', { vpc: net, description: 'storyboard graph lambda' })
+    neptuneSg.addIngressRule(graphFnSg, ec2.Port.tcp(NEPTUNE_PORT), 'Lambda to Neptune')
+
+    if (!fs.existsSync(path.join(GRAPH_FN, 'node_modules', 'gremlin'))) {
+      throw new Error('infra/graph 의 의존성이 없다. `cd infra/graph && npm install` 을 먼저 돌려라 — CDK 는 이 디렉터리를 그대로 올린다.')
+    }
+
+    const graphFn = new lambda.Function(this, 'GraphFn', {
+      functionName: `${id}-graph`,
+      runtime: lambda.Runtime.NODEJS_24_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromAsset(GRAPH_FN, { exclude: ['package-lock.json'] }),
+      vpc: net,
+      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+      allowPublicSubnet: true,
+      securityGroups: [graphFnSg],
+      timeout: Duration.seconds(30),
+      memorySize: 512,
+      environment: {
+        NEPTUNE_ENDPOINT: graph.attrEndpoint,
+        NEPTUNE_PORT: String(NEPTUNE_PORT),
+      },
+    })
+    graphFn.node.addDependency(graphInstance)
+
+    const graphDs = api.addLambdaDataSource('GraphDs', graphFn)
+    js(graphDs, 'LoadGraph', 'Query', 'loadGraph', 'loadGraph.js')
+    js(graphDs, 'QueryGraph', 'Query', 'queryGraph', 'queryGraph.js')
+    js(graphDs, 'SaveGraph', 'Mutation', 'saveGraph', 'saveGraph.js')
+    js(graphDs, 'UpdateGraph', 'Mutation', 'updateGraph', 'updateGraph.js')
 
     const sg = new ec2.SecurityGroup(this, 'GpuSg', { vpc: net, description: 'storyboard gpu' })
 
@@ -228,6 +307,8 @@ class StoryboardStack extends Stack {
       `  clientId: '${client.userPoolClientId}',`,
       "  genUrl: '/gen',",
       "  boardId: 'demo',",
+      // 켜져 있으면 graph-engine.js 가 인메모리 대신 Neptune 을 사실로 쓴다
+      '  hasGraph: true,',
       ...(demoPw ? [`  demoPw: ${JSON.stringify(demoPw)},`] : []),
       '}',
       '',
@@ -249,6 +330,8 @@ class StoryboardStack extends Stack {
     new CfnOutput(this, 'ClientId', { value: client.userPoolClientId })
     new CfnOutput(this, 'GpuAsg', { value: gpu.autoScalingGroupName })
     new CfnOutput(this, 'GpuAddr', { value: alb.loadBalancerDnsName })
+    new CfnOutput(this, 'NeptuneEndpoint', { value: graph.attrEndpoint })
+    new CfnOutput(this, 'GraphFnArn', { value: graphFn.functionArn })
   }
 }
 

@@ -76,6 +76,32 @@ const gqlPost = async (cfg, query, variables) => {
 }
 
 /**
+ * AWSJSON 필드 하나를 값으로 푼다.
+ *
+ * 배포된 리졸버들은 response 에서 JSON.stringify(...) 한 문자열을 AWSJSON 필드로 내보낸다.
+ * AppSync 가 AWSJSON 을 내보낼 때 한 번 더 감싸기 때문에, 한 번 파싱하면 값이 아니라
+ * JSON 문자열이 또 나온다 ('"{\"text\":...}"' → '{"text":...}' → {text:...}).
+ * 그래서 문자열이 남아 있으면 한 번 더 푼다. 리졸버가 나중에 ctx.result 를 그대로
+ * 돌려주도록 고쳐도 이 함수는 그대로 맞는다 — 그때는 첫 파싱에서 값이 나온다.
+ *
+ * @param {*} raw - json.data 의 AWSJSON 필드 값
+ * @returns {*} 파싱한 값
+ */
+export const parseField = (raw) => {
+  const v = typeof raw === 'string' ? JSON.parse(raw) : raw
+  if (typeof v !== 'string') return v
+  // 한 겹 더 싸여 온 것은 객체나 배열이다. 값이 진짜 문자열인 경우('42', 대본 텍스트)
+  // 까지 풀면 타입이 바뀌므로, 여는 괄호로 시작할 때만 한 번 더 푼다
+  const s = v.trim()
+  if (!s.startsWith('{') && !s.startsWith('[')) return v
+  try {
+    return JSON.parse(s)
+  } catch {
+    return v
+  }
+}
+
+/**
  * plan 쿼리만 쓰는 최소 클라이언트. story-graph.html 처럼 보드 동기화(구독·프레즌스)는
  * 필요 없고 Bedrock 호출만 하는 화면에서 쓴다.
  *
@@ -84,7 +110,32 @@ const gqlPost = async (cfg, query, variables) => {
 export function planClient() {
   const cfg = window.SB_CONFIG
   if (!cfg?.graphqlUrl) return null
-  return { plan: async (spec) => JSON.parse((await gqlPost(cfg, Q_PLAN, { spec: JSON.stringify(spec) })).plan) }
+  return { plan: async (spec) => parseField((await gqlPost(cfg, Q_PLAN, { spec: JSON.stringify(spec) })).plan) }
+}
+
+const Q_LOAD_GRAPH = `query LoadGraph($projectId: String) { loadGraph(projectId: $projectId) }`
+const Q_QUERY_GRAPH = `query QueryGraph($spec: AWSJSON!) { queryGraph(spec: $spec) }`
+const M_SAVE_GRAPH = `mutation SaveGraph($spec: AWSJSON!) { saveGraph(spec: $spec) }`
+const M_UPDATE_GRAPH = `mutation UpdateGraph($spec: AWSJSON!) { updateGraph(spec: $spec) }`
+
+/**
+ * Neptune 그래프 저장소 클라이언트. graph-engine.js 가 인메모리 대신 이걸 쓴다.
+ * 배포에서 hasGraph 가 켜져 있을 때만 나온다 — 로컬에서는 null 이라 인메모리로 돈다.
+ *
+ * @returns {{load: Function, save: Function, query: Function, update: Function}|null}
+ */
+export function graphClient() {
+  const cfg = window.SB_CONFIG
+  if (!cfg?.graphqlUrl || !cfg?.hasGraph) return null
+  // 그래프 리졸버 4개도 plan 과 같이 JSON.stringify 한 문자열을 AWSJSON 으로 내보낸다
+  const ask = async (query, field, variables) => parseField((await gqlPost(cfg, query, variables))[field])
+  const spec = (query, field) => (payload) => ask(query, field, { spec: JSON.stringify(payload) })
+  return {
+    load: (projectId = 'default') => ask(Q_LOAD_GRAPH, 'loadGraph', { projectId }),
+    query: spec(Q_QUERY_GRAPH, 'queryGraph'),
+    save: spec(M_SAVE_GRAPH, 'saveGraph'),
+    update: spec(M_UPDATE_GRAPH, 'updateGraph'),
+  }
 }
 
 async function awsTransport(cfg, h) {
@@ -152,7 +203,7 @@ async function awsTransport(cfg, h) {
       } while (token)
       return out.sort((a, b) => a.ts - b.ts)
     },
-    plan: async (spec) => JSON.parse((await post(Q_PLAN, { spec: JSON.stringify(spec) })).plan),
+    plan: async (spec) => parseField((await post(Q_PLAN, { spec: JSON.stringify(spec) })).plan),
     setLatency: (ms) => { latency = ms },
   }
 }

@@ -27,6 +27,39 @@ const numOr = (v, dflt) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number
 
 const JSON_ONLY = '오직 아래 모양의 JSON 하나만 출력한다. 설명·머리말·코드펜스를 붙이지 않는다.'
 
+// 프롬프트 길이는 두 군데서 막힌다.
+//  1) infra/resolvers/plan.js 가 8000자를 넘는 프롬프트를 BadRequest 로 튕긴다.
+//  2) AppSync HTTP 데이터소스(Bedrock)는 30초 안에 끝나야 한다 — 넘으면 Execution timeout 이다.
+// 아래 상한이 (1) 을 코드로 못 박는 자리고, 응답 토큰 상한이 (2) 를 잡는다.
+/** plan 리졸버가 받는 프롬프트 상한 */
+const PROMPT_MAX = 8000
+/** 위 상한에 두는 여유. 규칙 블록은 GRAPH_SCHEMA 가 늘면 같이 커진다 */
+const PROMPT_SAFE = PROMPT_MAX - 400
+
+/**
+ * 머리말·꼬리말 사이에 길이가 들쭉날쭉한 본문(대본 조각·컨텍스트 팩)을 끼운다.
+ * 프롬프트가 PROMPT_MAX 를 넘지 않도록 본문만 자른다 — 출력 모양과 규칙을 자르면
+ * 응답이 깨지므로 건드리지 않는다.
+ *
+ * @param {Array<string>} head - 본문 앞에 오는 줄들
+ * @param {string} body - 잘려도 되는 본문
+ * @param {Array<string>} tail - 본문 뒤에 오는 줄들 (출력 모양·규칙)
+ * @param {string} [note] 잘랐을 때 그 자리에 남기는 한 줄
+ * @returns {string} 길이가 PROMPT_SAFE 이하인 프롬프트
+ */
+const withBody = (head, body, tail, note = '(컨텍스트를 여기서 잘랐다)') => {
+  const lines = [...head, '', ...tail]
+  const room = Math.max(0, PROMPT_SAFE - lines.join('\n').length)
+  const text = String(body || '')
+  const fit = text.length <= room
+    ? text
+    : `${text.slice(0, Math.max(0, room - note.length - 1))}\n${note}`
+  return [...head, fit, ...tail].join('\n')
+}
+
+/** 이 프롬프트에서 본문에 남는 자리. contextPackPrompt 의 limit 으로 넘긴다 */
+const bodyRoom = (build) => Math.max(600, PROMPT_SAFE - build('').length)
+
 const roster = (chars) =>
   chars.length ? chars.map((c) => `- ${c.name}: ${c.brief || '(설명 없음)'}`).join('\n') : '(없음)'
 
@@ -93,15 +126,23 @@ export function cutsPrompt(spec, outline, beats, from, per) {
   ].join('\n')
 }
 
-const GRAPH_CHUNK = 6000
+// 조각 하나가 프롬프트에 통째로 들어가야 한다. 추출 프롬프트의 규칙·어휘 블록이
+// 3천자 가까이 되고 판에 있는 노드 목록도 함께 실리므로, 조각은 그만큼 작게 자른다.
+// 6000자로 자르던 때는 조각 하나가 8000자 상한을 넘어 리졸버가 BadRequest 로 튕겼다.
+const GRAPH_CHUNK = 3000
 const GRAPH_MAX_CHUNKS = 12
-const GRAPH_SRC_MAX = 12000
+/** 프롬프트에 적는 기존 노드 줄 수 상한. 판이 커도 꼬리말이 본문을 밀어내지 않게 한다 */
+const KNOWN_MAX = 40
 
 const relLines = () => GRAPH_SCHEMA.assertableRels.map((p) => `  ${p} — ${GRAPH_SCHEMA.rels[p].desc}`).join('\n')
 const kindLines = () => GRAPH_SCHEMA.nodeKinds.map((k) => `  ${k} — ${GRAPH_SCHEMA.nodeKindDesc[k]}`).join('\n')
-const knownLines = (known) => (known || []).length
-  ? known.map((n) => `- ${n.id} (${n.kind}) ${n.name}`).join('\n')
-  : '(없음)'
+const knownLines = (known) => {
+  const list = known || []
+  if (!list.length) return '(없음)'
+  const lines = list.slice(0, KNOWN_MAX).map((n) => `- ${n.id} (${n.kind}) ${n.name}`)
+  if (list.length > KNOWN_MAX) lines.push(`- (그 외 ${list.length - KNOWN_MAX}개는 생략했다)`)
+  return lines.join('\n')
+}
 
 /**
  * 대본·시놉시스 텍스트에서 관계 그래프를 뽑는 프롬프트.
@@ -113,21 +154,20 @@ const knownLines = (known) => (known || []).length
  * @param {Array}  [ctx.known] 이미 판에 있는 노드 [{id, kind, name}]. id 를 다시 쓰게 한다
  * @param {{i: number, n: number}} [ctx.part] 긴 대본을 나눠 넣을 때의 조각 번호
  * @param {number} [ctx.maxNodes=40] 노드 상한
- * @returns {string} Bedrock 에 그대로 넣는 프롬프트
+ * @returns {string} Bedrock 에 그대로 넣는 프롬프트. 길이는 PROMPT_MAX 이하가 보장된다
  */
 export function extractGraphPrompt(text, ctx = {}) {
   const max = ctx.maxNodes || 40
   const part = ctx.part && ctx.part.n > 1 ? ctx.part : null
-  const src = String(text || '').slice(0, GRAPH_SRC_MAX)
 
-  return [
+  return withBody([
     part
       ? `아래는 한 작품을 ${part.n}조각으로 나눈 것 중 ${part.i}번째다. 이 조각에서 인물과 관계를 뽑는다.`
       : '아래 글에서 인물과 관계를 뽑아 관계 그래프로 만든다.',
     ctx.title ? `작품: ${ctx.title}` : null,
     '',
     '글:',
-    src,
+  ].filter((l) => l !== null), text, [
     '',
     `이미 판에 있는 노드 (같은 대상이면 이 id 를 다시 쓴다):\n${knownLines(ctx.known)}`,
     '',
@@ -160,7 +200,7 @@ export function extractGraphPrompt(text, ctx = {}) {
     '- conceals 는 비밀을 감춘 인물 → Secret, hidden_from 은 Secret → 모르는 인물 방향이다.',
     '- s 와 o 는 위 nodes 에 있는 id 여야 한다.',
     '- 한국어로 쓴다. id 만 로마자다.',
-  ].filter((l) => l !== null).join('\n')
+  ], '(글이 길어 여기서 잘랐다)')
 }
 
 /**
@@ -196,7 +236,7 @@ export function scriptToText(raw, name = '') {
  * 긴 텍스트를 추출 단위로 자른다. 빈 줄을 경계로 삼아 문단이 갈라지지 않게 한다.
  *
  * @param {string} text - 원문
- * @param {number} [size=6000] 조각 하나의 글자 수 상한
+ * @param {number} [size=GRAPH_CHUNK] 조각 하나의 글자 수 상한
  * @returns {Array<string>} 조각 배열. 빈 텍스트면 빈 배열
  */
 export function chunkText(text, size = GRAPH_CHUNK) {
@@ -296,8 +336,46 @@ export function commitGraph(canon, next) {
 /** 컨텍스트 팩에 넣는 노드 상한. 씨앗 주변만 보면 되니 전체를 넣지 않는다 */
 const CTX_NODES = 24
 
+/** 컨텍스트 팩 글자 상한. 자리가 남아도 이만큼만 넣는다 (packFor) */
+const CTX_BUDGET = 3200
+/** 한 줄에 붙는 설명(desc·claim) 상한. 추출본의 desc 는 문단째로 오는 경우가 있다 */
+const CTX_DESC = 70
+/** 분기 응답 토큰 상한. 30초 안에 끝나야 하므로 낮춰 둔다 */
+const BRANCH_TOKENS = 2000
+/** 기획자의 자유 방향 상한. 이것도 프롬프트에 들어가니 못 박아 둔다 */
+const DIR_MAX = 1200
+
 const nm = (store, id) => store.getNode(id)?.name || String(id)
 const tNum = (v, dflt = 0) => (Number.isFinite(Number(v)) ? Number(v) : dflt)
+
+/** 여러 줄로 오는 설명을 한 줄로 눕히고 상한에서 자른다 */
+const oneLine = (v, n) => {
+  const s = String(v ?? '').replace(/\s+/g, ' ').trim()
+  return s.length > n ? `${s.slice(0, n - 1)}…` : s
+}
+
+/** 컨텍스트 팩의 목록 블록 하나. max 를 넘는 줄은 접어 두고 몇 줄 접었는지만 남긴다 */
+const ctxBlock = (head, lines, keep, max) => ({
+  head, keep, lines: lines.slice(0, max), dropped: Math.max(0, lines.length - max),
+})
+
+const ctxText = (b) => {
+  if (!b.lines.length) return ''
+  return [b.head, ...b.lines, ...(b.dropped ? [`- (${b.dropped}줄 더 있지만 생략했다)`] : [])].join('\n')
+}
+
+/** 블록들을 예산 안으로 줄인다. 지금 가장 긴 블록의 뒤에서 한 줄씩 덜어낸다 */
+const trimCtx = (blocks, budget) => {
+  const size = () => blocks.reduce((a, b) => a + (b.lines.length ? ctxText(b).length + 2 : 0), 0)
+  while (size() > budget) {
+    const big = blocks.filter((b) => b.lines.length > b.keep)
+      .sort((x, y) => ctxText(y).length - ctxText(x).length)[0]
+    if (!big) break
+    big.lines = big.lines.slice(0, -1)
+    big.dropped += 1
+  }
+  return blocks
+}
 
 /** 이 엣지를 사람이 읽는 한 줄로. 명시인지 추론인지도 같이 적는다 */
 const edgeLine = (store, e) => {
@@ -327,9 +405,11 @@ const ctxScope = (seed, store, limit = CTX_NODES) => {
  *
  * @param {Object|null} seed - findSeeds 가 준 씨앗 하나 {probe, score, title, desc, focus}
  * @param {Object} store - GraphStore
+ * @param {Object} [opts]
+ * @param {number} [opts.limit=CTX_BUDGET] 팩 전체 글자 상한. 넘치면 큰 블록부터 줄을 덜어낸다
  * @returns {string} 프롬프트에 그대로 붙이는 컨텍스트 텍스트
  */
-export function contextPackPrompt(seed, store) {
+export function contextPackPrompt(seed, store, opts = {}) {
   if (!store?.getNodes) return '(그래프가 없다)'
   const scope = ctxScope(seed, store)
   const sub = store.getSubgraph(scope)
@@ -339,10 +419,13 @@ export function contextPackPrompt(seed, store) {
   const chars = kind('Character').map((n) => {
     const p = n.props || {}
     const head = [p.age ? `${p.age}세` : null, p.role].filter(Boolean).join(', ')
-    return `- ${n.name}${head ? ` (${head})` : ''}${p.desc ? ` — ${p.desc}` : ''}`
+    const desc = oneLine(p.desc, CTX_DESC)
+    return `- ${n.name}${head ? ` (${head})` : ''}${desc ? ` — ${desc}` : ''}`
   })
-  const groups = [...kind('Faction'), ...kind('Location'), ...kind('Object')]
-    .map((n) => `- ${n.name} (${n.kind})${n.props?.desc ? ` — ${n.props.desc}` : ''}`)
+  const groups = [...kind('Faction'), ...kind('Location'), ...kind('Object')].map((n) => {
+    const desc = oneLine(n.props?.desc, CTX_DESC)
+    return `- ${n.name} (${n.kind})${desc ? ` — ${desc}` : ''}`
+  })
 
   const isSide = (id) => ['Secret', 'Event'].includes(store.getNode(id)?.kind)
   const rels = sub.edges.filter((e) => !isSide(e.s) && !isSide(e.o)).map((e) => edgeLine(store, e))
@@ -354,8 +437,10 @@ export function contextPackPrompt(seed, store) {
       const after = store.getEdgesFrom(n.id)
         .filter((e) => ['caused', 'enabled', 'resolves'].includes(e.p))
         .map((e) => `${e.p} ${nm(store, e.o)}`)
-      return `- t=${tNum(n.props?.t)} ${n.name}${n.props?.desc ? ` — ${n.props.desc}` : ''}`
-        + ` / 참여: ${cast.join(', ') || '(없음)'} / 결과: ${after.join(', ') || '(기록 없음)'}`
+      const desc = oneLine(n.props?.desc, CTX_DESC)
+      // 빈 절은 아예 빼서 줄을 짧게 유지한다 — "(없음)" 은 모델에 주는 정보가 없다
+      return `- t=${tNum(n.props?.t)} ${n.name}${desc ? ` — ${desc}` : ''}`
+        + `${cast.length ? ` / 참여: ${cast.join(', ')}` : ''}${after.length ? ` / 결과: ${after.join(', ')}` : ''}`
     })
 
   const secrets = kind('Secret').map((n) => {
@@ -363,34 +448,41 @@ export function contextPackPrompt(seed, store) {
     const hold = inbound.filter((e) => e.p === 'conceals').map((e) => nm(store, e.s))
     const know = inbound.filter((e) => e.p === 'knows').map((e) => nm(store, e.s))
     const dark = store.getEdgesFrom(n.id).filter((e) => e.p === 'hidden_from').map((e) => nm(store, e.o))
-    return `- ${n.name}: "${n.props?.claim || ''}" / 감춘 이: ${hold.join(', ') || '(없음)'}`
+    return `- ${n.name}: "${oneLine(n.props?.claim, CTX_DESC)}" / 감춘 이: ${hold.join(', ') || '(없음)'}`
       + ` / 아는 이: ${know.join(', ') || '(없음)'} / 모르는 이: ${dark.join(', ') || '(없음)'}`
   })
 
   const probe = seed ? PROBES[seed.probe] : null
-  const block = (head, lines) => (lines.length ? [head, ...lines].join('\n') : null)
+  const head = seed
+    ? `[씨앗] ${probe?.label || seed.probe} (점수 ${Number(seed.score).toFixed(2)})`
+      + `\n${oneLine(seed.title, 120)}\n${oneLine(seed.desc, 200)}`
+    : '[씨앗] 없다. 기획자가 방향을 직접 준다'
+  const flaw = seed
+    ? `[구조적 결함] 탐지기 ${seed.probe}\n${oneLine(probe?.hint, 140)}`
+      + `\n초점: ${(seed.focus || []).map((id) => nm(store, id)).join(', ')}`
+    : null
+  const scale = `[전체 규모] 노드 ${stats.nodes} · 명시 엣지 ${stats.assertedEdges} · 추론 엣지 ${stats.derivedEdges}`
+    + `${scope.length < stats.nodes ? ` (위에는 씨앗 주변 ${sub.nodes.length}개만 넣었다)` : ''}`
 
-  return [
-    seed
-      ? `[씨앗] ${probe?.label || seed.probe} (점수 ${Number(seed.score).toFixed(2)})\n${seed.title}\n${seed.desc}`
-      : '[씨앗] 없다. 기획자가 방향을 직접 준다',
-    block('[인물]', chars),
-    block('[집단·장소·사물]', groups),
-    block('[관계] → 는 단방향, ↔ 는 서로', rels),
-    block('[사건] 시간 순, t 는 현재를 0 으로 둔 상대 시점', events),
-    block('[비밀] 누가 알고 누가 모르는가', secrets),
-    seed
-      ? `[구조적 결함] 탐지기 ${seed.probe}\n${probe?.hint || ''}\n초점: ${(seed.focus || []).map((id) => nm(store, id)).join(', ')}`
-      : null,
-    `[전체 규모] 노드 ${stats.nodes} · 명시 엣지 ${stats.assertedEdges} · 추론 엣지 ${stats.derivedEdges}`
-      + `${scope.length < stats.nodes ? ` (위에는 씨앗 주변 ${sub.nodes.length}개만 넣었다)` : ''}`,
-  ].filter(Boolean).join('\n\n')
+  // 씨앗·결함·규모는 짧고 항상 필요하다. 남는 예산만 목록 블록이 나눠 쓴다.
+  const fixed = [head, flaw, scale].filter(Boolean).join('\n\n').length
+  const b = {
+    chars: ctxBlock('[인물]', chars, 4, 14),
+    groups: ctxBlock('[집단·장소·사물]', groups, 2, 10),
+    rels: ctxBlock('[관계] → 는 단방향, ↔ 는 서로', rels, 6, 36),
+    events: ctxBlock('[사건] 시간 순, t 는 현재를 0 으로 둔 상대 시점', events, 2, 12),
+    secrets: ctxBlock('[비밀] 누가 알고 누가 모르는가', secrets, 2, 8),
+  }
+  trimCtx(Object.values(b), Math.max(400, (opts.limit || CTX_BUDGET) - fixed))
+
+  return [head, ctxText(b.chars), ctxText(b.groups), ctxText(b.rels), ctxText(b.events),
+    ctxText(b.secrets), flaw, scale].filter(Boolean).join('\n\n')
 }
 
 const STORY_SHAPE = [
-  '{"title":"이 이야기의 제목","logline":"2~3문장 요약",',
-  ' "pivot":{"title":"분기점: 무엇이 갈리는가","body":"그래프의 어느 엣지가 갈리는지 한두 문장"},',
-  ' "branches":[{"id":"A","label":"짧은 제목","tone":"방식/결과 힌트","premise":"3~4문장 전개 요약",',
+  '{"title":"제목","logline":"1~2문장 요약",',
+  ' "pivot":{"title":"무엇이 갈리는가","body":"그래프의 어느 엣지가 갈리는지 한 문장"},',
+  ' "branches":[{"id":"A","label":"짧은 제목","tone":"방식/결과 힌트","premise":"2문장 전개 요약",',
   '   "beats":["한 장면을 한 문장으로"],',
   '   "outcome":{"인물 이름":"이 분기에서 그 인물이 맞는 결과 한 줄"},',
   '   "writeback":{"nodes":[{"name":"새 사건 이름","kind":"Event","t":0,"desc":"한 줄 설명"}],',
@@ -403,9 +495,12 @@ const branchRules = (existingGraph) => {
   return [
     '규칙',
     '- branches 는 정확히 3개. id 는 A, B, C 로 붙인다.',
-    '- 각 분기의 beats 는 3~5개. 한 비트는 한 장면이고, 카메라에 보이는 일만 적는다.',
+    '- 각 분기의 beats 는 3~4개. 한 비트는 한 장면이고, 카메라에 보이는 일만 한 문장으로 적는다.',
     '- 세 분기는 서로 다른 선택이어야 한다. 같은 결말로 수렴하지 않는다.',
     '- 분기마다 writeback 이 달라야 한다. 서로 다른 엣지를 넣거나 끊는다.',
+    '- writeback.nodes 는 분기마다 최대 2개, edges 는 1~3개로 둔다.',
+    '- outcome 은 이 분기에서 실제로 달라지는 인물 2~3명만 넣는다.',
+    '- 짧게 쓴다. 같은 말을 두 번 쓰지 않고, 이미 컨텍스트에 있는 설명은 되풀이하지 않는다.',
     '- writeback.nodes 의 kind 는 다음 중 하나다: ' + GRAPH_SCHEMA.nodeKinds.join(', '),
     `- writeback 의 술어(p)는 다음 중 하나만 쓴다.\n${relLines()}`,
     `- ${GRAPH_SCHEMA.derivedRels.join(', ')} 는 쓰지 않는다. 추론은 뒤 단계가 만든다.`,
@@ -424,20 +519,18 @@ const branchRules = (existingGraph) => {
  * @param {Object|null} seed - 씨앗
  * @param {string} contextPack - contextPackPrompt 의 반환값
  * @param {Object} existingGraph - 지금 그래프 {nodes, edges}. 역기입 계획에 쓴다
- * @returns {string} Bedrock 에 그대로 넣는 프롬프트
+ * @returns {string} Bedrock 에 그대로 넣는 프롬프트. 길이는 PROMPT_MAX 이하가 보장된다
  */
 export function branchPrompt(seed, contextPack, existingGraph) {
-  return [
-    '아래 관계 그래프에서 찾은 씨앗 하나를 이야기 분기 3개로 편다.',
-    '씨앗은 그래프의 구조적 결함이다. 그 결함을 어떻게 건드리느냐에 따라 이야기가 갈린다.',
-    '',
+  return withBody(
+    [
+      '아래 관계 그래프에서 찾은 씨앗 하나를 이야기 분기 3개로 편다.',
+      '씨앗은 그래프의 구조적 결함이다. 그 결함을 어떻게 건드리느냐에 따라 이야기가 갈린다.',
+      '',
+    ],
     contextPack,
-    '',
-    JSON_ONLY,
-    STORY_SHAPE,
-    '',
-    branchRules(existingGraph),
-  ].join('\n')
+    ['', JSON_ONLY, STORY_SHAPE, '', branchRules(existingGraph)],
+  )
 }
 
 /**
@@ -451,22 +544,21 @@ export function branchPrompt(seed, contextPack, existingGraph) {
  * @returns {string} 프롬프트
  */
 export function freeDirectionPrompt(userInput, seed, contextPack, existingGraph) {
-  const dir = String(userInput || '').trim().slice(0, 2000)
-  return [
-    '아래 관계 그래프를 바탕으로 이야기 분기 3개를 만든다.',
-    '방향은 기획자가 정했다. 탐지기가 찾은 씨앗보다 기획자의 지시가 먼저다.',
-    '',
-    `[기획자의 방향]\n${dir || '(비어 있다 — 그래프에서 가장 큰 긴장을 골라 쓴다)'}`,
-    '',
+  const dir = String(userInput || '').trim().slice(0, DIR_MAX)
+  // 기획자의 방향은 머리말에 둔다 — 자리가 모자라면 컨텍스트 팩이 먼저 줄어든다
+  return withBody(
+    [
+      '아래 관계 그래프를 바탕으로 이야기 분기 3개를 만든다.',
+      '방향은 기획자가 정했다. 탐지기가 찾은 씨앗보다 기획자의 지시가 먼저다.',
+      '',
+      `[기획자의 방향]\n${dir || '(비어 있다 — 그래프에서 가장 큰 긴장을 골라 쓴다)'}`,
+      '',
+    ],
     contextPack,
-    '',
-    JSON_ONLY,
-    STORY_SHAPE,
-    '',
-    branchRules(existingGraph),
-    '- 세 분기 모두 기획자의 방향 안에 있어야 한다. 방향을 벗어난 분기는 만들지 않는다.',
-    '- 방향이 그래프의 사실과 어긋나면, 어긋나는 지점을 pivot.body 에 한 문장으로 적는다.',
-  ].join('\n')
+    ['', JSON_ONLY, STORY_SHAPE, '', branchRules(existingGraph),
+      '- 세 분기 모두 기획자의 방향 안에 있어야 한다. 방향을 벗어난 분기는 만들지 않는다.',
+      '- 방향이 그래프의 사실과 어긋나면, 어긋나는 지점을 pivot.body 에 한 문장으로 적는다.'],
+  )
 }
 
 /** 이름으로 와도 노드를 찾는다. 역기입 엣지의 s·o 는 이름으로 오는 경우가 많다 */
@@ -486,6 +578,15 @@ const findEdge = (store, e) => {
 
 /** 이 삼항이 그래프에 실제로 있나. remove_edges 검증에 쓴다 */
 const hasEdge = (store, e) => !!findEdge(store, e)
+
+/**
+ * 이 프롬프트에 얹을 컨텍스트 팩을 짠다. 예산은 두 상한 중 작은 쪽이다.
+ *  - CTX_BUDGET: 자리가 남아도 이만큼만 넣는다. 팩이 길어지면 응답도 길어져 30초를 넘긴다
+ *  - bodyRoom: 프롬프트 상한에서 머리말·규칙을 뺀 나머지. 자유 방향이 길면 이쪽이 좁다
+ * 예산으로 미리 줄이면 문장 중간이 아니라 줄 단위로 접힌다 — withBody 의 가위는 보험이다.
+ */
+const packFor = (seed, store, build) =>
+  contextPackPrompt(seed, store, { limit: Math.min(CTX_BUDGET, bodyRoom(build)) })
 
 /** 정규화 + 역기입 검증. 로컬 폴백과 모델 결과가 같은 모양으로 나오게 한다 */
 function finishStory(raw, seed, store, { local = false } = {}) {
@@ -518,12 +619,14 @@ function finishStory(raw, seed, store, { local = false } = {}) {
  * @param {Object} store - GraphStore
  * @param {Object} [opts]
  * @param {Array} [opts.pool] 로컬 폴백에 쓸 스토리 묶음 (mock/stories.json)
+ * @param {Function} [opts.onTry] 시도마다 (몇 번째, 전체) 를 받는다 — 화면에 진행을 남길 때 쓴다
  * @returns {Promise<Object>} mock/stories.json 의 스토리 하나와 같은 모양 + {warnings, local}
  */
 export async function planBranches(net, seed, store, opts = {}) {
   if (!net?.plan) return localBranches(seed, store, opts.pool)
-  const context = contextPackPrompt(seed, store)
-  const raw = await ask(net, branchPrompt(seed, context, store?.toJSON?.() || null), 4000)
+  const graph = store?.toJSON?.() || null
+  const build = (ctx) => branchPrompt(seed, ctx, graph)
+  const raw = await ask(net, build(packFor(seed, store, build)), BRANCH_TOKENS, opts.onTry)
   return finishStory(raw, seed, store)
 }
 
@@ -536,29 +639,151 @@ export async function planBranches(net, seed, store, opts = {}) {
  * @param {Object} store - GraphStore
  * @param {Object} [opts]
  * @param {Array} [opts.pool] 로컬 폴백에 쓸 스토리 묶음
+ * @param {Function} [opts.onTry] 시도마다 (몇 번째, 전체) 를 받는다 — 화면에 진행을 남길 때 쓴다
  * @returns {Promise<Object>} planBranches 와 같은 모양
  */
 export async function planFreeBranches(net, userInput, seed, store, opts = {}) {
   if (!net?.plan) return localBranches(seed, store, opts.pool, userInput)
-  const context = contextPackPrompt(seed, store)
-  const raw = await ask(net, freeDirectionPrompt(userInput, seed, context, store?.toJSON?.() || null), 4000)
+  const graph = store?.toJSON?.() || null
+  const build = (ctx) => freeDirectionPrompt(userInput, seed, ctx, graph)
+  const raw = await ask(net, build(packFor(seed, store, build)), BRANCH_TOKENS, opts.onTry)
   return finishStory(raw, seed, store)
 }
 
-export function parseJson(text) {
-  const s = String(text || '')
-  const a = s.indexOf('{')
-  const b = s.lastIndexOf('}')
-  if (a < 0 || b <= a) throw new Error('기획 결과를 읽지 못했습니다. 다시 시도해 주세요.')
-  try {
-    return JSON.parse(s.slice(a, b + 1))
-  } catch {
-    throw new Error('기획 결과가 깨져서 왔습니다. 다시 시도해 주세요.')
-  }
+// 프롬프트로 "JSON 하나만" 을 못 박아도 모델은 코드펜스를 붙이거나 앞에 한 마디를 얹고,
+// 응답 상한(stop: max_tokens)에 걸리면 문장 중간에서 끊긴다. 아래 세 단계로 살린다.
+//   unfence  → 코드펜스를 벗긴다
+//   jsonBody → 앞뒤 설명을 버리고 여는 괄호부터 남긴다
+//   repairJson → 잘린 자리를 되짚어 열린 괄호를 닫는다
+
+const FENCE = /```[a-zA-Z]*[ \t]*\r?\n?([\s\S]*?)```/
+
+/** ```json … ``` 과 ``` … ``` 을 벗긴다. 닫는 펜스가 없는(잘린) 응답도 앞만 벗겨서 넘긴다 */
+const unfence = (s) => {
+  const m = s.match(FENCE)
+  if (m) return m[1]
+  return s.replace(/```[a-zA-Z]*[ \t]*\r?\n?/, '')
 }
 
-const ask = async (net, prompt, maxTokens) =>
-  parseJson((await net.plan({ prompt, maxTokens, think: false })).text)
+/**
+ * 앞뒤 설명을 버리고 { … } 또는 [ … ] 만 남긴다. 앞에 붙은 말에도 괄호가 있을 수 있어
+ * ("아래와 같습니다 [참고]:") 두 종류를 다 후보로 두고, 먼저 열린 쪽부터 시도한다.
+ */
+const jsonBodies = (s) => [['{', '}'], ['[', ']']]
+  .map(([open, close]) => {
+    const a = s.indexOf(open)
+    if (a < 0) return null
+    const b = s.lastIndexOf(close)
+    // 닫는 괄호가 없으면 잘려 온 것이다 — 끝까지 넘기고 repairJson 이 닫는다
+    return { at: a, body: b > a ? s.slice(a, b + 1) : s.slice(a) }
+  })
+  .filter(Boolean)
+  .sort((x, y) => x.at - y.at)
+  .map((c) => c.body)
+
+/** 잘린 JSON 을 살릴 때 되짚어 볼 자리 수. 뒤에서부터 이만큼만 시도한다 */
+const REPAIR_TRIES = 80
+
+/**
+ * 잘려서 온 JSON 을 살린다. 값 하나가 온전히 끝난 자리까지만 남기고 그 시점에 열려 있던
+ * 괄호를 닫는다. 응답이 상한에서 끊겨도 앞쪽 분기까지는 건진다 — 뒤는 normalizeStory 가
+ * 경고로 남긴다. 문자열 안의 괄호·이스케이프는 세지 않는다.
+ *
+ * @param {string} s - jsonBody 를 지난 텍스트
+ * @returns {*|undefined} 살린 값. 못 살리면 undefined (최상위가 객체·배열이라 값이 될 수 없다)
+ */
+const repairJson = (s) => {
+  const cuts = []
+  const stack = []
+  let inStr = false
+  let esc = false
+  const closers = () => [...stack].reverse().join('')
+
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]
+    if (esc) { esc = false; continue }
+    if (c === '\\') { if (inStr) esc = true; continue }
+    if (c === '"') { inStr = !inStr; continue }
+    if (inStr) continue
+    if (c === '{' || c === '[') { stack.push(c === '{' ? '}' : ']'); continue }
+    if (c === '}' || c === ']') {
+      stack.pop()
+      cuts.push({ at: i + 1, tail: closers() })
+      continue
+    }
+    // 쉼표 앞은 값 하나가 온전히 끝난 자리다. 꼬리 쉼표도 여기서 같이 걸러진다
+    if (c === ',') cuts.push({ at: i, tail: closers() })
+  }
+
+  for (let i = cuts.length - 1; i >= 0 && i > cuts.length - 1 - REPAIR_TRIES; i--) {
+    try {
+      return JSON.parse(s.slice(0, cuts[i].at) + cuts[i].tail)
+    } catch {
+      // 이 자리로는 안 됐다 — 한 칸 더 앞으로 물러난다
+    }
+  }
+  return undefined
+}
+
+/**
+ * 모델 응답에서 JSON 을 꺼낸다. 코드펜스·앞뒤 설명·잘린 꼬리를 모두 견딘다.
+ *
+ * @param {string} text - net.plan 이 준 text
+ * @returns {Object|Array} 파싱한 값
+ * @throws {Error} 여는 괄호조차 없거나, 되짚어도 살리지 못한 경우
+ */
+export function parseJson(text) {
+  const bodies = jsonBodies(unfence(String(text ?? '')))
+  if (!bodies.length) throw new Error('기획 결과를 읽지 못했습니다. 다시 시도해 주세요.')
+  for (const body of bodies) {
+    try {
+      return JSON.parse(body)
+    } catch {
+      // 그대로는 안 됐다 — 잘린 자리를 되짚어 본다
+    }
+    const fixed = repairJson(body)
+    if (fixed !== undefined) return fixed
+  }
+  throw new Error('기획 결과가 깨져서 왔습니다. 다시 시도해 주세요.')
+}
+
+/** 응답을 못 읽었을 때 다시 물어보는 횟수 (첫 시도 포함) */
+const ASK_TRIES = 3
+/** 실패한 응답을 콘솔에 남길 때의 글자 수 */
+const RAW_LOG = 500
+/** 상한에서 잘려 온 뒤 다시 물어볼 때 덧붙이는 한 줄 */
+const SHORTER = '\n- 앞 요청의 답이 길어서 잘렸다. 같은 모양의 JSON 을 더 짧게 쓴다.'
+  + ' 설명은 한 문장으로 줄이고 항목 수도 최소로 한다.'
+
+/**
+ * 프롬프트를 보내고 JSON 을 받는다. 못 읽으면 원문을 콘솔에 남기고 다시 물어본다.
+ * 같은 프롬프트를 그대로 다시 보내면 같은 자리에서 또 잘리므로, 상한에 걸렸을 때는
+ * 더 짧게 쓰라는 한 줄을 붙여서 보낸다.
+ *
+ * @param {Function} [onTry] 시도마다 (몇 번째, 전체) 를 받는다. 화면에 진행을 남길 때 쓴다
+ */
+const ask = async (net, prompt, maxTokens, onTry) => {
+  let last = null
+  let cut = false
+  for (let i = 1; i <= ASK_TRIES; i++) {
+    onTry?.(i, ASK_TRIES)
+    const res = await net.plan({ prompt: cut ? prompt + SHORTER : prompt, maxTokens, think: false })
+    const text = String(res?.text ?? '')
+    try {
+      return parseJson(text)
+    } catch (err) {
+      cut = res?.stop === 'max_tokens'
+      // 원문을 남긴다. 어떤 모양으로 오는지 모르면 이 실패는 재현이 안 된다
+      console.warn(`[story] 기획 결과를 읽지 못했다 (${i}/${ASK_TRIES})`
+        + ` stop=${res?.stop || '?'} ${text.length}자: ${err.message}`)
+      console.log('[story] Bedrock raw:', text.slice(0, RAW_LOG))
+      last = cut
+        ? new Error('기획 결과가 응답 상한에서 잘렸습니다. 다시 시도해 주세요.')
+        : err
+    }
+  }
+  throw last
+}
 
 export async function planOutline(net, spec, ctx) {
   if (!net?.plan) return localOutline(spec, ctx)
@@ -1094,6 +1319,10 @@ export function validateWritebackBeforeApply(store, writeback) {
  * 끊기 → 노드 → 엣지 순으로 얹는다. 엣지가 새 노드를 가리킬 수 있어서 노드가 먼저다.
  * 파생 엣지는 GraphStore 가 매번 다시 만들기 때문에, 끊은 명시 엣지에서 나왔던
  * 파생도 함께 사라진다 (진우 serves 귀마 를 끊으면 귀마 rival_of 루미 도 사라진다).
+ *
+ * Neptune 판 저장소를 받아도 이 함수는 동기다 — 저장소가 판을 바로 고치고 Neptune
+ * 왕복만 뒤로 미룬다. 저장까지 끝났는지 알아야 하는 화면은 뒤이어 store.flush() 를
+ * 기다린다 (story-graph.html 의 applyToBoard).
  *
  * @param {Object} store - GraphStore. 이 함수가 직접 바꾼다
  * @param {Object} writeback - branch.writeback ({nodes, edges, remove_edges} 또는 add_* 스키마)

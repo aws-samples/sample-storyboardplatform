@@ -1,10 +1,15 @@
 
-// 인메모리 관계 그래프 엔진.
+// 관계 그래프 엔진. 판은 브라우저에 두고, 사실은 Neptune 에 남긴다.
 //
 // 그래프를 브라우저 메모리에 색인해 두고 씨앗 탐지기가 쓰는 조회를 제공한다.
-// Neptune 으로 옮길 때 이 파일만 갈아끼우면 되도록, 바깥에서 보이는 것은
-// createGraphStore 와 store 의 메서드 이름·인자·반환 모양뿐이다.
-// 조회는 전부 동기다. Neptune 판에서는 같은 이름의 async 메서드가 된다.
+// 바깥에서 보이는 것은 createGraphStore 와 store 의 메서드 이름·인자·반환 모양뿐이다.
+//
+// 두 가지 모드가 있고, 고르는 것은 net.js 의 graphClient() 를 넘겨 주는지다
+// (story.js 가 net 을 인자로 받는 것과 같은 방식이다. 이 파일은 통신을 모른다).
+//   인메모리  net 이 없을 때. 로컬·테스트. 그래프가 이 파일 안에서만 산다
+//   Neptune   net 이 있을 때. 조회는 그대로 색인에서 답하고, 바뀐 것만 뒤에서 흘려보낸다
+// 어느 쪽이든 조회와 변경은 전부 동기다 — 탐지기 한 바퀴가 수백 번을 물어보므로
+// 그때마다 왕복하면 화면이 멈춘다. 저장이 끝났는지는 flush() 로 확인한다.
 
 import { deriveEdges, edgeKey } from './graph-schema.js'
 import { normalizeGraph } from './core.js'
@@ -18,6 +23,12 @@ const isDerived = (e) => e?.asserted === false || !!e?.derived
 /** removeEdges 인자를 키로 만든다. "s|p|o" 문자열과 {s,p,o} 객체를 모두 받는다 */
 const keyOf = (v) => (typeof v === 'string' ? v : v && typeof v === 'object' ? edgeKey(v) : '')
 
+/** removeEdges 인자를 삼항으로 되돌린다. Neptune 판이 지울 엣지를 가리킬 때 쓴다 */
+const tripleOf = (v) => {
+  const [s, p, o] = keyOf(v).split('|')
+  return s && p && o ? { s, p, o } : null
+}
+
 const push = (map, k, v) => {
   const cur = map.get(k)
   if (cur) cur.push(v)
@@ -26,6 +37,14 @@ const push = (map, k, v) => {
 
 class GraphStore {
   constructor(nodes, edges, warnings) {
+    this.load(nodes, edges, warnings)
+  }
+
+  /**
+   * 노드·엣지를 사실로 앉히고 색인을 세운다. 처음 만들 때와, Neptune 판에서
+   * 저장소를 다시 읽어올 때가 같은 길을 지난다.
+   */
+  load(nodes, edges, warnings) {
     /** @type {Array} 노드. 들어온 순서를 유지한다 */
     this.nodes = nodes
     /** @type {Array<string>} 정규화가 남긴 경고. UI 에 그대로 띄운다 */
@@ -285,25 +304,141 @@ class GraphStore {
   }
 }
 
+/** 프로젝트를 따로 두지 않은 화면이 쓰는 기본 키. Neptune 쪽 projectId 와 같다 */
+export const DEFAULT_PROJECT = 'default'
+
+/**
+ * Neptune 을 사실로 두는 저장소.
+ *
+ * 조회는 부모(GraphStore)의 색인을 그대로 쓴다 — 씨앗 탐지기 12종은 한 번 도는 데
+ * 수백 번을 물어보므로, 그때마다 Neptune 을 왕복하면 화면이 멈춘다. 그래서 판은
+ * 브라우저에 두고, Neptune 에는 바뀐 것만 뒤에서 흘려보낸다.
+ *
+ * 그래서 변경 메서드의 반환은 인메모리 판과 똑같이 동기다. 저장이 끝났는지 알아야
+ * 하는 자리(역기입을 확정하는 화면)에서만 flush() 를 기다린다.
+ */
+class NeptuneGraphStore extends GraphStore {
+  constructor(nodes, edges, warnings, net, projectId) {
+    super(nodes, edges, warnings)
+    this.net = net
+    this.projectId = projectId
+    /** 아직 안 끝난 저장. 순서를 지키려고 한 줄로 잇는다 */
+    this.pending = Promise.resolve()
+    /** flush 가 걷어 가는 저장 실패 목록 */
+    this.failures = []
+  }
+
+  /** Neptune 왕복을 줄에 세운다. 실패는 삼키지 않고 flush 가 돌려줄 자리에 쌓는다 */
+  queue(label, run) {
+    this.pending = this.pending.then(run).catch((err) => {
+      const msg = `Neptune ${label} 실패 — 화면은 그대로지만 저장되지 않았다: ${err.message}`
+      this.failures.push(msg)
+      this.warnings.push(msg)
+    })
+    return this.pending
+  }
+
+  /**
+   * 줄에 선 저장이 끝날 때까지 기다린다.
+   * @returns {Promise<{failures: Array<string>}>} 쌓였던 실패. 한 번 걷으면 비워진다
+   */
+  async flush() {
+    await this.pending
+    return { failures: this.failures.splice(0) }
+  }
+
+  /** 지금 판을 Neptune 에 통째로 밀어 넣는다. 추출 직후처럼 판이 새로 앉을 때 부른다 */
+  save() {
+    const nodes = this.nodes.map((n) => ({ ...n, props: asProps(n.props) }))
+    const edges = this.getEdges({ asserted: true })
+    return this.queue('그래프 저장', () => this.net.save({ projectId: this.projectId, nodes, edges }))
+  }
+
+  /** Neptune 을 다시 읽어 판을 갈아 앉힌다. 파생 엣지는 여기서 규칙이 다시 만든다 */
+  async reload() {
+    await this.pending
+    const data = await this.net.load(this.projectId)
+    const g = normalizeGraph({ nodes: asList(data?.nodes), edges: asList(data?.edges) })
+    this.load(g.nodes, g.edges, g.warnings)
+    return this
+  }
+
+  addNodes(nodes) {
+    const r = super.addNodes(nodes)
+    if (r.added.length) {
+      this.queue('노드 추가', () => this.net.update({ projectId: this.projectId, addNodes: r.added }))
+    }
+    return r
+  }
+
+  addEdges(edges) {
+    const r = super.addEdges(edges)
+    // 파생 엣지는 보내지 않는다. 규칙이 브라우저에서 다시 만든다
+    const asserted = r.added.filter((e) => !isDerived(e))
+    if (asserted.length) {
+      this.queue('엣지 추가', () => this.net.update({ projectId: this.projectId, addEdges: asserted }))
+    }
+    return r
+  }
+
+  removeEdges(edgeIds) {
+    // 부모가 지우고 나면 어떤 삼항이었는지 알 수 없으니 먼저 풀어 둔다
+    const triples = asList(edgeIds).map(tripleOf).filter(Boolean)
+    const dropped = super.removeEdges(edgeIds)
+    if (dropped && triples.length) {
+      this.queue('엣지 삭제', () => this.net.update({ projectId: this.projectId, removeEdges: triples }))
+    }
+    return dropped
+  }
+}
+
+/** 저장소 한 개를 만든다. net 이 있으면 Neptune 판, 없으면 인메모리 판 */
+function make(src, normalize, net, projectId) {
+  // {nodes:[], edges:[]} 도 정상 입력이다. 경고 없이 빈 저장소가 나온다
+  const g = normalize ? normalizeGraph(src) : {
+    nodes: asList(src.nodes).map((n) => ({ ...n, props: asProps(n.props) })),
+    edges: asList(src.edges),
+    warnings: [],
+  }
+  return net
+    ? new NeptuneGraphStore(g.nodes, g.edges, g.warnings, net, projectId)
+    : new GraphStore(g.nodes, g.edges, g.warnings)
+}
+
 /**
  * 그래프 JSON 을 색인해 조회용 저장소로 만든다.
  * 입력의 명시 엣지에 deriveEdges 의 파생 엣지를 붙여서 들고 있는다. 입력에 파생
  * 엣지가 이미 있어도 규칙이 만든 것과 겹치면 한 번만 남는다.
  *
+ * net 을 넘기면 Neptune 을 사실로 두는 저장소가 나온다. 메서드 이름·인자·반환
+ * 모양은 인메모리 판과 같고, save()·reload()·flush() 만 더 있다.
+ *
  * @param {Object} graphJson - {nodes, edges}. mock/graph.json 과 같은 모양
  * @param {Object} [opts]
  * @param {boolean} [opts.normalize=true] normalizeGraph 를 한 번 거칠지.
  *        이미 정규화된 데이터면 결과가 같고 경고만 빈 배열로 나온다
- * @returns {GraphStore}
+ * @param {Object|null} [opts.net] net.js 의 graphClient(). 없으면 인메모리로 돈다
+ * @param {string} [opts.projectId] Neptune 에서 이 그래프를 가리키는 키
+ * @returns {GraphStore|NeptuneGraphStore}
  */
-export function createGraphStore(graphJson, { normalize = true } = {}) {
+export function createGraphStore(graphJson, { normalize = true, net = null, projectId = DEFAULT_PROJECT } = {}) {
   const src = graphJson && typeof graphJson === 'object' ? graphJson : { nodes: [], edges: [] }
-  if (!normalize) {
-    return new GraphStore(asList(src.nodes).map((n) => ({ ...n, props: asProps(n.props) })), asList(src.edges), [])
-  }
-  // {nodes:[], edges:[]} 도 정상 입력이다. 경고 없이 빈 저장소가 나온다
-  const g = normalizeGraph(src)
-  return new GraphStore(g.nodes, g.edges, g.warnings)
+  return make(src, normalize, net, projectId)
 }
 
-export { GraphStore }
+/**
+ * Neptune 에 남아 있는 그래프를 읽어 저장소로 만든다. 새로고침해도 판이 남는 길이다.
+ *
+ * @param {Object} [opts]
+ * @param {Object|null} [opts.net] net.js 의 graphClient()
+ * @param {string} [opts.projectId]
+ * @returns {Promise<NeptuneGraphStore|null>} net 이 없으면 null — 부르는 쪽은
+ *          목데이터로 판을 채운다. 저장된 것이 없으면 노드 0개인 저장소가 나온다
+ */
+export async function loadGraphStore({ net = null, projectId = DEFAULT_PROJECT } = {}) {
+  if (!net) return null
+  const data = await net.load(projectId)
+  return make({ nodes: asList(data?.nodes), edges: asList(data?.edges) }, true, net, projectId)
+}
+
+export { GraphStore, NeptuneGraphStore }

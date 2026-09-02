@@ -1,0 +1,9 @@
+{
+  "name": "storyboard-graph",
+  "private": true,
+  "description": "Neptune Gremlin 쿼리 Lambda. 배포 전에 이 디렉터리에서 npm install 을 한 번 돌려야 한다 — CDK 가 디렉터리를 그대로 올린다.",
+  "main": "index.js",
+  "dependencies": {
+    "gremlin": "3.7.3"
+  }
+}

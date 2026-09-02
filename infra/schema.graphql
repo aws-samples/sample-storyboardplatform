@@ -27,11 +27,20 @@ type Presence {
 type Query {
   listOps(boardId: ID!, since: String, nextToken: String): OpPage!
   plan(spec: AWSJSON!): AWSJSON!
+
+  # 관계 그래프. Neptune 을 도는 Lambda 가 받는다.
+  # loadGraph 는 {nodes, edges}, queryGraph 는 spec.type 에 따라 모양이 달라진다.
+  loadGraph(projectId: String): AWSJSON!
+  queryGraph(spec: AWSJSON!): AWSJSON!
 }
 
 type Mutation {
   publishOp(boardId: ID!, id: ID!, ts: String!, actor: ID!, body: String!): Op!
   publishPresence(boardId: ID!, actor: ID!, body: String!): Presence!
+
+  # saveGraph 는 프로젝트를 통째로 덮어쓰고, updateGraph 는 역기입 한 묶음을 얹는다
+  saveGraph(spec: AWSJSON!): AWSJSON!
+  updateGraph(spec: AWSJSON!): AWSJSON!
 }
 
 type Subscription {
