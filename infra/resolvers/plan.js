@@ -1,7 +1,7 @@
 import { util } from '@aws-appsync/utils'
 
 const ROLES = ['planner', 'director']
-const MODEL = 'us.anthropic.claude-sonnet-5'
+const MODEL = 'us.anthropic.claude-sonnet-4-6'
 const SYSTEM = '당신은 광고·단편 영상의 콘티 기획자다. 요청받은 JSON 하나만 출력한다. 설명·머리말·코드펜스를 붙이지 않는다.'
 
 export function request(ctx) {
@@ -13,7 +13,8 @@ export function request(ctx) {
   if (prompt.length < 8 || prompt.length > 8000) {
     util.error('프롬프트 길이가 8~8000자여야 합니다', 'BadRequest')
   }
-  const want = Number(spec.maxTokens)
+  // AppSync JS 런타임에는 Number() 가 없다(INVALID_FUNCTION_INVOCATION). 단항 + 로 강제한다.
+  const want = +spec.maxTokens
   const maxTokens = Math.min(4000, Math.max(300, Number.isFinite(want) ? Math.round(want) : 2000))
 
   const body = {
