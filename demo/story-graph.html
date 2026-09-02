@@ -29,6 +29,8 @@
 
   textarea { width: 100%; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; font-family: inherit; font-size: 11.5px; line-height: 1.6; padding: 8px; resize: vertical; }
   textarea:focus { outline: none; border-color: #58a6ff; }
+  select { width: 100%; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; font-family: inherit; font-size: 11.5px; padding: 6px 7px; }
+  select:focus { outline: none; border-color: #58a6ff; }
 
   /* 그래프 위에 얹는 카드 */
   .card { position: absolute; z-index: 5; background: #161b22ee; border: 1px solid #30363d; border-radius: 8px; padding: 12px; backdrop-filter: blur(3px); }
@@ -135,6 +137,24 @@
   .cmp td.on { background: #1c1014; color: #ffb3a0; }
   details.warns { margin-top: 10px; font-size: 10.5px; color: #e3b341; }
   details.warns ul { margin: 6px 0 0 14px; color: #8b949e; line-height: 1.6; }
+
+  /* 분기 → 대본 생성 · 대본화 */
+  .ok { font-size: 10.5px; color: #3fb950; line-height: 1.6; margin-top: 6px; }
+  .opt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 11px; }
+  .opt-grid label { font-size: 10px; color: #8b949e; display: flex; flex-direction: column; gap: 3px; }
+  .opt-grid label.wide { grid-column: 1 / -1; }
+  .step-bar { display: flex; gap: 4px; margin-bottom: 12px; }
+  .step { flex: 1; font-size: 9.5px; text-align: center; padding: 4px 2px; border-radius: 4px; background: #21262d; border: 1px solid #30363d; color: #6e7681; }
+  .step.done { border-color: #1a7f37; color: #3fb950; }
+  .step.on { background: #1c1014; border-color: #f78166; color: #ffb3a0; }
+  .cut-row { border: 1px solid #21262d; border-radius: 6px; padding: 7px 9px; margin-bottom: 6px; font-size: 10.5px; line-height: 1.6; }
+  .cut-row .hd { display: flex; flex-wrap: wrap; gap: 7px; font-size: 9.5px; color: #6e7681; margin-bottom: 3px; }
+  .cut-row .hd .no { color: #8b949e; font-weight: 600; }
+  .cut-row .ac { color: #c9d1d9; }
+  .cut-row .dl { color: #79c0ff; }
+  pre.script { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 11px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; line-height: 1.8; color: #e6edf3; white-space: pre-wrap; word-break: break-word; max-height: 44vh; overflow: auto; }
+  .ep-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 11px; }
+  .ep-chips .branch-chip { flex: 0 0 auto; padding: 5px 9px; }
 </style>
 </head>
 <body>
@@ -190,6 +210,7 @@
     <div class="tabs">
       <div class="tab active" data-tab="seeds">씨앗</div>
       <div class="tab" data-tab="story">스토리</div>
+      <div class="tab" data-tab="script">대본화</div>
     </div>
     <div id="panel-seeds" class="panel active">
       <div class="panel-scroll" id="seedsList"></div>
@@ -197,19 +218,31 @@
     <div id="panel-story" class="panel">
       <div class="panel-scroll" id="storyPanel"><div class="placeholder">씨앗을 골라 스토리를 생성합니다.</div></div>
     </div>
+    <div id="panel-script" class="panel">
+      <div class="panel-scroll" id="scriptPanel"></div>
+    </div>
   </div>
 </div>
 
 <script src="./aws-config.js"></script>
 <script type="module">
-// 대본 → 그래프 → 씨앗 → 분기까지를 한 화면에서 돌린다.
+// 대본 → 그래프 → 씨앗 → 분기 → 대본 → 역기입 → 대본화까지를 한 화면에서 돌린다.
 //   그래프  mock/graph.json 을 읽거나, 대본에서 planGraph 로 뽑는다
 //   씨앗    graph-probes.js 의 탐지기 12종 (?seeds=mock 이면 mock/seeds.json)
 //   분기    planBranches / planFreeBranches. Bedrock 이 없으면 로컬 폴백
+//   대본    branchToSpec → planBranchOutline → planCuts. 기존 기획 파이프라인 그대로다
+//   역기입  applyWriteback. 그래프가 자라고 씨앗이 다시 뽑힌다 (루프의 고리)
+//   대본화  planScript. 컷을 드라마·영화·웹드라마 대본 텍스트로 옮긴다
 // 조회는 전부 graph-engine.js 의 GraphStore 를 거친다. Neptune 이 붙으면 그 파일만 바뀐다.
 import { createGraphStore } from './graph-engine.js'
 import { findSeeds, PROBES } from './graph-probes.js'
-import { planGraph, planBranches, planFreeBranches, scriptToText } from './story.js'
+import {
+  planGraph, planBranches, planFreeBranches, scriptToText,
+  branchToSpec, planBranchOutline, planCuts,
+  applyWriteback, validateWritebackBeforeApply,
+  planScript, scriptBlob, scriptFileName, SCRIPT_FORMATS,
+  GENRES, TONES, LENGTHS, CUTCOUNTS,
+} from './story.js'
 import { planClient } from './net.js'
 
 const $ = (id) => document.getElementById(id)
@@ -235,6 +268,9 @@ let MOCK_SEEDS = []
 let CUR = { seed: -1, branch: 0 }
 let VIS = null
 let showAllSeeds = false
+let EXPAND = null       // 분기 → 대본 흐름의 상태. null 이면 분기 화면을 그린다
+let EPISODES = []       // 이 화면에서 만든 회차. 대본화 탭이 여기서 컷을 가져온다
+let SCRIPT = { ep: 0, format: 'drama', text: '', busy: false, err: '' }
 
 // ── 데이터 읽기 ───────────────────────────────────────────────────────────────
 async function loadJson(path) {
@@ -271,9 +307,13 @@ function build(graph, { keepSeeds = null } = {}) {
   STORIES = new Map()
   CUR = { seed: -1, branch: 0 }
   showAllSeeds = false
+  EXPAND = null
+  EPISODES = []
+  SCRIPT = { ep: 0, format: SCRIPT.format, text: '', busy: false, err: '' }
   renderStats()
   renderNetwork()
   renderSeeds()
+  renderScriptPanel()
   renderFreeOnly(SEEDS.length
     ? '씨앗을 골라 스토리를 생성합니다. 방향이 이미 있다면 아래에 바로 적어도 됩니다.'
     : '탐지된 씨앗이 없습니다. 방향을 직접 주면 그래프 전체를 컨텍스트로 분기를 만듭니다.')
@@ -403,6 +443,7 @@ function renderSeeds() {
 const openTab = (name) => {
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name))
   document.querySelectorAll('.panel').forEach((p) => p.classList.toggle('active', p.id === `panel-${name}`))
+  if (name === 'script') renderScriptPanel()
 }
 
 /** 지금 보고 있는 스토리의 캐시 키. 씨앗을 안 골랐으면 자유 입력 자리다 */
@@ -410,6 +451,7 @@ const curKey = () => (CUR.seed >= 0 ? String(CUR.seed) : 'free')
 
 async function pickSeed(i) {
   CUR = { seed: i, branch: 0 }
+  EXPAND = null
   renderSeeds()
   openTab('story')
   highlight(SEEDS[i].focus || [])
@@ -483,14 +525,19 @@ function bindFree() {
     // 씨앗을 골랐으면 그 씨앗의 분기를 방향대로 다시 만들고, 안 골랐으면 자유 입력 자리에 넣는다
     const seed = CUR.seed >= 0 ? SEEDS[CUR.seed] : null
     CUR = { ...CUR, branch: 0 }
+    EXPAND = null
     generate(() => planFreeBranches(NET, text, seed, STORE, { pool: POOL }), curKey(),
       '기획자의 방향으로 다시 만들고 있습니다')
   }
 }
 
 function renderStory() {
+  if (EXPAND) return renderExpand()
   const st = STORIES.get(curKey())
-  if (!st) return
+  if (!st) {
+    renderFreeOnly('씨앗을 골라 스토리를 생성합니다. 방향이 이미 있다면 아래에 바로 적어도 됩니다.')
+    return
+  }
   const seed = CUR.seed >= 0 ? SEEDS[CUR.seed] : null
   if (!st.branches.length) {
     $('storyPanel').innerHTML = `<div class="story-content">
@@ -568,7 +615,7 @@ function renderStory() {
       <div class="wb-sum">+ 노드 <b>${c.n}</b> · + 엣지 <b>${c.e}</b> · − 엣지 <i>${c.x}</i></div>
       <div class="wb-box">${wbNodes}${wbEdges}${wbCuts || ''}</div>
       <div class="card__row"><button class="btn btn--wide" id="expandBtn">이 분기로 대본 생성</button></div>
-      <div class="hint" id="expandNote">선택한 분기를 컷으로 펼치고 역기입을 확정하는 단계는 다음 스텝에서 붙습니다.</div>
+      <div class="hint" id="expandNote">이 분기를 개요 → 컷으로 펼치고, 판에 붙일 때 위 역기입을 그래프에 적용합니다.</div>
 
       <div class="sec-label">분기 비교</div>
       ${cmp}
@@ -583,17 +630,380 @@ function renderStory() {
   bindFree()
 }
 
+// ── 고른 분기 → 대본 ─────────────────────────────────────────────────────────
+// 새 생성 경로를 만들지 않는다. 기존 기획 파이프라인을 그대로 지난다:
+//   branchToSpec → planBranchOutline (개요) → planCuts (컷 확장) → 판에 붙이기
+// 판에 붙이는 자리에서 applyWriteback 으로 그래프가 자라고 씨앗이 다시 뽑힌다.
+
+const STEPS = [
+  { id: 'options', label: '옵션' },
+  { id: 'outline', label: '개요' },
+  { id: 'cuts', label: '컷' },
+  { id: 'done', label: '판에 붙이기' },
+]
+
+const OPT_DEFAULT = { mode: 'next', genre: GENRES[0], tone: TONES[0], secs: 60, cuts: CUTCOUNTS[1] }
+
+const sel = (id, list, now, label = (v) => v) => `<select id="${id}">${list.map((v) =>
+  `<option value="${esc(v)}" ${String(v) === String(now) ? 'selected' : ''}>${esc(label(v))}</option>`).join('')}</select>`
+
+const secsLabel = (v) => (v >= 60 ? `${v / 60}분` : `${v}초`)
+
+/** 컷 하나를 목록 한 줄로. 컷 확장 결과와 대본화 탭이 같은 모양을 쓴다 */
+const cutRow = (raw, n) => {
+  const c = raw || {}
+  const cast = (c.cast || []).filter(Boolean)
+  return `<div class="cut-row">
+    <div class="hd"><span class="no">${n + 1}</span><span>${esc(c.scene || `S${n + 1}`)}</span>
+      ${c.camera ? `<span>${esc(c.camera)}</span>` : ''}<span>${Number(c.secs) || 0}초</span>
+      ${cast.length ? `<span>${esc(cast.join(', '))}</span>` : ''}</div>
+    ${c.action ? `<div class="ac">${esc(c.action)}</div>` : ''}
+    ${c.dialogue ? `<div class="dl">“${esc(c.dialogue)}”</div>` : ''}
+  </div>`
+}
+
 /**
- * 다음 단계(대본 확장 + 역기입 확정)로 넘기는 자리.
- * 지금은 넘길 것을 콘솔에 찍고 화면에 요약만 남긴다.
+ * 이 화면의 기획 컨텍스트. app.js 의 planCtx() 자리다.
+ * 보드가 없으니 스토리와 그래프의 인물에서 만든다.
  */
+function expandCtx(x) {
+  const chars = (STORE ? STORE.getNodes({ kind: 'Character' }) : []).map((n) => ({
+    name: n.name,
+    brief: [n.props?.role, n.props?.desc].filter(Boolean).join(' · ') || '설명 없음',
+  }))
+  const focus = (x.seed?.focus || []).map((id) => STORE?.getNode(id)).find((n) => n?.kind === 'Character')
+  return {
+    title: x.story?.title || '',
+    scenario: [x.story?.logline, x.story?.pivot?.body].filter(Boolean).join('\n'),
+    chars,
+    centerName: focus?.name || chars[0]?.name || '',
+  }
+}
+
+/** "이 분기로 대본 생성" 을 누른 자리. 역기입을 미리 점검해 두고 옵션부터 묻는다 */
 function expandToScript(seed, story, branch) {
-  const c = wbCount(branch)
-  const payload = { seed, title: story.title, branch, graph: STORE.toJSON() }
-  console.info('[story-graph] 다음 단계로 넘길 것', payload)
-  $('expandNote').innerHTML = `<span style="color:#3fb950">${esc(branch.id)}. ${esc(branch.label)}</span> 를 골랐습니다 — `
-    + `비트 ${branch.beats.length}개, 역기입 + 노드 ${c.n} · + 엣지 ${c.e} · − 엣지 ${c.x}. `
-    + '대본 확장은 다음 스텝에서 붙습니다 (넘길 내용은 콘솔에 찍었습니다).'
+  EXPAND = {
+    seed, story, branch,
+    step: 'options', busy: '', err: '',
+    opts: { ...OPT_DEFAULT },
+    check: validateWritebackBeforeApply(STORE, branch.writeback),
+    spec: null, outline: null, cuts: null, applied: null, epIndex: null,
+  }
+  renderExpand()
+}
+
+/** 역기입 미리보기. 옵션 단계와 컷 단계에서 같은 것을 보여 준다 */
+function wbPreview(x) {
+  const p = x.check.preview
+  const bad = x.check.warnings
+  return `<div class="wb-sum">역기입 미리보기 — + 노드 <b>${p.nodesAdded}</b> · + 엣지 <b>${p.edgesAdded}</b>
+      · − 엣지 <i>${p.edgesRemoved}</i></div>
+    ${x.check.safe ? '' : '<div class="warn">넣을 수 없는 항목이 있습니다. 그 항목만 빼고 적용합니다.</div>'}
+    ${bad.length ? `<details class="warns"><summary>역기입 점검 ${bad.length}건</summary>
+      <ul>${bad.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></details>` : ''}`
+}
+
+function renderExpand() {
+  const x = EXPAND
+  if (!x) return renderStory()
+  const at = STEPS.findIndex((s) => s.id === x.step)
+  const head = `
+    <div class="seed-info">
+      <span class="probe-tag">${esc(x.branch.id)}. ${esc(x.branch.label)}</span>
+      <span>${esc(x.story.title || '분기에서 대본 만들기')}</span>
+    </div>
+    <div class="step-bar">${STEPS.map((s, i) =>
+      `<div class="step ${i === at ? 'on' : i < at ? 'done' : ''}">${esc(s.label)}</div>`).join('')}</div>`
+
+  if (x.busy) {
+    $('storyPanel').innerHTML = `<div class="story-content">${head}
+      <div class="busy"><span class="spin"></span>${x.busy === 'outline'
+        ? '분기를 개요로 짜고 있습니다… 10초쯤 걸립니다.'
+        : `비트를 컷 ${x.spec.cuts}개로 펼치고 있습니다… 10초쯤 걸립니다.`}${NET ? '' : ' (로컬 모드)'}</div></div>`
+    return
+  }
+
+  const err = x.err ? `<div class="err">${esc(x.err)}</div>` : ''
+  const body = { options: expandOptions, outline: expandOutline, cuts: expandCuts, done: expandDone }[x.step](x)
+  $('storyPanel').innerHTML = `<div class="story-content">${head}${err}${body}</div>`
+  bindExpand()
+}
+
+const expandOptions = (x) => `
+  <div class="sec-label">이 분기로 대본 만들기</div>
+  ${wbPreview(x)}
+  <div class="opt-grid">
+    <label class="wide">형식${sel('exMode', ['next', 'spin'], x.opts.mode,
+      (v) => (v === 'next' ? '새 회차 — 인물과 앞 사건을 이어서' : '스핀오프 — 한 인물을 주인공으로 갈라'))}</label>
+    <label>장르${sel('exGenre', GENRES, x.opts.genre)}</label>
+    <label>톤${sel('exTone', TONES, x.opts.tone)}</label>
+    <label>러닝타임${sel('exSecs', LENGTHS, x.opts.secs, secsLabel)}</label>
+    <label>씬 수${sel('exCuts', CUTCOUNTS, x.opts.cuts, (v) => `${v}컷`)}</label>
+  </div>
+  <div class="card__row">
+    <button class="btn btn--wide" id="exGo">생성</button>
+    <button class="btn btn--line" id="exBack">분기로</button>
+  </div>
+  <div class="hint">개요를 먼저 보여드립니다. 판에 붙이는 것과 역기입은 그다음입니다.</div>`
+
+const expandOutline = (x) => {
+  const o = x.outline
+  const secs = o.beats.reduce((s, b) => s + (Number(b.secs) || 0), 0)
+  return `
+    ${o.local ? '<div class="warn">로컬 모드 개요입니다 — 분기의 비트를 그대로 세운 뼈대입니다.</div>' : ''}
+    <h1>${esc(o.title || '제목 없음')}</h1>
+    <div class="logline">${esc(o.logline)}</div>
+    ${o.synopsis ? `<div class="branch-premise">${esc(o.synopsis)}</div>` : ''}
+    ${o.chars.length ? `<div class="sec-label">새로 만들 인물 ${o.chars.length}명</div>
+      ${o.chars.map((c) => `<div class="beat"><span class="no">＋</span><span><b>${esc(c.name)}</b> ${esc(c.brief)}</span></div>`).join('')}` : ''}
+    <div class="sec-label">비트 ${o.beats.length}개 · ${Math.round(secs)}초</div>
+    ${o.beats.map((b, n) => `<div class="beat"><span class="no">${n + 1}</span>
+      <span>${esc(b.scene || `S${n + 1}`)} — ${esc(b.action)}${b.cast.length ? ` (${esc(b.cast.join(', '))})` : ''}</span></div>`).join('')}
+    <div class="card__row">
+      <button class="btn btn--wide" id="exCuts">이 개요로 컷 ${x.spec.cuts}개 만들기</button>
+    </div>
+    <div class="card__row">
+      <button class="btn btn--line" id="exAgain">개요 다시</button>
+      <button class="btn btn--line" id="exOpts">옵션 고치기</button>
+      <button class="btn btn--line" id="exBack">분기로</button>
+    </div>`
+}
+
+const expandCuts = (x) => {
+  const secs = x.cuts.reduce((s, c) => s + (Number(c.secs) || 0), 0)
+  return `
+    <h1>${esc(x.outline.title || '제목 없음')}</h1>
+    <div class="logline">${x.opts.mode === 'spin' ? '스핀오프' : '새 회차'} · 컷 ${x.cuts.length}개 · ${Math.round(secs)}초</div>
+    ${wbPreview(x)}
+    <div class="card__row">
+      <button class="btn btn--wide" id="exApply">판에 붙이고 역기입 적용</button>
+    </div>
+    <div class="card__row">
+      <button class="btn btn--line" id="exExport">대본으로 내보내기</button>
+      <button class="btn btn--line" id="exRecut">컷 다시</button>
+      <button class="btn btn--line" id="exBack">분기로</button>
+    </div>
+    <div class="hint">판에 붙이면 위 역기입이 그래프에 적용되고 씨앗을 다시 뽑습니다.
+      대본으로 내보내기만 하면 그래프는 그대로 둡니다.</div>
+    <div class="sec-label">컷 ${x.cuts.length}개</div>
+    ${x.cuts.map(cutRow).join('')}`
+}
+
+const expandDone = (x) => {
+  const a = x.applied.applied
+  const n = x.applied.newSeeds.length
+  return `
+    <div class="ok">${esc(x.outline.title || '새 회차')} 를 판에 붙였습니다 — 컷 ${x.cuts.length}개.</div>
+    <div class="sec-label">그래프에 적용한 역기입</div>
+    <div class="wb-sum">+ 노드 <b>${a.nodesAdded}</b> · + 엣지 <b>${a.edgesAdded}</b> · − 엣지 <i>${a.edgesRemoved}</i>
+      ${a.derivedLost ? ` · 함께 사라진 추론 <i>${a.derivedLost}</i>` : ''}</div>
+    <div class="ok">${n ? `새 회차 씨앗 ${n}개를 발견했습니다.` : '이번에는 새 씨앗이 나오지 않았습니다.'}</div>
+    ${x.applied.warnings.length ? `<details class="warns"><summary>적용 기록 ${x.applied.warnings.length}건</summary>
+      <ul>${x.applied.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></details>` : ''}
+    <div class="card__row">
+      <button class="btn btn--wide" id="exSeeds">씨앗 ${n}개 보기</button>
+      <button class="btn btn--line" id="exScript">대본화</button>
+    </div>
+    <div class="card__row"><button class="btn btn--line btn--wide" id="exClose">닫기</button></div>
+    <div class="hint">씨앗을 다시 고르면 자란 그래프에서 다음 회차가 갈라집니다.</div>`
+}
+
+function bindExpand() {
+  const x = EXPAND
+  const on = (id, fn) => { const el = $(id); if (el) el.onclick = fn }
+  const num = (id, dflt) => Number($(id)?.value) || dflt
+
+  on('exGo', () => {
+    x.opts = {
+      mode: $('exMode').value === 'spin' ? 'spin' : 'next',
+      genre: $('exGenre').value,
+      tone: $('exTone').value,
+      secs: num('exSecs', OPT_DEFAULT.secs),
+      cuts: num('exCuts', OPT_DEFAULT.cuts),
+    }
+    runOutline()
+  })
+  on('exAgain', runOutline)
+  on('exCuts', runCuts)
+  on('exRecut', runCuts)
+  on('exOpts', () => { x.step = 'options'; x.err = ''; renderExpand() })
+  on('exApply', applyToBoard)
+  on('exExport', () => { stashEpisode(); openTab('script') })
+  on('exSeeds', () => openTab('seeds'))
+  on('exScript', () => openTab('script'))
+  on('exBack', () => { EXPAND = null; renderStory() })
+  on('exClose', () => {
+    EXPAND = null
+    renderFreeOnly('역기입을 적용했습니다. 씨앗 탭에서 자란 그래프의 다음 씨앗을 고르세요.')
+  })
+}
+
+async function runOutline() {
+  const x = EXPAND
+  x.spec = branchToSpec(x.branch, x.opts)
+  x.busy = 'outline'
+  x.err = ''
+  renderExpand()
+  try {
+    x.outline = await planBranchOutline(NET, x.branch, x.spec, expandCtx(x))
+    x.step = 'outline'
+  } catch (err) {
+    console.warn('[story-graph] 개요 생성 실패', err)
+    x.err = `${err.message || '서버 연결에 실패했습니다.'} 다시 시도해 주세요.`
+    x.step = 'options'
+  } finally {
+    x.busy = ''
+    renderExpand()
+  }
+}
+
+async function runCuts() {
+  const x = EXPAND
+  x.busy = 'cuts'
+  x.err = ''
+  renderExpand()
+  try {
+    const cuts = await planCuts(NET, x.spec, x.outline)
+    if (!cuts.length) throw new Error('컷을 받지 못했습니다.')
+    x.cuts = cuts
+    x.step = 'cuts'
+  } catch (err) {
+    console.warn('[story-graph] 컷 확장 실패', err)
+    x.err = `${err.message || '서버 연결에 실패했습니다.'} 다시 시도해 주세요.`
+    x.step = 'outline'
+  } finally {
+    x.busy = ''
+    renderExpand()
+  }
+}
+
+/** 만든 회차를 대본화 탭이 읽을 자리에 넣는다. 컷을 다시 만들면 같은 자리를 덮는다 */
+function stashEpisode() {
+  const x = EXPAND
+  const ep = {
+    title: x.outline.title || x.story.title || `${x.branch.id}. ${x.branch.label}`,
+    logline: x.outline.logline,
+    branch: `${x.branch.id}. ${x.branch.label}`,
+    mode: x.opts.mode,
+    chars: x.outline.chars,
+    cuts: x.cuts,
+  }
+  if (x.epIndex === null) { EPISODES.push(ep); x.epIndex = EPISODES.length - 1 }
+  else EPISODES[x.epIndex] = ep
+  SCRIPT = { ...SCRIPT, ep: x.epIndex, text: '', err: '' }
+  return x.epIndex
+}
+
+/**
+ * 판에 붙이기. 여기서 역기입이 확정되고 그래프가 자란다.
+ * 씨앗 인덱스가 바뀌므로 분기 캐시는 버린다.
+ */
+function applyToBoard() {
+  const x = EXPAND
+  stashEpisode()
+  x.applied = applyWriteback(STORE, x.branch.writeback)
+  x.step = 'done'
+  SEEDS = x.applied.newSeeds
+  STORIES = new Map()
+  CUR = { seed: -1, branch: 0 }
+  showAllSeeds = false
+  renderStats()
+  renderNetwork()
+  renderSeeds()
+  renderExpand()
+}
+
+// ── 대본화 ───────────────────────────────────────────────────────────────────
+// 보드의 컷을 정식 대본 텍스트로 옮긴다. 스토리 디벨롭과는 따로 도는 기능이다.
+
+function renderScriptPanel() {
+  const box = $('scriptPanel')
+  if (!box) return
+  if (!EPISODES.length) {
+    box.innerHTML = `<div class="placeholder">컷이 없습니다. 먼저 스토리를 생성해 주세요.<br>
+      씨앗 → 분기 → <b>이 분기로 대본 생성</b> 을 지나면 여기에 컷이 들어옵니다.</div>`
+    return
+  }
+  const i = Math.min(Math.max(0, SCRIPT.ep), EPISODES.length - 1)
+  const ep = EPISODES[i]
+  const secs = ep.cuts.reduce((s, c) => s + (Number(c.secs) || 0), 0)
+  const chips = EPISODES.length > 1
+    ? `<div class="ep-chips">${EPISODES.map((e, n) => `<button class="branch-chip ${n === i ? 'on' : ''}"
+        data-ep="${n}">${esc(e.title || `회차 ${n + 1}`)}</button>`).join('')}</div>`
+    : ''
+
+  box.innerHTML = `<div class="story-content">
+    ${chips}
+    <h1>${esc(ep.title || '제목 없음')}</h1>
+    <div class="logline">${esc(ep.branch)} · 컷 ${ep.cuts.length}개 · ${Math.round(secs)}초</div>
+    <div class="opt-grid"><label class="wide">대본 형식${sel('scFormat', Object.keys(SCRIPT_FORMATS),
+      SCRIPT.format, (v) => SCRIPT_FORMATS[v].label)}</label></div>
+    <div class="card__row"><button class="btn btn--wide" id="scGo" ${SCRIPT.busy ? 'disabled' : ''}>대본 생성</button></div>
+    ${SCRIPT.busy ? `<div class="busy"><span class="spin"></span>대본으로 옮기고 있습니다${NET ? '' : ' (로컬 모드)'}</div>` : ''}
+    ${SCRIPT.err ? `<div class="err">${esc(SCRIPT.err)}</div>` : ''}
+    ${SCRIPT.text ? `
+      <div class="sec-label">대본</div>
+      <pre class="script">${esc(SCRIPT.text)}</pre>
+      <div class="card__row">
+        <button class="btn btn--line" id="scCopy">복사</button>
+        <button class="btn btn--line" id="scDown">다운로드</button>
+      </div>
+      <div class="hint" id="scNote">${esc(scriptFileName(ep.title))} 으로 내려받습니다 (UTF-8 BOM).</div>` : ''}
+    <div class="sec-label">컷 ${ep.cuts.length}개</div>
+    ${ep.cuts.map(cutRow).join('')}
+  </div>`
+
+  box.querySelectorAll('[data-ep]').forEach((el) => {
+    el.onclick = () => { SCRIPT = { ...SCRIPT, ep: Number(el.dataset.ep), text: '', err: '' }; renderScriptPanel() }
+  })
+  const fmt = $('scFormat')
+  if (fmt) fmt.onchange = () => { SCRIPT.format = fmt.value }
+  $('scGo').onclick = runScript
+  if ($('scCopy')) $('scCopy').onclick = () => copyScript(SCRIPT.text)
+  if ($('scDown')) $('scDown').onclick = () => downloadScript(SCRIPT.text, scriptFileName(ep.title))
+}
+
+async function runScript() {
+  const ep = EPISODES[Math.min(Math.max(0, SCRIPT.ep), EPISODES.length - 1)]
+  if (!ep?.cuts?.length) {
+    SCRIPT = { ...SCRIPT, err: '컷이 없습니다. 먼저 스토리를 생성해 주세요.' }
+    renderScriptPanel()
+    return
+  }
+  SCRIPT = { ...SCRIPT, busy: true, err: '', text: '' }
+  renderScriptPanel()
+  try {
+    SCRIPT.text = await planScript(NET, ep.cuts, {
+      format: SCRIPT.format, title: ep.title, chars: ep.chars,
+    })
+  } catch (err) {
+    console.warn('[story-graph] 대본화 실패', err)
+    SCRIPT.err = `${err.message || '서버 연결에 실패했습니다.'} 다시 시도해 주세요.`
+  } finally {
+    SCRIPT.busy = false
+    renderScriptPanel()
+  }
+}
+
+async function copyScript(text) {
+  const note = $('scNote')
+  try {
+    await navigator.clipboard.writeText(text)
+    if (note) { note.className = 'ok'; note.textContent = '대본을 클립보드에 복사했습니다.' }
+  } catch (err) {
+    console.warn('[story-graph] 복사 실패', err)
+    if (note) { note.className = 'warn'; note.textContent = '복사가 막혔습니다. 대본을 직접 선택해 복사해 주세요.' }
+  }
+}
+
+/** 대본 텍스트를 .txt 로 내려받는다. BOM 을 붙여 한글이 깨지지 않게 한다 */
+function downloadScript(text, filename) {
+  const url = URL.createObjectURL(scriptBlob(text))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename || '대본.txt'
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 // ── 대본에서 그래프 뽑기 ──────────────────────────────────────────────────────

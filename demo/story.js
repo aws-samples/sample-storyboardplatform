@@ -2,8 +2,8 @@
 import {
   normalizePlan, normalizeGraph, normalizeStory, validateAgainstCanon, mergeGraphs, splitScenario, josa, CAMERAS,
 } from './core.js'
-import { GRAPH_SCHEMA, deriveEdges } from './graph-schema.js'
-import { PROBES } from './graph-probes.js'
+import { GRAPH_SCHEMA, deriveEdges, edgeKey } from './graph-schema.js'
+import { PROBES, findSeeds } from './graph-probes.js'
 
 export const MODES = [
   { id: 'new', label: '새 스토리', hint: '프롬프트 하나로 이야기·인물·컷을 처음부터' },
@@ -20,6 +20,10 @@ const beatCount = (cuts) => Math.min(8, Math.max(3, Math.round(cuts / 2)))
 const perBeat = (cuts, beats) => Math.max(1, Math.round(cuts / Math.max(1, beats)))
 const BATCH = 4
 const HARD_MAX = 40
+
+const asList = (v) => (Array.isArray(v) ? v : [])
+const asObj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {})
+const numOr = (v, dflt) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : dflt)
 
 const JSON_ONLY = '오직 아래 모양의 JSON 하나만 출력한다. 설명·머리말·코드펜스를 붙이지 않는다.'
 
@@ -472,12 +476,16 @@ const nodeRef = (store, v) => {
   return store.getNodes().find((n) => n.name === raw)?.id || ''
 }
 
-/** 이 삼항이 그래프에 실제로 있나. remove_edges 검증에 쓴다 */
-const hasEdge = (store, e) => {
-  const s = nodeRef(store, e.s)
-  const o = nodeRef(store, e.o)
-  return !!s && !!o && store.getEdgesFrom(s).some((x) => x.p === e.p && x.o === o)
+/** 이 삼항이 그래프에 실제로 있나. 있으면 그 엣지를 준다 (명시인지 파생인지도 함께) */
+const findEdge = (store, e) => {
+  const s = nodeRef(store, e?.s)
+  const o = nodeRef(store, e?.o)
+  if (!s || !o) return null
+  return store.getEdgesFrom(s).find((x) => x.p === e?.p && x.o === o) || null
 }
+
+/** 이 삼항이 그래프에 실제로 있나. remove_edges 검증에 쓴다 */
+const hasEdge = (store, e) => !!findEdge(store, e)
 
 /** 정규화 + 역기입 검증. 로컬 폴백과 모델 결과가 같은 모양으로 나오게 한다 */
 function finishStory(raw, seed, store, { local = false } = {}) {
@@ -713,4 +721,631 @@ function localCuts(spec, outline) {
     }
   }
   return out.slice(0, HARD_MAX)
+}
+
+// ── 고른 분기 → 대본 ─────────────────────────────────────────────────────────
+// 새 생성 경로를 만들지 않는다. 고른 분기를 기존 기획 파이프라인이 읽는 모양으로
+// 옮겨 주는 어댑터다. 개요만 분기에서 출발하고, 컷 확장은 planCuts 를 그대로 쓴다.
+//   branchToSpec → planBranchOutline → planCuts → (뷰어의 applyPlan/ep.add 자리)
+
+/** 비트를 한 줄로. normalizeStory 는 문자열과 {scene, action, secs, cast} 객체를 모두 낸다 */
+const beatLine = (b) => {
+  if (typeof b === 'string' || typeof b === 'number') return String(b).trim()
+  const t = asObj(b)
+  const head = t.scene ? `${t.scene} — ` : ''
+  return `${head}${t.action || ''}`.trim()
+}
+
+/** 비트 하나를 normalizePlan 이 읽는 모양으로. 로컬 폴백 개요에 쓴다 */
+const beatPlan = (b, i, secs, cast) => {
+  if (typeof b === 'string' || typeof b === 'number') {
+    return { scene: `S${i + 1}`, summary: String(b), secs, cast }
+  }
+  const t = asObj(b)
+  return {
+    scene: t.scene || `S${i + 1}`,
+    summary: t.action || '',
+    secs: numOr(t.secs, secs),
+    cast: asList(t.cast).length ? t.cast : cast,
+  }
+}
+
+const outcomeLines = (outcome) =>
+  Object.entries(asObj(outcome)).map(([k, v]) => `- ${k}: ${v}`).join('\n')
+
+/** 이 분기가 그래프에 남기는 것을 한 덩어리로. 개요 프롬프트에 근거로 넣는다 */
+const writebackLines = (writeback) => {
+  const { nodes, edges, removes } = wbParts(writeback)
+  return [
+    ...nodes.map((n) => `- 새 ${n?.kind || '노드'}: ${n?.name || ''}${n?.desc ? ` — ${n.desc}` : ''}`),
+    ...edges.map((e) => `- 새 관계: ${e?.s} ${e?.p} ${e?.o}${e?.note ? ` (${e.note})` : ''}`),
+    ...removes.map((e) => `- 끊기는 관계: ${e?.s} ${e?.p} ${e?.o}${e?.note ? ` (${e.note})` : ''}`),
+  ].join('\n')
+}
+
+/**
+ * 고른 분기를 기존 스토리 기획 파이프라인의 spec 으로 옮긴다.
+ * 나온 spec 은 planCuts 가 그대로 읽고, prompt 에 분기 내용이 다 들어가 있어서
+ * 급하면 기존 outlinePrompt 에 넣어도 뜻이 통한다.
+ *
+ * @param {Object} branch - planBranches 가 준 분기 하나 (mock/stories.json 의 branch 스키마)
+ * @param {Object} [options]
+ * @param {'next'|'spin'} [options.mode='next'] 새 회차인지 스핀오프인지. 'new' 는 쓰지 않는다
+ * @param {string} [options.genre] 장르. 없으면 GENRES[0]
+ * @param {string} [options.tone] 톤. 없으면 분기의 tone, 그것도 없으면 TONES[0]
+ * @param {number} [options.secs=30] 러닝타임(초)
+ * @param {number} [options.cuts=8] 만들 컷 수
+ * @param {number} [options.newChars] 새로 만들 인물 수. 없으면 역기입의 Character 수
+ * @param {boolean} [options.useChars=true] 지금 판의 인물을 그대로 쓸지
+ * @returns {Object} planBranchOutline/planCuts 에 넣는 spec
+ *          {mode, genre, tone, secs, cuts, newChars, useChars, prompt, branchId, branchLabel}
+ */
+export function branchToSpec(branch, options = {}) {
+  const b = asObj(branch)
+  const o = asObj(options)
+  const { nodes: wbNodes } = wbParts(b.writeback)
+  const newFolk = wbNodes.filter((n) => n?.kind === 'Character')
+  const beats = asList(b.beats).map(beatLine).filter(Boolean)
+  const outcome = outcomeLines(b.outcome)
+
+  return {
+    mode: o.mode === 'spin' ? 'spin' : 'next',
+    genre: o.genre || GENRES[0],
+    tone: o.tone || b.tone || TONES[0],
+    secs: numOr(o.secs, 30),
+    cuts: numOr(o.cuts, CUTCOUNTS[1]),
+    newChars: Math.min(4, Math.max(0, o.newChars === undefined ? newFolk.length : Number(o.newChars) || 0)),
+    useChars: o.useChars !== false,
+    prompt: [
+      `${b.label || '고른 분기'}${b.tone ? ` (${b.tone})` : ''}`,
+      b.premise || '',
+      beats.length ? `장면 순서:\n${beats.map((t, i) => `${i + 1}. ${t}`).join('\n')}` : '',
+      outcome ? `이 분기의 결과:\n${outcome}` : '',
+    ].filter(Boolean).join('\n\n'),
+    branchId: b.id || '',
+    branchLabel: b.label || '',
+  }
+}
+
+/**
+ * 분기에서 출발하는 개요 생성 프롬프트. 기존 outlinePrompt 와 같은 구조·같은 출력이다.
+ * 다른 것은 소재 자리다 — spec.prompt 대신 분기의 전개·장면·결과가 들어간다.
+ *
+ * @param {Object} branch - 고른 분기
+ * @param {Object} spec - branchToSpec 의 반환값
+ * @param {Object} [ctx] - app.js 의 planCtx() 와 같은 모양 {title, scenario, chars, centerName}
+ * @returns {string} Bedrock 에 그대로 넣는 프롬프트
+ */
+export function branchOutlinePrompt(branch, spec, ctx = {}) {
+  const b = asObj(branch)
+  const s = asObj(spec)
+  const mode = s.mode === 'spin' ? 'spin' : 'next'
+  const secs = numOr(s.secs, 30)
+  const nb = beatCount(numOr(s.cuts, CUTCOUNTS[1]))
+  const keep = s.useChars === false ? [] : asList(ctx.chars)
+  const beats = asList(b.beats).map(beatLine).filter(Boolean)
+  const outcome = outcomeLines(b.outcome)
+  const wb = writebackLines(b.writeback)
+  const newChars = Math.max(0, Number(s.newChars) || 0)
+
+  const head = {
+    next: `아래 분기를 다음 회차(${secs}초)로 기획한다. 인물과 앞 사건을 잇되, 이 회차 안에서 시작하고 끝나야 한다.`,
+    spin: `아래 분기를 ${ctx.centerName || '한 인물'}을 주인공으로 갈라 나온 스핀오프(${secs}초)로 기획한다.`,
+  }[mode]
+
+  return [
+    head,
+    '분기는 관계 그래프에서 찾은 씨앗이 갈라진 갈래다. 분기가 이미 정한 선택과 결과를 뒤집지 않는다.',
+    '',
+    `[고른 분기] ${b.id ? `${b.id}. ` : ''}${b.label || '(제목 없음)'}${b.tone ? ` — ${b.tone}` : ''}`,
+    b.premise ? `전개: ${b.premise}` : null,
+    beats.length ? `장면 순서:\n${beats.map((t, i) => `${i + 1}. ${t}`).join('\n')}` : null,
+    outcome ? `이 분기의 결과:\n${outcome}` : null,
+    wb ? `이 분기가 관계 그래프에 남기는 것:\n${wb}` : null,
+    '',
+    `장르: ${s.genre || GENRES[0]} / 톤: ${s.tone || TONES[0]}`,
+    `지금 판의 제목: ${ctx.title || '(없음)'}`,
+    `지금 판의 이야기:\n${ctx.scenario || '(없음)'}`,
+    `이미 있는 인물:\n${roster(keep)}`,
+    '',
+    JSON_ONLY,
+    '{"title":"제목","logline":"한 문장 요약","synopsis":"3~5문장 줄거리",',
+    ' "chars":[{"name":"이름","brief":"나이·외모·옷·분위기를 한 줄로. 그림 지시로 쓸 수 있게 구체적으로"}],',
+    ' "beats":[{"scene":"S1 장소","summary":"이 비트에서 일어나는 일","secs":초,"cast":["이름"]}]}',
+    '',
+    '규칙',
+    `- beats는 ${nb}개. secs 합계는 ${secs}초에 맞춘다.`,
+    '- 위 장면 순서를 뼈대로 삼는다. 순서를 뒤집거나 결과를 다르게 만들지 않는다.',
+    newChars > 0
+      ? `- chars에는 새로 만드는 인물 ${newChars}명만 넣는다. 이름은 한국어로 짓는다.`
+      : '- chars는 빈 배열로 둔다.',
+    keep.length ? '- 이미 있는 인물은 chars에 다시 넣지 않고 cast에서 이름으로만 부른다.' : null,
+    '- 대사는 여기서 쓰지 않는다. 비트는 무슨 일이 벌어지는지만 적는다.',
+    '- 한국어로 쓴다.',
+  ].filter((l) => l !== null).join('\n')
+}
+
+/**
+ * 고른 분기를 기반으로 개요를 만든다. planOutline 과 같은 호출 계약이다.
+ * 이 다음의 컷 확장은 기존 planCuts(net, spec, outline) 를 그대로 쓴다.
+ *
+ * @param {Object} net - net.plan({prompt, maxTokens, think}) 를 가진 객체. 없으면 로컬 모드
+ * @param {Object} branch - 고른 분기
+ * @param {Object} spec - branchToSpec 의 반환값
+ * @param {Object} [ctx] - planCtx() 와 같은 컨텍스트
+ * @returns {Promise<Object>} normalizePlan 을 통과한 {title, logline, synopsis, chars, cuts, beats, local}
+ */
+export async function planBranchOutline(net, branch, spec, ctx = {}) {
+  if (!net?.plan) return localBranchOutline(branch, spec, ctx)
+  const maxChars = Number.isFinite(Number(spec?.newChars)) ? Number(spec.newChars) : 4
+  const p = normalizePlan(await ask(net, branchOutlinePrompt(branch, spec, ctx), 3000), { maxChars, maxCuts: 12 })
+  if (!p.cuts.length) throw new Error('비트를 받지 못했습니다. 다시 시도해 주세요.')
+  return { ...p, beats: p.cuts, local: false }
+}
+
+/**
+ * Bedrock 없이 분기의 비트를 그대로 개요로 세운다. localOutline 과 같은 자리다.
+ *
+ * @param {Object} branch - 고른 분기
+ * @param {Object} spec - branchToSpec 의 반환값
+ * @param {Object} [ctx] - planCtx() 와 같은 컨텍스트
+ * @returns {Object} planBranchOutline 과 같은 모양 (local: true)
+ */
+export function localBranchOutline(branch, spec, ctx = {}) {
+  const b = asObj(branch)
+  const s = asObj(spec)
+  const secs = numOr(s.secs, 30)
+  const newChars = Math.max(0, Number(s.newChars) || 0)
+  const raw = asList(b.beats).filter((t) => (typeof t === 'string' ? t.trim() : !!asObj(t).action))
+  const nb = raw.length || beatCount(numOr(s.cuts, CUTCOUNTS[1]))
+  const keep = s.useChars === false ? [] : asList(ctx.chars).map((c) => c.name).slice(0, 2)
+  const chars = LOCAL_NAMES.slice(0, newChars).map((name) => ({
+    name, brief: `${s.tone || TONES[0]} 분위기의 인물 (로컬 모드 임시)`,
+  }))
+  const cast = [...keep, ...chars.map((c) => c.name)]
+  const beats = (raw.length ? raw : Array.from({ length: nb }, () => b.premise || '분기의 장면'))
+    .map((t, i) => beatPlan(t, i, secs / nb, cast))
+  const outcome = outcomeLines(b.outcome)
+
+  const p = normalizePlan({
+    title: b.label || '분기 대본',
+    logline: b.premise || b.label || '',
+    synopsis: [b.premise, outcome].filter(Boolean).join('\n'),
+    chars,
+    beats,
+  }, { maxChars: newChars, maxCuts: 12 })
+  return { ...p, beats: p.cuts, local: true }
+}
+
+// ── 그래프 역기입 ─────────────────────────────────────────────────────────────
+// 고른 분기의 writeback 을 그래프에 얹는다. 노드·엣지가 늘고, 끊은 명시 엣지에서
+// 나왔던 파생 엣지도 같이 사라진다 (graph-engine 의 rebuild 가 매번 다시 만든다).
+// 그래서 다음 회차의 탐침이 이전에는 없던 구멍을 찾는다 — 이 기능의 핵심이다.
+
+const KIND_OK = new Set(GRAPH_SCHEMA.nodeKinds)
+const REL_OK = new Set(GRAPH_SCHEMA.edgeRels)
+const DERIVED_ONLY = new Set(GRAPH_SCHEMA.derivedRels)
+
+/**
+ * 역기입의 세 목록을 꺼낸다.
+ * mock/stories.json 스키마({nodes, edges, remove_edges})와 지시서 스키마
+ * ({add_nodes, add_edges, remove_edges})를 둘 다 받는다.
+ */
+function wbParts(writeback) {
+  const wb = asObj(writeback)
+  return {
+    nodes: [...asList(wb.nodes), ...asList(wb.add_nodes)],
+    edges: [...asList(wb.edges), ...asList(wb.add_edges)],
+    removes: [...asList(wb.remove_edges), ...asList(wb.remove), ...asList(wb.removeEdges)],
+  }
+}
+
+/** 역기입 노드를 normalizeGraph 가 읽는 {id?, kind, name, props} 로 편다 */
+const wbNodeShape = (n) => {
+  const src = asObj(n)
+  const props = { ...asObj(src.props) }
+  const t = Number(src.t ?? props.t)
+  if (Number.isFinite(t)) props.t = t
+  if (src.desc && !props.desc) props.desc = src.desc
+  if (src.claim && !props.claim) props.claim = src.claim
+  const out = { kind: src.kind, name: src.name, props }
+  if (src.id) out.id = src.id
+  return out
+}
+
+/** 역기입 엣지에는 note 가 있고 그래프에는 그 자리가 없다. props.cause 로 옮겨 근거를 남긴다 */
+const wbEdgeShape = (e, s, p, o) => {
+  const props = { ...asObj(e.props) }
+  if (e.note && !props.cause) props.cause = String(e.note)
+  const out = { s, p, o, asserted: true }
+  if (Object.keys(props).length) out.props = props
+  return out
+}
+
+/**
+ * 역기입을 미리 훑어 무엇이 들어가고 무엇이 걸리는지 가른다. store 는 건드리지 않는다.
+ * applyWriteback 과 validateWritebackBeforeApply 가 같은 판정을 쓰도록 한 곳에 둔다.
+ *
+ * errors 는 데이터가 어긋나 넣을 수 없는 것(모르는 kind·술어, 없는 노드, 정본 모순),
+ * warnings 는 넣지 않고 넘어가도 되는 것(이미 있는 노드·엣지, 없는 엣지 삭제 시도).
+ */
+function planWriteback(store, writeback) {
+  const warnings = []
+  const errors = []
+  if (!store?.getNode) {
+    errors.push('그래프 저장소가 없다 — 역기입을 적용할 수 없다')
+    return { nodes: [], edges: [], removes: [], warnings, errors, conflicts: [] }
+  }
+  const { nodes: rawNodes, edges: rawEdges, removes: rawRemoves } = wbParts(writeback)
+
+  // 1. 끊을 엣지. 실제로 있는 명시 엣지만 끊는다 — 파생은 근거를 지워야 사라진다
+  const removes = []
+  const cutKeys = new Set()
+  for (const e of rawRemoves) {
+    const src = asObj(e)
+    const label = `${src.s ?? '없음'} ${src.p ?? '?'} ${src.o ?? '없음'}`
+    const hit = findEdge(store, src)
+    if (!hit) { warnings.push(`역기입 삭제: 그래프에 없는 엣지 (${label}) — 건너뛴다`); continue }
+    if (hit.asserted === false) {
+      warnings.push(`역기입 삭제: 파생 엣지는 직접 삭제할 수 없습니다 (${label}) — 건너뛴다`)
+      continue
+    }
+    const key = edgeKey(hit)
+    if (cutKeys.has(key)) continue
+    cutKeys.add(key)
+    removes.push({ s: hit.s, p: hit.p, o: hit.o })
+  }
+
+  // 2. 새 노드. normalizeGraph 로 검증하면서 id 까지 미리 정한다 (addNodes 가 하는 것과 같다)
+  const okNodes = []
+  for (const n of rawNodes) {
+    const src = asObj(n)
+    const name = String(src.name ?? src.label ?? '').trim()
+    const kind = String(src.kind ?? src.type ?? '').trim()
+    if (!name) { errors.push('역기입 노드: 이름이 없다 — 노드를 버린다'); continue }
+    if (!KIND_OK.has(kind)) {
+      errors.push(`역기입 노드 "${name}": 모르는 kind "${kind || '없음'}" — 노드를 버린다`)
+      continue
+    }
+    okNodes.push(src)
+  }
+  const g = normalizeGraph({ nodes: okNodes.map(wbNodeShape), edges: [] })
+  warnings.push(...g.warnings)
+
+  const nodes = []
+  const fresh = new Map() // 이 역기입에서 새로 생기는 노드의 이름·id → 얹힌 뒤의 id
+  for (const n of g.nodes) {
+    const prev = store.getNode(n.id) || store.getNodes().find((x) => x.name === n.name)
+    if (prev) {
+      warnings.push(`역기입 노드 "${n.name}": 이미 있는 노드(${prev.id}) — 새로 만들지 않는다`)
+      fresh.set(n.id, prev.id)
+      fresh.set(n.name, prev.id)
+      continue
+    }
+    nodes.push(n)
+    fresh.set(n.id, n.id)
+    fresh.set(n.name, n.id)
+  }
+
+  // 3. 새 엣지. 양끝은 기존 노드거나 이 역기입에서 새로 만드는 노드여야 한다
+  const ref = (v) => {
+    const raw = String(v ?? '').trim()
+    return nodeRef(store, raw) || fresh.get(raw) || ''
+  }
+  const edges = []
+  const addKeys = new Set()
+  for (const e of rawEdges) {
+    const src = asObj(e)
+    const p = String(src.p ?? src.rel ?? src.pred ?? '').trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_')
+    const label = `${src.s ?? '없음'} ${p || '?'} ${src.o ?? '없음'}`
+    if (!REL_OK.has(p)) { errors.push(`역기입 엣지: 어휘에 없는 술어 (${label}) — 버린다`); continue }
+    if (DERIVED_ONLY.has(p)) {
+      warnings.push(`역기입 엣지: ${p} 는 파생 전용이라 직접 넣지 않는다 (${label}) — 추론이 다시 만든다`)
+      continue
+    }
+    const s = ref(src.s ?? src.from ?? src.subject)
+    const o = ref(src.o ?? src.to ?? src.object)
+    if (!s || !o) { errors.push(`역기입 엣지: 없는 노드를 가리킨다 (${label}) — 버린다`); continue }
+    if (s === o) { warnings.push(`역기입 엣지: 자기 자신을 가리킨다 (${label}) — 버린다`); continue }
+    const key = edgeKey({ s, p, o })
+    if (addKeys.has(key)) { warnings.push(`역기입 엣지: 같은 엣지가 두 번 왔다 (${label})`); continue }
+    if (!cutKeys.has(key) && store.getEdgesFrom(s).some((x) => x.p === p && x.o === o)) {
+      warnings.push(`역기입 엣지: 이미 있는 엣지 (${label}) — 넣지 않는다`)
+      continue
+    }
+    addKeys.add(key)
+    edges.push(wbEdgeShape(src, s, p, o))
+  }
+
+  // 4. 이미 확립된 그래프와 어긋나지 않는지. 끊기로 한 엣지는 빼고 견준다
+  const canon = store.toJSON()
+  const check = validateAgainstCanon(
+    { nodes, edges },
+    { nodes: canon.nodes, edges: canon.edges.filter((e) => !cutKeys.has(edgeKey(e))) },
+  )
+  for (const c of check.conflicts) (c.level === 'error' ? errors : warnings).push(`역기입 모순: ${c.msg}`)
+
+  return { nodes, edges, removes, warnings, errors, conflicts: check.conflicts }
+}
+
+/**
+ * 역기입을 적용하기 전에 안전한지 본다. store 는 바뀌지 않는다.
+ * 뷰어는 이 결과로 "+ 노드 N · + 엣지 N · − 엣지 N" 미리보기를 띄운다.
+ *
+ * @param {Object} store - GraphStore
+ * @param {Object} writeback - branch.writeback
+ * @returns {{safe: boolean, warnings: Array<string>, conflicts: Array,
+ *            preview: {nodesAdded: number, edgesAdded: number, edgesRemoved: number}}}
+ *          safe 는 넣을 수 없는 항목이 하나도 없을 때만 true
+ */
+export function validateWritebackBeforeApply(store, writeback) {
+  const p = planWriteback(store, writeback)
+  return {
+    safe: p.errors.length === 0,
+    warnings: [...p.errors, ...p.warnings],
+    conflicts: p.conflicts,
+    preview: { nodesAdded: p.nodes.length, edgesAdded: p.edges.length, edgesRemoved: p.removes.length },
+  }
+}
+
+/**
+ * 분기의 역기입을 그래프에 적용한다. #1 파이프라인의 apply_writeback 자리다.
+ *
+ * 끊기 → 노드 → 엣지 순으로 얹는다. 엣지가 새 노드를 가리킬 수 있어서 노드가 먼저다.
+ * 파생 엣지는 GraphStore 가 매번 다시 만들기 때문에, 끊은 명시 엣지에서 나왔던
+ * 파생도 함께 사라진다 (진우 serves 귀마 를 끊으면 귀마 rival_of 루미 도 사라진다).
+ *
+ * @param {Object} store - GraphStore. 이 함수가 직접 바꾼다
+ * @param {Object} writeback - branch.writeback ({nodes, edges, remove_edges} 또는 add_* 스키마)
+ * @returns {{applied: {nodesAdded: number, edgesAdded: number, edgesRemoved: number, derivedLost: number},
+ *            warnings: Array<string>, newSeeds: Array, before: Object, after: Object}}
+ *          newSeeds 는 적용 뒤에 다시 돌린 findSeeds 의 결과다
+ */
+export function applyWriteback(store, writeback) {
+  const p = planWriteback(store, writeback)
+  if (!store?.addNodes) {
+    return {
+      applied: { nodesAdded: 0, edgesAdded: 0, edgesRemoved: 0, derivedLost: 0 },
+      warnings: [...p.errors, ...p.warnings],
+      newSeeds: [],
+      before: null,
+      after: null,
+    }
+  }
+  const warnings = [...p.errors, ...p.warnings]
+  const before = store.stats()
+
+  // removeEdges 는 파생까지 합한 감소분을 낸다. 끊은 명시 엣지 수와 갈라서 적는다
+  const dropped = p.removes.length ? store.removeEdges(p.removes) : 0
+  const addedNodes = p.nodes.length ? store.addNodes(p.nodes) : { added: [], warnings: [] }
+  warnings.push(...addedNodes.warnings)
+  const addedEdges = p.edges.length ? store.addEdges(p.edges) : { added: [], warnings: [] }
+  warnings.push(...addedEdges.warnings)
+
+  return {
+    applied: {
+      nodesAdded: addedNodes.added.length,
+      edgesAdded: addedEdges.added.length,
+      edgesRemoved: p.removes.length,
+      derivedLost: Math.max(0, dropped - p.removes.length),
+    },
+    warnings,
+    newSeeds: findSeeds(store),
+    before,
+    after: store.stats(),
+  }
+}
+
+// ── 대본화 ───────────────────────────────────────────────────────────────────
+// 보드의 컷을 정식 대본 포맷으로 옮긴다. 스토리 디벨롭과는 따로 도는 기능이다.
+// 출력이 JSON 이 아니라 대본 텍스트라서 여기서는 parseJson 을 쓰지 않는다.
+
+/** 한 번에 대본으로 옮기는 컷 수. 넘으면 묶음으로 나눠 부른다 (planCuts 와 같은 패턴) */
+const SCRIPT_BATCH = 10
+
+/**
+ * 대본 형식별 안내. 프롬프트의 형식 지시와 뷰어의 선택 항목이 같은 곳에서 나온다.
+ */
+export const SCRIPT_FORMATS = {
+  drama: {
+    label: '드라마 대본',
+    guide: [
+      '드라마 대본 형식으로 옮긴다.',
+      'S#번호. 장소 / 시간',
+      '등장인물: 이름, 이름',
+      '지문은 평서문 한두 줄로 쓴다. 짧은 지시는 (괄호) 안에.',
+      '캐릭터: 대사',
+    ],
+  },
+  film: {
+    label: '영화 각본',
+    guide: [
+      '영화 각본 형식(Hollywood format)으로 옮긴다.',
+      '맨 앞에 FADE IN: 을 한 번 쓴다.',
+      'INT./EXT. 장소 - 시간',
+      '액션 라인은 현재형으로 쓴다.',
+      '캐릭터 이름을 한 줄에 두고, 그 아래 들여쓰기로 대사를 쓴다. 지시는 캐릭터 이름 뒤 (괄호) 에.',
+      '맨 끝에 FADE OUT. 을 한 번 쓴다.',
+    ],
+  },
+  webdrama: {
+    label: '웹드라마',
+    guide: [
+      '웹드라마 대본 형식으로 옮긴다.',
+      '[씬 번호 - 장소]',
+      '모바일 화면에 맞게 짧은 호흡으로 쓴다.',
+      '빠른 템포의 대사와 액션. 지문은 한 줄로.',
+    ],
+  },
+}
+
+const scriptFormat = (v) => (SCRIPT_FORMATS[v] ? v : 'drama')
+
+/**
+ * 스토리보드의 컷을 정식 대본 포맷으로 옮기는 프롬프트.
+ * 기존 outlinePrompt/cutsPrompt 와 같은 배열-join 구조지만, 출력은 JSON 이 아니라
+ * 대본 텍스트다. 그래서 JSON_ONLY 대신 "대본 텍스트만" 을 못 박는다.
+ *
+ * @param {Array} cuts - 보드의 컷 배열 [{scene, action, dialogue, camera, cast, secs}]
+ * @param {Object} [options]
+ * @param {'drama'|'film'|'webdrama'} [options.format='drama'] 대본 형식
+ * @param {string} [options.title] 작품 제목
+ * @param {Array} [options.chars] 인물 목록 [{name, brief}]
+ * @param {{i: number, n: number, from: number}} [options.part] 컷이 많아 묶음으로 나눌 때의 조각 번호
+ * @returns {string} Bedrock 에 그대로 넣는 프롬프트
+ */
+export function scriptFormatPrompt(cuts, options = {}) {
+  const o = asObj(options)
+  const fmt = scriptFormat(o.format)
+  const list = asList(cuts)
+  const part = o.part && Number(o.part.n) > 1 ? o.part : null
+  const from = Number(part?.from) || 0
+
+  const lines = list.map((raw, i) => {
+    const c = asObj(raw)
+    const cast = asList(c.cast).filter(Boolean)
+    return [
+      `${from + i + 1}. ${c.scene || `S${from + i + 1}`} (${numOr(c.secs, 2)}초${c.camera ? `, ${c.camera}` : ''})`,
+      c.action ? `   보이는 것: ${c.action}` : null,
+      c.dialogue ? `   대사: ${c.dialogue}` : null,
+      cast.length ? `   등장: ${cast.join(', ')}` : null,
+    ].filter(Boolean).join('\n')
+  })
+
+  return [
+    part
+      ? `아래는 콘티를 ${part.n}묶음으로 나눈 것 중 ${part.i}번째다. 이 묶음의 컷만 대본으로 옮긴다.`
+      : '아래 콘티 컷을 정식 대본으로 옮긴다.',
+    '',
+    ...SCRIPT_FORMATS[fmt].guide.map((g, i) => (i === 0 ? g : `- ${g}`)),
+    '',
+    o.title ? `제목: ${o.title}` : null,
+    `인물:\n${roster(asList(o.chars))}`,
+    '',
+    '컷:',
+    ...lines,
+    '',
+    '규칙',
+    '- 컷 순서를 지킨다. 컷을 합치거나 빼지 않는다.',
+    part
+      ? `- 씬 번호는 ${from + 1} 번부터 이어 붙인다. 앞뒤 묶음이 따로 만들어지므로 처음·끝 표시는 쓰지 않는다.`
+      : null,
+    '- 컷에 없는 사건이나 인물을 새로 만들지 않는다. 대사가 없는 컷은 지문만 쓴다.',
+    '- 대본 텍스트만 출력한다. JSON·설명·머리말·코드펜스를 붙이지 않는다.',
+    '- 한국어로 쓴다. 형식 표기(INT./EXT., FADE IN 등)는 원어 그대로 둔다.',
+  ].filter((l) => l !== null).join('\n')
+}
+
+/**
+ * 컷을 정식 대본으로 옮긴다. 반환값은 JSON 이 아니라 대본 텍스트다.
+ * 컷이 많으면 planCuts 처럼 묶음으로 나눠 부르고 이어 붙인다.
+ *
+ * @param {Object} net - net.plan 을 가진 객체. 없으면 로컬 모드
+ * @param {Array} cuts - 보드의 컷 배열
+ * @param {Object} [options] - scriptFormatPrompt 와 같은 {format, title, chars}
+ * @returns {Promise<string>} 대본 텍스트. 컷이 없으면 빈 문자열
+ */
+export async function planScript(net, cuts, options = {}) {
+  const list = asList(cuts)
+  if (!list.length) return ''
+  if (!net?.plan) return localScript(list, options)
+
+  const batches = []
+  for (let i = 0; i < list.length; i += SCRIPT_BATCH) batches.push(list.slice(i, i + SCRIPT_BATCH))
+  const got = await Promise.allSettled(batches.map((b, i) => net.plan({
+    prompt: scriptFormatPrompt(b, { ...options, part: { i: i + 1, n: batches.length, from: i * SCRIPT_BATCH } }),
+    maxTokens: 4000,
+    think: false,
+  })))
+
+  const out = []
+  let failed = 0
+  got.forEach((r, i) => {
+    const text = r.status === 'fulfilled' ? String(r.value?.text ?? '').trim() : ''
+    if (text) { out.push(text); return }
+    // 묶음 하나가 비어 오면 그 자리만 로컬 형식으로 메운다. 전부 비면 에러다 —
+    // 형식만 갖춘 대본을 모델이 쓴 것처럼 내놓지 않는다
+    failed++
+    console.warn('[story] 대본 묶음 실패 — 로컬 형식으로 채운다', r.reason?.message)
+    out.push(localScript(batches[i], { ...options, from: i * SCRIPT_BATCH, whole: batches.length === 1 }))
+  })
+
+  const body = out.filter(Boolean).join('\n\n')
+  if (failed === batches.length || !body) throw new Error('대본을 받지 못했습니다. 다시 시도해 주세요.')
+  return body
+}
+
+/**
+ * Bedrock 없이 컷을 대본 형식으로 조합한다. 내용이 아니라 형식을 갖추는 것이 목적이다.
+ *
+ * @param {Array} cuts - 컷 배열
+ * @param {Object} [options]
+ * @param {'drama'|'film'|'webdrama'} [options.format='drama'] 대본 형식
+ * @param {string} [options.title] 제목
+ * @param {number} [options.from=0] 씬 번호 시작 오프셋. 묶음을 채울 때 쓴다
+ * @param {boolean} [options.whole=true] 작품 전체인지. false 면 FADE IN/OUT 을 붙이지 않는다
+ * @returns {string} 대본 텍스트. 컷이 없으면 빈 문자열
+ */
+export function localScript(cuts, options = {}) {
+  const list = asList(cuts)
+  if (!list.length) return ''
+  const o = asObj(options)
+  const fmt = scriptFormat(o.format)
+  const from = Math.max(0, Number(o.from) || 0)
+  const whole = o.whole !== false && !from
+  const lines = []
+
+  if (o.title && whole) lines.push(fmt === 'film' ? String(o.title).toUpperCase() : String(o.title), '')
+  if (fmt === 'film' && whole) lines.push('FADE IN:', '')
+
+  list.forEach((raw, i) => {
+    const cut = asObj(raw)
+    const n = from + i + 1
+    const place = cut.scene || '장소 미정'
+    const cast = asList(cut.cast).filter(Boolean)
+    const who = cast[0] || '인물'
+    if (fmt === 'film') {
+      lines.push(`INT. ${place} - DAY`)
+      if (cut.action) lines.push(cut.action)
+      if (cut.dialogue) lines.push('', `        ${who}`, `    ${cut.dialogue}`)
+    } else if (fmt === 'webdrama') {
+      lines.push(`[씬 ${n} - ${place}]`)
+      if (cast.length) lines.push(`(${cast.join(', ')})`)
+      if (cut.action) lines.push(cut.action)
+      if (cut.dialogue) lines.push(`${who}: ${cut.dialogue}`)
+    } else {
+      lines.push(`S#${n}. ${place}`)
+      if (cast.length) lines.push(`등장인물: ${cast.join(', ')}`)
+      if (cut.action) lines.push(`  ${cut.action}`)
+      if (cut.dialogue) lines.push(`  ${who}: ${cut.dialogue}`)
+    }
+    lines.push('')
+  })
+
+  if (fmt === 'film' && whole) lines.push('FADE OUT.')
+  return lines.join('\n').trim()
+}
+
+/** UTF-8 BOM. 한글 작가들이 쓰는 편집기가 BOM 없는 UTF-8 을 깨뜨리는 일이 있다 */
+export const SCRIPT_BOM = '\uFEFF'
+
+/**
+ * 대본 텍스트를 .txt 로 내려받을 Blob 으로 만든다.
+ *
+ * @param {string} text - 대본 텍스트
+ * @returns {Blob} BOM 이 붙은 UTF-8 텍스트 Blob
+ */
+export function scriptBlob(text) {
+  return new Blob([SCRIPT_BOM + String(text ?? '')], { type: 'text/plain;charset=utf-8' })
+}
+
+/**
+ * 내려받을 대본 파일 이름. 제목을 앞에 둔다.
+ *
+ * @param {string} title - 작품 제목
+ * @returns {string} "제목_대본.txt"
+ */
+export function scriptFileName(title) {
+  const base = String(title ?? '').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60)
+  return `${base || '무제'}_대본.txt`
 }

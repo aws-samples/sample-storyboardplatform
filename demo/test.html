@@ -27,7 +27,11 @@
     probeBetrayalPotential, probeIdentityCrisis, probeForbiddenBond, probePowerVacuum,
   } = await import(`./graph-probes.js?t=${Date.now()}`)
   const { extractGraphPrompt, scriptToText, chunkText, contextPackPrompt, branchPrompt,
-    freeDirectionPrompt, localBranches } = await import(`./story.js?t=${Date.now()}`)
+    freeDirectionPrompt, localBranches,
+    branchToSpec, branchOutlinePrompt, planBranchOutline, localBranchOutline,
+    applyWriteback, validateWritebackBeforeApply,
+    scriptFormatPrompt, planScript, localScript, scriptBlob, scriptFileName, SCRIPT_FORMATS,
+  } = await import(`./story.js?t=${Date.now()}`)
 
   const out = document.getElementById('out')
   let failed = 0
@@ -934,6 +938,341 @@
   })())
   ok('자유 입력 프롬프트는 방향이 비어도 만들어진다', freeDirectionPrompt('', null, '', null).includes('비어 있다'))
 
+  // ── 고른 분기 → 대본: branchToSpec / branchOutlinePrompt / planBranchOutline ─
+  const WB_GRAPH = () => G(
+    [N('gaon', 'Character', '가온', { role: '빵집 주인' }), N('noeul', 'Character', '노을'),
+      N('bada', 'Character', '바다'), N('s1', 'Secret', '가게의 사정', { claim: '가온은 가게를 넘길 생각이다' })],
+    [E('gaon', 'conceals', 's1'), E('bada', 'knows', 's1'), E('s1', 'hidden_from', 'noeul'),
+      E('gaon', 'loves', 'noeul', { tension: 0.6 })])
+  const wbStore = () => createGraphStore(WB_GRAPH())
+
+  const demoBranch = {
+    id: 'A',
+    label: '드러낸다',
+    tone: '공개 / 되돌릴 수 없다',
+    premise: '가온이 단골 앞에서 가게를 넘긴다고 말한다.',
+    beats: ['셔터를 올린다', { scene: 'S2 카운터', action: '노을이 묻는다', secs: 4, cast: ['노을'] }, '가온이 답한다'],
+    outcome: { 가온: '입을 연다', 노을: '뒤늦게 안다' },
+    writeback: {
+      nodes: [{ name: '가게를 넘기는 날', kind: 'Event', t: 0, desc: '가온이 말한다' },
+        { name: '바람', kind: 'Character', desc: '새 주인' }],
+      edges: [{ s: '가온', p: 'reveals', o: '가게의 사정', note: '공개' }],
+      remove_edges: [{ s: '가온', p: 'loves', o: '노을', note: '이 분기에서 끊긴다' }],
+    },
+  }
+
+  ok('branchToSpec 이 기획 파이프라인이 읽는 필드를 다 낸다', (() => {
+    const s = branchToSpec(demoBranch, {})
+    return ['mode', 'genre', 'tone', 'secs', 'cuts', 'newChars', 'useChars', 'prompt']
+      .every((k) => s[k] !== undefined) && typeof s.prompt === 'string' && s.prompt.length > 20
+  })())
+  ok('branchToSpec 의 mode 는 next 가 기본이고 spin 만 갈아탄다',
+    branchToSpec(demoBranch, {}).mode === 'next'
+    && branchToSpec(demoBranch, { mode: 'spin' }).mode === 'spin'
+    && branchToSpec(demoBranch, { mode: 'new' }).mode === 'next')
+  ok('branchToSpec 이 옵션을 그대로 옮긴다', (() => {
+    const s = branchToSpec(demoBranch, { genre: '스릴러', tone: '서늘한', secs: 120, cuts: 16 })
+    return s.genre === '스릴러' && s.tone === '서늘한' && s.secs === 120 && s.cuts === 16
+  })())
+  ok('branchToSpec 의 톤은 없으면 분기의 톤을 쓴다',
+    branchToSpec(demoBranch, {}).tone === demoBranch.tone)
+  ok('branchToSpec 의 prompt 에 전개·장면·결과가 다 들어간다', (() => {
+    const p = branchToSpec(demoBranch, {}).prompt
+    return p.includes('드러낸다') && p.includes('가온이 단골 앞에서')
+      && p.includes('노을이 묻는다') && p.includes('입을 연다')
+  })())
+  ok('branchToSpec 의 새 인물 수는 역기입의 Character 수에서 온다',
+    branchToSpec(demoBranch, {}).newChars === 1 && branchToSpec(demoBranch, { newChars: 0 }).newChars === 0)
+  ok('branchToSpec 은 빈 분기에도 spec 을 낸다', (() => {
+    const s = branchToSpec(null, {})
+    return s.mode === 'next' && s.newChars === 0 && typeof s.prompt === 'string'
+  })())
+  ok('branchToSpec 은 지시서 스키마(add_nodes)도 읽는다',
+    branchToSpec({ writeback: { add_nodes: [{ name: '새 인물', kind: 'Character' }] } }, {}).newChars === 1)
+
+  const bSpec = branchToSpec(demoBranch, { secs: 60, cuts: 8 })
+  const bCtx = { title: '동네 빵집', scenario: '가온의 가게', chars: [{ name: '가온', brief: '주인' }], centerName: '가온' }
+  ok('분기 개요 프롬프트는 JSON 하나만 요구한다', (() => {
+    const p = branchOutlinePrompt(demoBranch, bSpec, bCtx)
+    return p.includes('코드펜스') && p.includes('"beats"') && p.includes('"chars"') && p.includes('"logline"')
+  })())
+  ok('분기 개요 프롬프트에 분기의 전개·장면·결과가 들어간다', (() => {
+    const p = branchOutlinePrompt(demoBranch, bSpec, bCtx)
+    return p.includes('A. 드러낸다') && p.includes('가온이 단골 앞에서')
+      && p.includes('노을이 묻는다') && p.includes('입을 연다')
+  })())
+  ok('분기 개요 프롬프트는 역기입을 근거로 함께 넣는다', (() => {
+    const p = branchOutlinePrompt(demoBranch, bSpec, bCtx)
+    return p.includes('관계 그래프에 남기는 것') && p.includes('가게를 넘기는 날')
+      && p.includes('끊기는 관계') && p.includes('loves')
+  })())
+  ok('분기 개요 프롬프트는 비트 개수와 초 합계를 못 박는다', (() => {
+    const p = branchOutlinePrompt(demoBranch, bSpec, bCtx)
+    return /beats는 \d+개/.test(p) && p.includes('60초에 맞춘다')
+  })())
+  ok('분기 개요 프롬프트는 장면 순서를 뒤집지 말라고 적는다',
+    branchOutlinePrompt(demoBranch, bSpec, bCtx).includes('순서를 뒤집거나'))
+  ok('스핀오프 모드는 중심 인물을 적는다',
+    branchOutlinePrompt(demoBranch, branchToSpec(demoBranch, { mode: 'spin' }), bCtx)
+      .includes('가온을 주인공으로'))
+  ok('useChars 를 끄면 이미 있는 인물을 넣지 않는다', (() => {
+    const p = branchOutlinePrompt(demoBranch, branchToSpec(demoBranch, { useChars: false }), bCtx)
+    return p.includes('이미 있는 인물:\n(없음)')
+  })())
+  ok('새 인물이 0명이면 chars 를 비우라고 적는다',
+    branchOutlinePrompt(demoBranch, branchToSpec(demoBranch, { newChars: 0 }), bCtx).includes('chars는 빈 배열'))
+
+  ok('로컬 폴백 개요는 분기의 비트를 그대로 세운다', (() => {
+    const o = localBranchOutline(demoBranch, bSpec, bCtx)
+    return o.local === true && o.beats.length === 3 && o.title === '드러낸다'
+      && o.beats[1].scene === 'S2 카운터' && o.beats[1].action === '노을이 묻는다'
+  })())
+  ok('로컬 폴백 개요도 normalizePlan 을 지난다', (() => {
+    const o = localBranchOutline(demoBranch, bSpec, bCtx)
+    return o.beats.every((b) => CAMERAS.includes(b.camera) && b.secs > 0 && Array.isArray(b.cast))
+  })())
+  ok('net 이 없으면 planBranchOutline 이 로컬로 내려간다',
+    (await planBranchOutline(null, demoBranch, bSpec, bCtx)).local === true)
+  ok('net 이 있으면 planBranchOutline 이 프롬프트를 태우고 정규화한다', await (async () => {
+    let seen = ''
+    const fake = { plan: async ({ prompt }) => {
+      seen = prompt
+      return { text: JSON.stringify({ title: 'T', logline: 'L', synopsis: 'S', chars: [],
+        beats: [{ scene: 'S1', summary: '가온이 말한다', secs: 5, cast: ['가온'] }] }) }
+    } }
+    const o = await planBranchOutline(fake, demoBranch, bSpec, bCtx)
+    return o.local === false && o.title === 'T' && o.beats.length === 1
+      && o.beats[0].action === '가온이 말한다' && seen.includes('드러낸다')
+  })())
+  ok('비트를 못 받으면 planBranchOutline 이 에러를 낸다', await (async () => {
+    const fake = { plan: async () => ({ text: '{"title":"T","beats":[]}' }) }
+    try { await planBranchOutline(fake, demoBranch, bSpec, bCtx); return false } catch { return true }
+  })())
+
+  // ── 그래프 역기입: validateWritebackBeforeApply / applyWriteback ────────────
+  ok('유효한 역기입은 safe: true 와 미리보기 숫자를 낸다', (() => {
+    const v = validateWritebackBeforeApply(wbStore(), demoBranch.writeback)
+    return v.safe === true && v.preview.nodesAdded === 2 && v.preview.edgesAdded === 1
+      && v.preview.edgesRemoved === 1
+  })(), JSON.stringify(validateWritebackBeforeApply(wbStore(), demoBranch.writeback).preview))
+  ok('검증은 그래프를 바꾸지 않는다', (() => {
+    const st = wbStore()
+    const before = JSON.stringify(st.stats())
+    validateWritebackBeforeApply(st, demoBranch.writeback)
+    return JSON.stringify(st.stats()) === before
+  })())
+  ok('빈 역기입은 safe 하고 미리보기가 전부 0 이다', (() => {
+    const v = validateWritebackBeforeApply(wbStore(), { nodes: [], edges: [] })
+    return v.safe === true && v.preview.nodesAdded === 0 && v.preview.edgesAdded === 0
+      && v.preview.edgesRemoved === 0
+  })())
+  ok('모르는 kind 의 노드는 safe: false 와 이유를 남긴다', (() => {
+    const v = validateWritebackBeforeApply(wbStore(), { nodes: [{ name: '트럭', kind: 'Vehicle' }] })
+    return v.safe === false && v.warnings.some((w) => w.includes('Vehicle') && w.includes('트럭'))
+  })())
+  ok('어휘에 없는 술어는 safe: false 다', (() => {
+    const v = validateWritebackBeforeApply(wbStore(), { edges: [{ s: '가온', p: 'hates', o: '노을' }] })
+    return v.safe === false && v.warnings.some((w) => w.includes('술어'))
+  })())
+  ok('없는 노드를 가리키는 엣지는 safe: false 다', (() => {
+    const v = validateWritebackBeforeApply(wbStore(), { edges: [{ s: '가온', p: 'loves', o: '없는 사람' }] })
+    return v.safe === false && v.warnings.some((w) => w.includes('없는 노드'))
+  })())
+  ok('정본과 모순되는 역기입은 safe: false 다 (아는 이 vs 모르는 이)', (() => {
+    const v = validateWritebackBeforeApply(wbStore(), { edges: [{ s: '노을', p: 'knows', o: '가게의 사정' }] })
+    return v.safe === false && v.warnings.some((w) => w.includes('역기입 모순'))
+  })())
+  ok('없는 엣지를 끊으려 하면 경고만 남고 미리보기에서 빠진다', (() => {
+    const v = validateWritebackBeforeApply(wbStore(), { remove_edges: [{ s: '바다', p: 'loves', o: '노을' }] })
+    return v.safe === true && v.preview.edgesRemoved === 0
+      && v.warnings.some((w) => w.includes('그래프에 없는 엣지'))
+  })())
+
+  ok('역기입을 적용하면 노드·엣지가 움직인다', (() => {
+    const st = wbStore()
+    const before = st.stats()
+    const r = applyWriteback(st, demoBranch.writeback)
+    const after = st.stats()
+    return r.applied.nodesAdded === 2 && r.applied.edgesAdded === 1 && r.applied.edgesRemoved === 1
+      && after.nodes === before.nodes + 2 && after.assertedEdges === before.assertedEdges
+  })(), JSON.stringify(applyWriteback(wbStore(), demoBranch.writeback).applied))
+  ok('역기입 뒤의 씨앗은 역기입 전과 다르다', (() => {
+    const st = wbStore()
+    const sig = (list) => list.map((s) => `${s.probe}:${s.focus.join('+')}`).sort().join(',')
+    const before = sig(findSeeds(st))
+    const r = applyWriteback(st, demoBranch.writeback)
+    return sig(r.newSeeds) !== before
+  })())
+  ok('newSeeds 는 적용 뒤 findSeeds 와 같다', (() => {
+    const st = wbStore()
+    const r = applyWriteback(st, demoBranch.writeback)
+    return JSON.stringify(r.newSeeds) === JSON.stringify(findSeeds(st))
+  })())
+  ok('역기입은 통계 before/after 를 함께 낸다', (() => {
+    const r = applyWriteback(wbStore(), demoBranch.writeback)
+    return r.before.nodes === 4 && r.after.nodes === 6
+  })())
+  ok('명시 엣지를 끊으면 그 엣지에서 나온 추론도 사라진다', (() => {
+    const st = wbStore()
+    const had = st.getEdgesFrom('noeul').some((e) => e.p === 'unrequited_love' && e.o === 'gaon')
+    const r = applyWriteback(st, { remove_edges: [{ s: '가온', p: 'loves', o: '노을' }] })
+    const now = st.getEdgesFrom('noeul').some((e) => e.p === 'unrequited_love' && e.o === 'gaon')
+    return had === true && now === false && r.applied.derivedLost >= 1
+  })())
+  ok('빈 역기입은 그래프를 그대로 둔다', (() => {
+    const st = wbStore()
+    const before = JSON.stringify(st.toJSON())
+    const r = applyWriteback(st, { nodes: [], edges: [] })
+    return JSON.stringify(st.toJSON()) === before && r.applied.nodesAdded === 0
+      && r.applied.edgesAdded === 0 && r.applied.edgesRemoved === 0
+  })())
+  ok('역기입이 아예 없어도(undefined) 크래시하지 않는다', (() => {
+    const st = wbStore()
+    const r = applyWriteback(st, undefined)
+    return r.applied.nodesAdded === 0 && st.stats().nodes === 4
+  })())
+  ok('없는 엣지 삭제는 경고 후 건너뛴다', (() => {
+    const st = wbStore()
+    const r = applyWriteback(st, { remove_edges: [{ s: '바다', p: 'loves', o: '노을' }] })
+    return r.applied.edgesRemoved === 0 && st.stats().assertedEdges === 4
+      && r.warnings.some((w) => w.includes('그래프에 없는 엣지'))
+  })())
+  ok('파생 엣지를 지우려 하면 경고 후 건너뛴다', (() => {
+    const st = wbStore()
+    const r = applyWriteback(st, { remove_edges: [{ s: '노을', p: 'unrequited_love', o: '가온' }] })
+    return r.applied.edgesRemoved === 0
+      && r.warnings.some((w) => w.includes('파생 엣지는 직접 삭제할 수 없습니다'))
+      && st.getEdgesFrom('noeul').some((e) => e.p === 'unrequited_love')
+  })())
+  ok('파생 전용 술어는 직접 넣지 않는다', (() => {
+    const st = wbStore()
+    const r = applyWriteback(st, { edges: [{ s: '노을', p: 'has_leverage_over', o: '바다' }] })
+    return r.applied.edgesAdded === 0 && r.warnings.some((w) => w.includes('파생 전용'))
+  })())
+  ok('지시서 스키마(add_nodes/add_edges)도 그대로 받는다', (() => {
+    const st = wbStore()
+    const r = applyWriteback(st, {
+      add_nodes: [{ name: '낡은 열쇠', kind: 'Object' }],
+      add_edges: [{ s: '가온', p: 'uses', o: '낡은 열쇠' }],
+      remove_edges: [],
+    })
+    return r.applied.nodesAdded === 1 && r.applied.edgesAdded === 1
+      && st.getEdgesFrom('gaon').some((e) => e.p === 'uses')
+  })())
+  ok('역기입 엣지의 note 는 props.cause 로 남는다', (() => {
+    const st = wbStore()
+    applyWriteback(st, { edges: [{ s: '가온', p: 'reveals', o: '가게의 사정', note: '공개' }] })
+    return st.getEdgesFrom('gaon').find((e) => e.p === 'reveals')?.props?.cause === '공개'
+  })())
+  ok('이미 있는 이름의 노드는 새로 만들지 않는다', (() => {
+    const st = wbStore()
+    const r = applyWriteback(st, { nodes: [{ name: '가온', kind: 'Character' }] })
+    return r.applied.nodesAdded === 0 && st.stats().nodes === 4
+      && r.warnings.some((w) => w.includes('이미 있는 노드'))
+  })())
+  ok('이미 있는 엣지는 두 번 넣지 않는다', (() => {
+    const st = wbStore()
+    const r = applyWriteback(st, { edges: [{ s: '가온', p: 'loves', o: '노을' }] })
+    return r.applied.edgesAdded === 0 && r.warnings.some((w) => w.includes('이미 있는 엣지'))
+  })())
+  ok('저장소가 없으면 적용하지 않고 이유를 남긴다', (() => {
+    const r = applyWriteback(null, demoBranch.writeback)
+    return r.applied.nodesAdded === 0 && r.newSeeds.length === 0 && r.warnings.length >= 1
+  })())
+
+  // ── 대본화: scriptFormatPrompt / planScript / localScript ───────────────────
+  const demoCuts = [
+    { scene: 'S1 빵집', secs: 3, action: '셔터를 올린다', dialogue: '', camera: 'WS', cast: ['가온'] },
+    { scene: 'S2 카운터', secs: 4, action: '노을이 들어온다', dialogue: '오늘도 그거요', camera: 'MS', cast: ['가온', '노을'] },
+    { scene: 'S3 진열장', secs: 5, action: '빵을 담는다', dialogue: '', camera: 'CU', cast: ['가온'] },
+  ]
+
+  ok('대본화 형식은 3종이다', Object.keys(SCRIPT_FORMATS).join(',') === 'drama,film,webdrama')
+  ok('drama 프롬프트는 S#번호 가이드를 넣는다',
+    scriptFormatPrompt(demoCuts, { format: 'drama' }).includes('S#번호'))
+  ok('film 프롬프트는 FADE IN 가이드를 넣는다',
+    scriptFormatPrompt(demoCuts, { format: 'film' }).includes('FADE IN'))
+  ok('webdrama 프롬프트는 [씬 가이드를 넣는다',
+    scriptFormatPrompt(demoCuts, { format: 'webdrama' }).includes('[씬'))
+  ok('모르는 형식은 drama 로 떨어진다',
+    scriptFormatPrompt(demoCuts, { format: 'musical' }).includes('S#번호'))
+  ok('대본화 프롬프트에 컷의 장면·대사·등장이 들어간다', (() => {
+    const p = scriptFormatPrompt(demoCuts, { format: 'drama', title: '동네 빵집', chars: [{ name: '가온', brief: '주인' }] })
+    return p.includes('S2 카운터') && p.includes('오늘도 그거요') && p.includes('가온, 노을')
+      && p.includes('동네 빵집') && p.includes('WS')
+  })())
+  ok('대본화 프롬프트는 JSON 이 아니라 대본 텍스트를 요구한다', (() => {
+    const p = scriptFormatPrompt(demoCuts, {})
+    return p.includes('대본 텍스트만 출력한다') && !p.includes('오직 아래 모양의 JSON')
+  })())
+  ok('묶음으로 나눌 때는 씬 번호를 이어 붙이게 한다', (() => {
+    const p = scriptFormatPrompt(demoCuts, { part: { i: 2, n: 3, from: 10 } })
+    return p.includes('3묶음으로 나눈 것 중 2번째') && p.includes('11 번부터 이어 붙인다')
+  })())
+  ok('컷이 없어도 프롬프트는 만들어진다', typeof scriptFormatPrompt([], {}) === 'string')
+
+  ok('localScript 는 컷 3개를 S#1~S#3 으로 낸다', (() => {
+    const t = localScript(demoCuts, {})
+    return t.includes('S#1.') && t.includes('S#2.') && t.includes('S#3.')
+  })())
+  ok('localScript 는 지문과 대사를 갈라 적는다', (() => {
+    const t = localScript(demoCuts, {})
+    return t.includes('등장인물: 가온, 노을') && t.includes('가온: 오늘도 그거요')
+      && t.includes('셔터를 올린다')
+  })())
+  ok('localScript 는 빈 컷 배열에 빈 문자열을 낸다', localScript([], {}) === '' && localScript(null, {}) === '')
+  ok('localScript film 은 FADE IN/OUT 과 INT. 를 세운다', (() => {
+    const t = localScript(demoCuts, { format: 'film', title: '빵집' })
+    return t.startsWith('빵집') && t.includes('FADE IN:') && t.includes('INT. S1 빵집 - DAY')
+      && t.trim().endsWith('FADE OUT.')
+  })())
+  ok('localScript webdrama 는 [씬 n - 장소] 로 센다', (() => {
+    const t = localScript(demoCuts, { format: 'webdrama' })
+    return t.includes('[씬 1 - S1 빵집]') && t.includes('[씬 3 - S3 진열장]')
+  })())
+  ok('localScript 의 from 은 씬 번호를 밀어 준다',
+    localScript(demoCuts, { from: 10 }).includes('S#11.'))
+  ok('localScript 는 대사 없는 컷에 지문만 적는다', (() => {
+    const t = localScript([demoCuts[0]], {})
+    return t.includes('셔터를 올린다') && !t.includes('가온: ')
+  })())
+
+  ok('net 이 없으면 planScript 가 localScript 와 같다',
+    (await planScript(null, demoCuts, { format: 'drama' })) === localScript(demoCuts, { format: 'drama' }))
+  ok('컷이 없으면 planScript 는 빈 문자열이다', (await planScript(null, [], {})) === '')
+  ok('planScript 는 모델이 준 텍스트를 그대로 쓴다 (JSON 파싱을 하지 않는다)', await (async () => {
+    const fake = { plan: async () => ({ text: 'S#1. 빵집\n  가온: 문 열었습니다' }) }
+    const t = await planScript(fake, demoCuts, {})
+    return t === 'S#1. 빵집\n  가온: 문 열었습니다'
+  })())
+  ok('컷이 많으면 묶음으로 나눠 부르고 이어 붙인다', await (async () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({ ...demoCuts[0], scene: `S${i + 1}` }))
+    let calls = 0
+    const fake = { plan: async () => { calls++; return { text: `조각 ${calls}` } } }
+    const t = await planScript(fake, many, {})
+    return calls === 3 && t.split('\n\n').length === 3
+  })())
+  ok('묶음 하나가 실패하면 로컬 형식으로 메운다', await (async () => {
+    const many = Array.from({ length: 15 }, (_, i) => ({ ...demoCuts[0], scene: `S${i + 1}` }))
+    let calls = 0
+    const fake = { plan: async () => { calls++; if (calls === 2) throw new Error('끊김'); return { text: '조각' } } }
+    const t = await planScript(fake, many, {})
+    return t.includes('조각') && t.includes('S#11.')
+  })())
+  ok('모든 묶음이 빈 텍스트면 에러를 낸다', await (async () => {
+    const fake = { plan: async () => ({ text: '' }) }
+    try { await planScript(fake, demoCuts, {}); return false } catch { return true }
+  })())
+
+  ok('대본 Blob 은 BOM 을 앞에 붙인 UTF-8 이다', (() => {
+    const b = scriptBlob('abc')
+    return b.size === 6 && b.type === 'text/plain;charset=utf-8'
+  })())
+  ok('대본 Blob 은 한글도 담는다', scriptBlob('가온').size === 3 + 6)
+  ok('대본 파일 이름에 제목이 들어간다', scriptFileName('마지막 레시피') === '마지막 레시피_대본.txt')
+  ok('제목이 없으면 무제로 둔다', scriptFileName('') === '무제_대본.txt' && scriptFileName(null) === '무제_대본.txt')
+  ok('파일 이름에서 경로 문자를 뺀다', scriptFileName('A/B:C*D') === 'A B C D_대본.txt')
+
   // ── mock/graph.json 과의 호환: 추출 결과를 그대로 뷰어에 넣을 수 있는가 ──────
   const grab = async (p) => {
     const r = await fetch(`${p}?t=${Date.now()}`)
@@ -1069,6 +1408,66 @@
     ok('컨텍스트 팩이 canon 의 씨앗 주변만 담는다', (() => {
       const ctx = contextPackPrompt(liveSeeds[0], store)
       return ctx.includes('[씨앗]') && ctx.includes('[구조적 결함]') && ctx.length < 4000
+    })())
+
+    // ── canon + mock/stories.json 의 역기입을 실제로 얹어 본다 ────────────────
+    const mockStories = stories.map((st) => normalizeStory(st))
+    const fresh = () => createGraphStore(canon)
+    const seedSig = (list) => list.map((s) => `${s.probe}:${s.focus.join('+')}`).sort().join(',')
+    const canonSeeds = seedSig(findSeeds(fresh()))
+
+    ok('mock 스토리의 첫 분기 역기입은 canon 위에서 safe 하다', (() => {
+      const v = validateWritebackBeforeApply(fresh(), mockStories[0].branches[0].writeback)
+      return v.safe === true && v.preview.nodesAdded === 1 && v.preview.edgesAdded === 4
+    })(), JSON.stringify(validateWritebackBeforeApply(fresh(), mockStories[0].branches[0].writeback).preview))
+    ok('mock 분기 12개를 다 얹어도 크래시하지 않는다', (() => {
+      let moved = 0
+      for (const st of mockStories) {
+        for (const b of st.branches) {
+          const store2 = fresh()
+          const r = applyWriteback(store2, b.writeback)
+          if (r.applied.nodesAdded + r.applied.edgesAdded > 0) moved++
+          if (!Array.isArray(r.newSeeds)) return false
+        }
+      }
+      return moved === 12
+    })())
+    ok('역기입이 그래프를 키우면 탐침이 새 씨앗을 찾는다', (() => {
+      // 3번 스토리 A 분기는 새 Secret 과 knows 를 넣어 비밀 레버리지 자리를 만든다
+      const store2 = fresh()
+      const r = applyWriteback(store2, mockStories[3].branches[0].writeback)
+      const after = seedSig(r.newSeeds)
+      return after !== canonSeeds && r.newSeeds.length > findSeeds(fresh()).length
+    })(), `${findSeeds(fresh()).length} -> ${applyWriteback(fresh(), mockStories[3].branches[0].writeback).newSeeds.length}`)
+    ok('진우 serves 귀마 를 끊으면 귀마 rival_of 루미 파생도 사라진다', (() => {
+      const store2 = fresh()
+      const had = store2.getEdgesFrom('gwima').some((e) => e.p === 'rival_of' && e.o === 'rumi')
+      const r = applyWriteback(store2, { remove_edges: [{ s: '진우', p: 'serves', o: '귀마' }] })
+      const now = store2.getEdgesFrom('gwima').some((e) => e.p === 'rival_of' && e.o === 'rumi')
+      return had && !now && r.applied.edgesRemoved === 1 && r.applied.derivedLost === 1
+    })())
+    ok('엣지를 끊으면 그 자리에서 나왔던 씨앗도 줄어든다', (() => {
+      const store2 = fresh()
+      const r = applyWriteback(store2, { remove_edges: [{ s: '진우', p: 'serves', o: '귀마' }] })
+      return r.newSeeds.length < findSeeds(fresh()).length
+    })())
+    ok('역기입은 노드 이름으로 온 엣지도 id 로 옮겨 붙인다', (() => {
+      const store2 = fresh()
+      applyWriteback(store2, mockStories[0].branches[0].writeback)
+      return store2.getEdgesFrom('rumi').some((e) => e.p === 'calls_true_name' && e.o === 'jinu')
+    })())
+    ok('역기입으로 들어온 새 사건은 t 를 지킨다', (() => {
+      const store2 = fresh()
+      applyWriteback(store2, mockStories[0].branches[0].writeback)
+      const made = store2.getNodes({ kind: 'Event' }).find((n) => n.name === '이름의 호명')
+      return !!made && made.props.t === 0 && !!made.props.desc
+    })())
+    ok('mock 분기를 spec 으로 옮기면 컷 확장까지 이어진다', await (async () => {
+      const b = mockStories[0].branches[0]
+      const spec = branchToSpec(b, { secs: 60, cuts: 8 })
+      const outline = await planBranchOutline(null, b, spec, { chars: [], title: mockStories[0].title })
+      return outline.beats.length === b.beats.length && outline.local === true
+        && localScript(outline.beats, {}).includes('S#1.')
     })())
 
   } catch (err) {
