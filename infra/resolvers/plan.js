@@ -1,9 +1,14 @@
-// updated: 2026-09-02 r3 — 이 줄을 고치면 인라인 코드 문자열이 바뀌어 리졸버가 강제로 갱신된다
+// updated: 2026-09-03 r6 — 이 줄을 고치면 인라인 코드 문자열이 바뀌어 리졸버가 강제로 갱신된다
+//
+// plan 을 비동기로 띄운다. AppSync 의 요청 실행 시간 상한은 30초이고 상향이 불가라서
+// 느린 모델(Opus 등)을 동기로 기다리면 Execution timeout 이 난다. 그래서
+//   1) 여기서 Lambda 를 Event 로 띄우고 jobId 만 즉시 돌려준다 (Bedrock 을 기다리지 않는다)
+//   2) Lambda 가 Bedrock 을 끝낸 뒤 결과를 Ops 테이블에 적는다
+//   3) 브라우저가 planResult(jobId) 로 받아 간다 — demo/net.js 의 runPlan
+// invocationType 이 Event 면 ctx.result 는 null 이다. 그래서 jobId 는 stash 로 넘긴다.
 import { util } from '@aws-appsync/utils'
 
 const ROLES = ['planner', 'director']
-const MODEL = 'us.anthropic.claude-sonnet-5'
-const SYSTEM = '당신은 광고·단편 영상의 콘티 기획자다. 요청받은 JSON 하나만 출력한다. 설명·머리말·코드펜스를 붙이지 않는다.'
 
 export function request(ctx) {
   const claims = ctx.identity?.claims || {}
@@ -21,33 +26,34 @@ export function request(ctx) {
   if (prompt.length < 8 || prompt.length > 8000) {
     util.error('프롬프트 길이가 8~8000자여야 합니다', 'BadRequest')
   }
-  // APPSYNC_JS 는 Number() 변환 함수를 주지 않는다 (Number.isFinite·isNaN 만 있다).
-  // 곱셈으로 강제하면 ToNumber 와 같은 결과가 나온다 — Number() 를 다시 쓰면 배포가 막힌다.
-  const want = input.maxTokens * 1
-  const maxTokens = Math.min(4000, Math.max(300, Number.isFinite(want) ? Math.round(want) : 2000))
 
-  const body = {
-    system: [{ text: SYSTEM }],
-    messages: [{ role: 'user', content: [{ text: prompt }] }],
-    inferenceConfig: { maxTokens },
-  }
-  if (input.think !== true) body.additionalModelRequestFields = { thinking: { type: 'disabled' } }
+  // 결과를 읽을 수 있는 사람을 여기서 못 박는다. planResult 가 같은 값으로 대조한다 —
+  // jobId 를 주워도 남의 결과는 못 읽는다.
+  const owner = claims['cognito:username'] || claims.sub || ''
+  const jobId = util.autoId()
+  ctx.stash.jobId = jobId
 
+  // maxTokens·model·think 는 손대지 않고 넘긴다. 클램프와 허용 목록은 Lambda 쪽에 있다 —
+  // APPSYNC_JS 에는 Number() 도 없어서 검사를 두 군데 두면 규칙이 어긋나기 쉽다.
   return {
-    method: 'POST',
-    resourcePath: `/model/${MODEL}/converse`,
-    params: { headers: { 'Content-Type': 'application/json' }, body },
+    operation: 'Invoke',
+    invocationType: 'Event',
+    payload: {
+      operation: 'plan',
+      payload: {
+        jobId,
+        owner,
+        prompt,
+        maxTokens: input.maxTokens,
+        model: input.model,
+        think: input.think,
+      },
+    },
   }
 }
 
 export function response(ctx) {
+  // Event 호출이라 ctx.error 는 Lambda 안에서 난 오류가 아니라 띄우는 데 실패한 것이다
   if (ctx.error) util.error(ctx.error.message, ctx.error.type)
-  const { statusCode, body } = ctx.result
-  if (statusCode !== 200) util.error(`Bedrock ${statusCode}: ${body}`, 'BedrockError')
-
-  const out = JSON.parse(body)
-  const content = (out.output && out.output.message && out.output.message.content) || []
-  let text = ''
-  for (const c of content) if (typeof c.text === 'string') text += c.text
-  return JSON.stringify({ text, usage: out.usage, stop: out.stopReason })
+  return { jobId: ctx.stash.jobId, status: 'pending' }
 }

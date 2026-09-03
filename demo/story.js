@@ -254,9 +254,106 @@ export function chunkText(text, size = GRAPH_CHUNK) {
   return out
 }
 
+// ── 긴 대본은 먼저 줄인다 ─────────────────────────────────────────────────────
+// 조각마다 그래프를 뽑으면 조각 수만큼 (조각 + 규칙 블록) 프롬프트가 만들어져 상한에
+// 걸리기 쉽고, 조각을 넘나드는 관계도 조각 안에서는 보이지 않는다. 그래서 긴 대본은
+// 요약을 한 번 거쳐 짧게 만든 뒤 추출을 한 번만 돈다.
+//   긴 대본 → summarizeForExtraction → extractGraphPrompt → normalizeGraph
+
+/** 이 길이부터 먼저 요약한다. 이 밑은 예전처럼 바로 추출한다 */
+const SUMMARY_MIN = 3000
+/** 요약본 목표 글자 수. 추출 프롬프트에 통째로 들어가야 해서 GRAPH_CHUNK 아래로 둔다 */
+const SUMMARY_CHARS = 2000
+/** 요약 응답 토큰 상한. 요약은 짧으니 이만큼이면 넉넉하다 */
+const SUMMARY_TOKENS = 1500
+/** 요약 프롬프트에 한 번에 넣는 원문 글자 수. 규칙 블록이 짧아 추출 조각보다 크게 잡는다 */
+const SUMMARY_CHUNK = 6000
+
+/**
+ * 대본을 그래프 추출용으로 줄이는 프롬프트. 출력은 JSON 이 아니라 요약문이다.
+ *
+ * @param {string} text - 대본 전문 또는 그 조각
+ * @param {Object} [opts]
+ * @param {string} [opts.title] 작품 제목
+ * @param {number} [opts.limit=SUMMARY_CHARS] 요약본 글자 수 상한
+ * @param {{i: number, n: number}} [opts.part] 원문을 나눠 넣을 때의 조각 번호
+ * @returns {string} Bedrock 에 그대로 넣는 프롬프트. 길이는 PROMPT_MAX 이하가 보장된다
+ */
+export function summarizePrompt(text, opts = {}) {
+  const limit = numOr(opts.limit, SUMMARY_CHARS)
+  const part = opts.part && opts.part.n > 1 ? opts.part : null
+
+  return withBody([
+    `아래 대본의 핵심 인물, 관계, 사건, 비밀만 ${limit}자 이내로 요약해.`
+      + ' 인물 이름, 나이, 역할, 관계를 빠짐없이 포함할 것.',
+    part ? `아래는 한 대본을 ${part.n}조각으로 나눈 것 중 ${part.i}번째다. 이 조각만 요약한다.` : null,
+    opts.title ? `작품: ${opts.title}` : null,
+    '',
+    '대본:',
+  ].filter((l) => l !== null), text, [
+    '',
+    '규칙',
+    '- 인물 이름은 대본에 나온 그대로 쓴다. 별명·호칭이 여럿이면 가장 많이 불리는 것을 쓴다.',
+    '- 인물마다 나이·역할·소속을 알 수 있는 만큼 적는다.',
+    '- 누가 누구를 어떻게 여기는지(사랑·불신·적대·보호 등)를 빠뜨리지 않는다.',
+    '- 사건은 관계를 바꾼 것만, 일어난 순서로 적는다.',
+    '- 비밀은 그 내용과 함께 누가 감추고 누가 아는지·모르는지를 적는다.',
+    '- 대사·화면 묘사·장면 지시는 옮기지 않는다.',
+    '- 요약문만 출력한다. 머리말·설명·코드펜스를 붙이지 않는다.',
+    '- 한국어로 쓴다.',
+  ], '(대본이 길어 여기서 잘랐다)')
+}
+
+/**
+ * 긴 대본을 그래프 추출에 넣을 요약본으로 줄인다. planGraph 의 1단계다.
+ * 원문이 한 프롬프트에 들어가지 않으면 조각으로 나눠 요약하고 이어 붙인다 —
+ * 조각마다 그래프를 뽑는 것보다 이쪽이 싸고, 이어 붙인 요약은 한 번에 추출된다.
+ *
+ * @param {Object} net - net.plan({prompt, maxTokens, think}) 를 가진 객체
+ * @param {string} source - 대본 평문 (scriptToText 를 먼저 거친 것)
+ * @param {Object} [ctx]
+ * @param {string} [ctx.title] 작품 제목
+ * @param {string} [ctx.model] 쓸 모델 ('haiku-4.5' | 'sonnet-5' | 'opus-4.8')
+ * @returns {Promise<{text: string, warnings: Array<string>}>} 요약본. 다 실패하면 throw 한다
+ */
+export async function summarizeForExtraction(net, source, ctx = {}) {
+  const text = String(source || '').trim()
+  if (!text) return { text: '', warnings: [] }
+  if (!net?.plan) throw new Error('대본 요약에는 Bedrock 연결이 필요합니다.')
+
+  const warnings = []
+  let parts = chunkText(text, SUMMARY_CHUNK)
+  if (parts.length > GRAPH_MAX_CHUNKS) {
+    warnings.push(`대본이 길어 앞 ${GRAPH_MAX_CHUNKS}조각까지만 요약했다`)
+    parts = parts.slice(0, GRAPH_MAX_CHUNKS)
+  }
+  // 조각이 여럿이면 이어 붙인 요약이 목표 길이를 넘지 않게 조각마다 몫을 나눠 준다
+  const limit = Math.max(500, Math.round(SUMMARY_CHARS / parts.length))
+
+  const got = await Promise.allSettled(parts.map((p, i) => net.plan(planSpec(
+    summarizePrompt(p, { title: ctx.title, limit, part: { i: i + 1, n: parts.length } }),
+    SUMMARY_TOKENS, ctx.model))))
+
+  const out = []
+  got.forEach((r, i) => {
+    const body = r.status === 'fulfilled' ? String(r.value?.text ?? '').trim() : ''
+    if (!body) {
+      warnings.push(`${i + 1}/${parts.length} 조각 요약 실패 — 건너뛴다: ${r.reason?.message || ''}`)
+      return
+    }
+    out.push(body)
+  })
+  if (!out.length) throw new Error('대본 요약을 받지 못했습니다. 다시 시도해 주세요.')
+  return { text: out.join('\n\n'), warnings }
+}
+
 /**
  * 텍스트에서 그래프를 뽑아 mock/graph.json 과 같은 모양으로 돌려준다.
  * 뽑은 것(asserted)에 deriveEdges 의 파생 엣지를 붙여서 준다.
+ *
+ * 텍스트가 SUMMARY_MIN 자 이상이면 두 단계로 돈다 — 먼저 요약해서 줄이고, 그
+ * 요약본에서 그래프를 뽑는다. 요약이 실패하면 예전처럼 원문을 조각내서 뽑는다.
+ * 그보다 짧으면 요약 없이 바로 뽑는다.
  *
  * @param {Object} net - net.plan({prompt, maxTokens, think}) 를 가진 객체
  * @param {string} source - 대본·시놉시스 평문 (scriptToText 를 먼저 거친 것)
@@ -264,6 +361,7 @@ export function chunkText(text, size = GRAPH_CHUNK) {
  * @param {string} [ctx.title] 작품 제목
  * @param {Object} [ctx.canon] 이미 확립된 {nodes, edges}. id 재사용과 모순 검사에 쓴다
  * @param {number} [ctx.maxNodes] 노드 상한
+ * @param {string} [ctx.model] 쓸 모델. 요약과 추출이 같은 모델로 간다
  * @returns {Promise<{nodes: Array, edges: Array, warnings: Array, conflicts: Array, compatible: boolean}>}
  */
 export async function planGraph(net, source, ctx = {}) {
@@ -272,7 +370,21 @@ export async function planGraph(net, source, ctx = {}) {
   if (!net?.plan) throw new Error('그래프 추출에는 Bedrock 연결이 필요합니다.')
 
   const warnings = []
-  let parts = chunkText(text)
+  let body = text
+  if (text.length >= SUMMARY_MIN) {
+    // 요약이 안 되면 추출까지 같이 죽이지 않는다 — 조각내서 뽑는 예전 길로 내려간다
+    const sum = await summarizeForExtraction(net, text, ctx).catch((err) => {
+      warnings.push(`대본 요약 실패 — 원문을 조각내서 뽑는다: ${err.message || ''}`)
+      return null
+    })
+    if (sum) {
+      warnings.push(...sum.warnings)
+      warnings.push(`대본이 ${text.length}자라 ${sum.text.length}자로 요약한 뒤 뽑았다`)
+      body = sum.text
+    }
+  }
+
+  let parts = chunkText(body)
   if (parts.length > GRAPH_MAX_CHUNKS) {
     warnings.push(`텍스트가 길어 앞 ${GRAPH_MAX_CHUNKS}조각까지만 읽었다`)
     parts = parts.slice(0, GRAPH_MAX_CHUNKS)
@@ -281,7 +393,8 @@ export async function planGraph(net, source, ctx = {}) {
   const known = canon.nodes.map((n) => ({ id: n.id, kind: n.kind, name: n.name }))
 
   const got = await Promise.allSettled(parts.map((p, i) => ask(net,
-    extractGraphPrompt(p, { ...ctx, known, part: { i: i + 1, n: parts.length } }), 4000)))
+    extractGraphPrompt(p, { ...ctx, known, part: { i: i + 1, n: parts.length } }),
+    4000, { model: ctx.model })))
 
   const raws = []
   got.forEach((r, i) => {
@@ -620,13 +733,15 @@ function finishStory(raw, seed, store, { local = false } = {}) {
  * @param {Object} [opts]
  * @param {Array} [opts.pool] 로컬 폴백에 쓸 스토리 묶음 (mock/stories.json)
  * @param {Function} [opts.onTry] 시도마다 (몇 번째, 전체) 를 받는다 — 화면에 진행을 남길 때 쓴다
+ * @param {string} [opts.model] 쓸 모델 ('haiku-4.5' | 'sonnet-5' | 'opus-4.8')
  * @returns {Promise<Object>} mock/stories.json 의 스토리 하나와 같은 모양 + {warnings, local}
  */
 export async function planBranches(net, seed, store, opts = {}) {
   if (!net?.plan) return localBranches(seed, store, opts.pool)
   const graph = store?.toJSON?.() || null
   const build = (ctx) => branchPrompt(seed, ctx, graph)
-  const raw = await ask(net, build(packFor(seed, store, build)), BRANCH_TOKENS, opts.onTry)
+  const raw = await ask(net, build(packFor(seed, store, build)), BRANCH_TOKENS,
+    { onTry: opts.onTry, model: opts.model })
   return finishStory(raw, seed, store)
 }
 
@@ -640,13 +755,15 @@ export async function planBranches(net, seed, store, opts = {}) {
  * @param {Object} [opts]
  * @param {Array} [opts.pool] 로컬 폴백에 쓸 스토리 묶음
  * @param {Function} [opts.onTry] 시도마다 (몇 번째, 전체) 를 받는다 — 화면에 진행을 남길 때 쓴다
+ * @param {string} [opts.model] 쓸 모델 ('haiku-4.5' | 'sonnet-5' | 'opus-4.8')
  * @returns {Promise<Object>} planBranches 와 같은 모양
  */
 export async function planFreeBranches(net, userInput, seed, store, opts = {}) {
   if (!net?.plan) return localBranches(seed, store, opts.pool, userInput)
   const graph = store?.toJSON?.() || null
   const build = (ctx) => freeDirectionPrompt(userInput, seed, ctx, graph)
-  const raw = await ask(net, build(packFor(seed, store, build)), BRANCH_TOKENS, opts.onTry)
+  const raw = await ask(net, build(packFor(seed, store, build)), BRANCH_TOKENS,
+    { onTry: opts.onTry, model: opts.model })
   return finishStory(raw, seed, store)
 }
 
@@ -756,18 +873,36 @@ const SHORTER = '\n- 앞 요청의 답이 길어서 잘렸다. 같은 모양의 
   + ' 설명은 한 문장으로 줄이고 항목 수도 최소로 한다.'
 
 /**
+ * net.plan 에 보내는 요청 하나. 모델 선택은 화면에서 오고 리졸버가 허용 목록으로 걸러 준다.
+ * 고른 것이 없으면 model 을 아예 싣지 않는다 — 그때는 리졸버의 기본 모델로 간다.
+ *
+ * @param {string} prompt - 보낼 프롬프트
+ * @param {number} maxTokens - 응답 토큰 상한
+ * @param {string} [model] - 'haiku-4.5' | 'sonnet-5' | 'opus-4.8' (infra/resolvers/plan.js 의 MODELS)
+ * @returns {{prompt: string, maxTokens: number, think: boolean, model?: string}}
+ */
+const planSpec = (prompt, maxTokens, model) => {
+  const spec = { prompt, maxTokens, think: false }
+  if (model) spec.model = String(model)
+  return spec
+}
+
+/**
  * 프롬프트를 보내고 JSON 을 받는다. 못 읽으면 원문을 콘솔에 남기고 다시 물어본다.
  * 같은 프롬프트를 그대로 다시 보내면 같은 자리에서 또 잘리므로, 상한에 걸렸을 때는
  * 더 짧게 쓰라는 한 줄을 붙여서 보낸다.
  *
- * @param {Function} [onTry] 시도마다 (몇 번째, 전체) 를 받는다. 화면에 진행을 남길 때 쓴다
+ * @param {Object} [opts]
+ * @param {Function} [opts.onTry] 시도마다 (몇 번째, 전체) 를 받는다. 화면에 진행을 남길 때 쓴다
+ * @param {string} [opts.model] 쓸 모델. 없으면 리졸버 기본값
  */
-const ask = async (net, prompt, maxTokens, onTry) => {
+const ask = async (net, prompt, maxTokens, opts = {}) => {
+  const { onTry, model } = opts
   let last = null
   let cut = false
   for (let i = 1; i <= ASK_TRIES; i++) {
     onTry?.(i, ASK_TRIES)
-    const res = await net.plan({ prompt: cut ? prompt + SHORTER : prompt, maxTokens, think: false })
+    const res = await net.plan(planSpec(cut ? prompt + SHORTER : prompt, maxTokens, model))
     const text = String(res?.text ?? '')
     try {
       return parseJson(text)
@@ -785,9 +920,12 @@ const ask = async (net, prompt, maxTokens, onTry) => {
   throw last
 }
 
+/** ctx·opts 에 model 이 있으면 그것을, 없으면 spec 에 실려 온 것을 쓴다 (branchToSpec 경로) */
+const pickModel = (a, b) => a?.model || b?.model || undefined
+
 export async function planOutline(net, spec, ctx) {
   if (!net?.plan) return localOutline(spec, ctx)
-  const p = normalizePlan(await ask(net, outlinePrompt(spec, ctx), 3000), {
+  const p = normalizePlan(await ask(net, outlinePrompt(spec, ctx), 3000, { model: pickModel(ctx, spec) }), {
     maxChars: spec.newChars,
     maxCuts: 12,
   })
@@ -795,14 +933,19 @@ export async function planOutline(net, spec, ctx) {
   return { ...p, beats: p.cuts, local: false }
 }
 
-export async function planCuts(net, spec, outline) {
+/**
+ * @param {Object} [opts]
+ * @param {string} [opts.model] 쓸 모델. 없으면 spec.model, 그것도 없으면 리졸버 기본값
+ */
+export async function planCuts(net, spec, outline, opts = {}) {
   if (!net?.plan) return localCuts(spec, outline)
   const per = perBeat(spec.cuts, outline.beats.length)
+  const model = pickModel(opts, spec)
   const batches = []
   for (let i = 0; i < outline.beats.length; i += BATCH) batches.push(outline.beats.slice(i, i + BATCH))
 
   const got = await Promise.allSettled(
-    batches.map((b, i) => ask(net, cutsPrompt(spec, outline, b, i * BATCH, per), 2500)))
+    batches.map((b, i) => ask(net, cutsPrompt(spec, outline, b, i * BATCH, per), 2500, { model })))
 
   const out = []
   got.forEach((r, i) => {
@@ -978,6 +1121,11 @@ const beatPlan = (b, i, secs, cast) => {
 const outcomeLines = (outcome) =>
   Object.entries(asObj(outcome)).map(([k, v]) => `- ${k}: ${v}`).join('\n')
 
+// 비트 하나를 2~3문장으로 쓰게 하면서 응답 상한을 3000 으로 두면 뒤 비트가 잘려 온다
+// (8비트 × 280자 + 제목·로그라인·줄거리 ≈ 3600 토큰). 리졸버 상한인 4000 까지 올려 둔다.
+/** 분기 개요의 응답 토큰 상한. 이보다 큰 값은 리졸버(plan.js)가 4000 으로 깎는다 */
+const BRANCH_OUTLINE_TOKENS = 4000
+
 /** 이 분기가 그래프에 남기는 것을 한 덩어리로. 개요 프롬프트에 근거로 넣는다 */
 const writebackLines = (writeback) => {
   const { nodes, edges, removes } = wbParts(writeback)
@@ -1058,7 +1206,9 @@ export function branchOutlinePrompt(branch, spec, ctx = {}) {
     spin: `아래 분기를 ${ctx.centerName || '한 인물'}을 주인공으로 갈라 나온 스핀오프(${secs}초)로 기획한다.`,
   }[mode]
 
-  return [
+  // 판의 컨텍스트(제목·이야기·인물 목록)만 잘릴 수 있게 withBody 로 감싼다. 판이 커지면
+  // 인물 목록이 수십 줄이 되는데, 아래 규칙이 잘리면 비트가 다시 한 줄로 돌아온다
+  return withBody([
     head,
     '분기는 관계 그래프에서 찾은 씨앗이 갈라진 갈래다. 분기가 이미 정한 선택과 결과를 뒤집지 않는다.',
     '',
@@ -1069,25 +1219,36 @@ export function branchOutlinePrompt(branch, spec, ctx = {}) {
     wb ? `이 분기가 관계 그래프에 남기는 것:\n${wb}` : null,
     '',
     `장르: ${s.genre || GENRES[0]} / 톤: ${s.tone || TONES[0]}`,
+  ].filter((l) => l !== null), [
     `지금 판의 제목: ${ctx.title || '(없음)'}`,
     `지금 판의 이야기:\n${ctx.scenario || '(없음)'}`,
     `이미 있는 인물:\n${roster(keep)}`,
+  ].join('\n'), [
     '',
     JSON_ONLY,
     '{"title":"제목","logline":"한 문장 요약","synopsis":"3~5문장 줄거리",',
     ' "chars":[{"name":"이름","brief":"나이·외모·옷·분위기를 한 줄로. 그림 지시로 쓸 수 있게 구체적으로"}],',
-    ' "beats":[{"scene":"S1 장소","summary":"이 비트에서 일어나는 일","secs":초,"cast":["이름"]}]}',
+    ' "beats":[{"scene":"S1 장소","summary":"2~3문장. 보이는 사건 + 인물의 내면 변화 + 관계 변화",'
+      + '"secs":초,"cast":["이름"]}]}',
     '',
     '규칙',
     `- beats는 ${nb}개. secs 합계는 ${secs}초에 맞춘다.`,
     '- 위 장면 순서를 뼈대로 삼는다. 순서를 뒤집거나 결과를 다르게 만들지 않는다.',
+    '',
+    '비트 쓰는 법',
+    '- summary 를 한 줄로 끝내지 않는다. 2~3문장으로 쓰고 280자 안쪽으로 둔다.',
+    '- 한 비트에 세 가지를 담는다. (1) 화면에 보이는 사건 (2) 그 사건이 인물의 안에서 무엇을 바꾸는지'
+      + ' (3) 인물 사이의 관계가 어느 쪽으로 움직이는지.',
+    '- 내면과 관계는 감정 단어로 이름 붙이지 않고, 인물이 무엇을 하기로 했는지로 적는다'
+      + ' (\'불안해한다\' 대신 \'묻지 않기로 하고 자리를 옮긴다\').',
+    '- 비트마다 앞 비트에서 달라진 것이 있어야 한다. 같은 상태를 두 번 적지 않는다.',
     newChars > 0
       ? `- chars에는 새로 만드는 인물 ${newChars}명만 넣는다. 이름은 한국어로 짓는다.`
       : '- chars는 빈 배열로 둔다.',
     keep.length ? '- 이미 있는 인물은 chars에 다시 넣지 않고 cast에서 이름으로만 부른다.' : null,
-    '- 대사는 여기서 쓰지 않는다. 비트는 무슨 일이 벌어지는지만 적는다.',
+    '- 대사는 여기서 쓰지 않는다. 무슨 일이 벌어지고 그것이 인물을 어떻게 바꾸는지만 적는다.',
     '- 한국어로 쓴다.',
-  ].filter((l) => l !== null).join('\n')
+  ].filter((l) => l !== null), '(판의 컨텍스트를 여기서 잘랐다)')
 }
 
 /**
@@ -1097,13 +1258,14 @@ export function branchOutlinePrompt(branch, spec, ctx = {}) {
  * @param {Object} net - net.plan({prompt, maxTokens, think}) 를 가진 객체. 없으면 로컬 모드
  * @param {Object} branch - 고른 분기
  * @param {Object} spec - branchToSpec 의 반환값
- * @param {Object} [ctx] - planCtx() 와 같은 컨텍스트
+ * @param {Object} [ctx] - planCtx() 와 같은 컨텍스트. ctx.model 로 쓸 모델을 고른다
  * @returns {Promise<Object>} normalizePlan 을 통과한 {title, logline, synopsis, chars, cuts, beats, local}
  */
 export async function planBranchOutline(net, branch, spec, ctx = {}) {
   if (!net?.plan) return localBranchOutline(branch, spec, ctx)
   const maxChars = Number.isFinite(Number(spec?.newChars)) ? Number(spec.newChars) : 4
-  const p = normalizePlan(await ask(net, branchOutlinePrompt(branch, spec, ctx), 3000), { maxChars, maxCuts: 12 })
+  const p = normalizePlan(await ask(net, branchOutlinePrompt(branch, spec, ctx), BRANCH_OUTLINE_TOKENS,
+    { model: pickModel(ctx, spec) }), { maxChars, maxCuts: 12 })
   if (!p.cuts.length) throw new Error('비트를 받지 못했습니다. 다시 시도해 주세요.')
   return { ...p, beats: p.cuts, local: false }
 }
@@ -1368,9 +1530,17 @@ export function applyWriteback(store, writeback) {
 // ── 대본화 ───────────────────────────────────────────────────────────────────
 // 보드의 컷을 정식 대본 포맷으로 옮긴다. 스토리 디벨롭과는 따로 도는 기능이다.
 // 출력이 JSON 이 아니라 대본 텍스트라서 여기서는 parseJson 을 쓰지 않는다.
+// 다만 모델이 대본을 JSON 으로 감싸 보내는 일이 있어 scriptText 로 래핑만 벗긴다.
 
-/** 한 번에 대본으로 옮기는 컷 수. 넘으면 묶음으로 나눠 부른다 (planCuts 와 같은 패턴) */
-const SCRIPT_BATCH = 10
+// 한 번에 대본으로 옮기는 컷 수. 넘으면 묶음으로 나눠 부른다 (planCuts 와 같은 패턴).
+// 컷 하나를 15줄 이상으로 펴라고 요구하므로 묶음이 크면 응답이 4000 토큰 상한에서 잘린다
+// (10컷 × 15줄이면 6천자가 넘는다). 30초 안에 끝나야 하는 것도 같은 이유로 묶음을 작게 만든다.
+/** 한 묶음의 컷 수. 이 값을 올리면 SCRIPT_TOKENS 안에서 컷당 줄 수가 줄어든다 */
+const SCRIPT_BATCH = 4
+/** 대본 한 묶음의 응답 토큰 상한. 리졸버가 4000 에서 자른다 */
+const SCRIPT_TOKENS = 4000
+/** 컷 하나에 요구하는 최소 줄 수 (지문 + 대사). 프롬프트와 묶음 크기가 같은 값을 본다 */
+const SCRIPT_LINES = 15
 
 /**
  * 대본 형식별 안내. 프롬프트의 형식 지시와 뷰어의 선택 항목이 같은 곳에서 나온다.
@@ -1382,7 +1552,7 @@ export const SCRIPT_FORMATS = {
       '드라마 대본 형식으로 옮긴다.',
       'S#번호. 장소 / 시간',
       '등장인물: 이름, 이름',
-      '지문은 평서문 한두 줄로 쓴다. 짧은 지시는 (괄호) 안에.',
+      '지문은 평서문으로 쓴다. 한 동작을 한 줄로 끊는다. 짧은 지시는 (괄호) 안에.',
       '캐릭터: 대사',
     ],
   },
@@ -1403,7 +1573,7 @@ export const SCRIPT_FORMATS = {
       '웹드라마 대본 형식으로 옮긴다.',
       '[씬 번호 - 장소]',
       '모바일 화면에 맞게 짧은 호흡으로 쓴다.',
-      '빠른 템포의 대사와 액션. 지문은 한 줄로.',
+      '빠른 템포의 대사와 액션. 지문은 짧은 문장을 여러 줄로 끊어 쓴다.',
     ],
   },
 }
@@ -1441,10 +1611,13 @@ export function scriptFormatPrompt(cuts, options = {}) {
     ].filter(Boolean).join('\n')
   })
 
-  return [
+  // 컷 목록만 잘릴 수 있게 withBody 로 감싼다 — 형식 가이드와 아래 규칙을 자르면
+  // 분량·묘사 지시가 사라져 예전처럼 두 줄짜리 대본이 돌아온다
+  return withBody([
     part
       ? `아래는 콘티를 ${part.n}묶음으로 나눈 것 중 ${part.i}번째다. 이 묶음의 컷만 대본으로 옮긴다.`
       : '아래 콘티 컷을 정식 대본으로 옮긴다.',
+    '콘티는 뼈대다. 한 컷을 실제로 촬영할 수 있는 한 장면으로 펴는 것이 이 작업이다.',
     '',
     ...SCRIPT_FORMATS[fmt].guide.map((g, i) => (i === 0 ? g : `- ${g}`)),
     '',
@@ -1452,17 +1625,120 @@ export function scriptFormatPrompt(cuts, options = {}) {
     `인물:\n${roster(asList(o.chars))}`,
     '',
     '컷:',
-    ...lines,
+  ].filter((l) => l !== null), lines.join('\n'), [
+    '',
+    '분량',
+    `- 컷 하나를 지문과 대사 합쳐 ${SCRIPT_LINES}줄 이상으로 편다. 컷을 한두 줄로 요약하지 않는다.`,
+    '- 한 씬(장소·시간이 같은 덩어리)은 최소 10줄이다. 짧게 끝내고 다음 씬으로 넘어가지 않는다.',
+    '',
+    '지문',
+    '- 카메라 앵글·조명·인물의 미세한 표정과 손짓까지 적는다. 한 동작을 한 줄로 끊어 쓴다.',
+    '- "해인의 손가락이 떨린다" 에서 멈추지 않는다. "해인의 왼손 약지가 테이블 모서리를 잡고,'
+      + ' 손톱 끝이 하얗게 질릴 만큼 힘이 들어간다. 표정은 무너지지 않는다." 처럼 무엇이 어떻게 보이는지 적는다.',
+    '- 감정을 이름으로 설명하지 않는다 (슬프다·화가 난다·불안하다). 시선·호흡·손에 쥔 소품·몸의 방향으로 보여준다.',
+    '',
+    '대사',
+    '- 인물마다 말투가 달라야 한다. 위 인물 설명에서 그 사람의 말투를 정하고 끝까지 지킨다.',
+    '- 자란 자리와 처지가 말에 남는다. 재벌가에서 자란 인물은 짧고 단정한 문장으로,'
+      + ' 농촌에서 자란 인물은 따뜻하고 직설적인 말로 쓴다. 같은 뜻도 사람마다 다르게 말한다.',
+    '- 대사를 연달아 붙이지 않는다. 대사와 대사 사이에 지문 한 줄을 넣어 호흡을 만든다.',
+    '',
+    '씬 전환',
+    '- 씬이 바뀌면 시간과 장소가 어떻게 변했는지 첫 줄에서 알 수 있게 쓴다.',
+    '- 앞 씬에서 인물의 감정이 어디까지 왔는지 이어 받는다. 같은 자리에서 다시 시작하지 않는다.',
     '',
     '규칙',
     '- 컷 순서를 지킨다. 컷을 합치거나 빼지 않는다.',
     part
       ? `- 씬 번호는 ${from + 1} 번부터 이어 붙인다. 앞뒤 묶음이 따로 만들어지므로 처음·끝 표시는 쓰지 않는다.`
       : null,
-    '- 컷에 없는 사건이나 인물을 새로 만들지 않는다. 대사가 없는 컷은 지문만 쓴다.',
+    '- 컷에 없는 사건이나 인물을 새로 만들지 않는다. 분량은 새 사건이 아니라'
+      + ' 이미 컷에 있는 순간을 더 자세히 봐서 채운다.',
+    '- 대사가 없는 컷은 지문만 쓴다. 대사를 억지로 만들지 않는다.',
     '- 대본 텍스트만 출력한다. JSON·설명·머리말·코드펜스를 붙이지 않는다.',
     '- 한국어로 쓴다. 형식 표기(INT./EXT., FADE IN 등)는 원어 그대로 둔다.',
-  ].filter((l) => l !== null).join('\n')
+  ].filter((l) => l !== null), '(컷이 많아 여기서 잘랐다)')
+}
+
+// 프롬프트로 "대본 텍스트만" 을 못 박아도 모델은 묶음의 뒤쪽에서 {"script": "S#5…"} 처럼
+// JSON 으로 감싸 보낼 때가 있다. 그대로 이어 붙이면 대본 중간부터 JSON 문자열이 보인다.
+// 아래 세 조각으로 벗긴다 — JSON 으로 의심되는 모양일 때만 손을 대고, 평문은 건드리지 않는다.
+//   SCRIPT_JSON → 여는 모양으로 JSON 여부를 가린다
+//   scriptOf    → 파싱한 값에서 대본 문자열을 고른다
+//   unquote     → 상한에서 잘려 파싱조차 안 되는 경우 문자열 값만 손으로 벗긴다
+
+/** 대본이 JSON 으로 감싸여 올 때 텍스트가 들어 있을 만한 키 */
+const SCRIPT_KEYS = ['script', 'text', 'content', 'body', '대본']
+
+/**
+ * JSON 으로 감싸여 온 응답의 여는 모양. `{` 뒤 키 따옴표, `[` 뒤 객체·배열·문자열만 본다 —
+ * webdrama 대본은 `[씬 1 - 빵집]` 으로 시작하므로 여는 괄호만으로 판단하면 평문을 건드린다.
+ */
+const SCRIPT_JSON = /^\{\s*["}]|^\[\s*[{["\]]/
+
+/** 잘려 온 `{"script": "…` 에서 값이 시작하는 자리 */
+const SCRIPT_OPEN = new RegExp(`^\\{\\s*"(?:${SCRIPT_KEYS.join('|')})"\\s*:\\s*"`)
+
+/**
+ * 파싱한 값에서 대본 문자열을 고른다. 아는 키를 먼저 보고, 키 이름이 다르면
+ * 값 중에서 가장 긴 문자열을 대본으로 본다 (짧은 title·note 가 아니라 본문을 집는다).
+ *
+ * @param {*} v - JSON.parse 나 repairJson 이 준 값
+ * @returns {string} 대본 텍스트. 문자열이 없으면 빈 문자열
+ */
+const scriptOf = (v) => {
+  if (typeof v === 'string') return v
+  if (Array.isArray(v)) return v.map(scriptOf).filter((t) => t.trim()).join('\n\n')
+  const o = asObj(v)
+  for (const k of SCRIPT_KEYS) if (typeof o[k] === 'string' && o[k].trim()) return o[k]
+  const rest = Object.values(o).map(scriptOf).filter((t) => t.trim())
+  return rest.sort((a, b) => b.length - a.length)[0] || ''
+}
+
+/**
+ * 잘린 JSON 문자열 값의 이스케이프를 되돌린다. 닫는 따옴표를 만나면 거기서 끊는다.
+ *
+ * @param {string} s - 여는 따옴표 다음부터의 텍스트
+ * @returns {string} 이스케이프를 푼 문자열
+ */
+const unquote = (s) => {
+  let out = ''
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]
+    if (c === '"') break
+    if (c !== '\\') { out += c; continue }
+    const e = s[++i]
+    if (e === undefined) break
+    if (e === 'n') out += '\n'
+    else if (e === 't') out += '\t'
+    else if (e === 'r') out += '\r'
+    else if (e === 'u') { out += String.fromCharCode(parseInt(s.slice(i + 1, i + 5), 16) || 0); i += 4 }
+    // \" \\ \/ 는 뒤 문자를 그대로 쓴다
+    else out += e
+  }
+  return out
+}
+
+/**
+ * 한 묶음의 응답에서 대본 텍스트만 꺼낸다. 코드펜스와 JSON 래핑을 벗기고,
+ * 평문 대본은 모델이 준 그대로 넘긴다.
+ *
+ * @param {*} raw - net.plan 이 준 text
+ * @returns {string} 이어 붙일 대본 텍스트. 감싼 JSON 에 텍스트가 없으면 빈 문자열
+ */
+const scriptText = (raw) => {
+  const s = unfence(String(raw ?? '')).trim()
+  if (!SCRIPT_JSON.test(s)) return s
+
+  let val
+  try { val = JSON.parse(s) } catch { val = repairJson(s) }
+  // 파싱은 됐다 — 텍스트가 없으면 빈 문자열이다. 감싼 JSON 을 대본으로 내보내지 않는다
+  if (val !== undefined) return scriptOf(val).trim()
+
+  // 상한에서 문자열 중간이 잘려 repairJson 도 못 살린 경우 — 값만 손으로 벗긴다
+  const m = s.match(SCRIPT_OPEN)
+  if (m) return unquote(s.slice(m[0].length)).trim()
+  return s
 }
 
 /**
@@ -1471,7 +1747,7 @@ export function scriptFormatPrompt(cuts, options = {}) {
  *
  * @param {Object} net - net.plan 을 가진 객체. 없으면 로컬 모드
  * @param {Array} cuts - 보드의 컷 배열
- * @param {Object} [options] - scriptFormatPrompt 와 같은 {format, title, chars}
+ * @param {Object} [options] - scriptFormatPrompt 와 같은 {format, title, chars} + {model}
  * @returns {Promise<string>} 대본 텍스트. 컷이 없으면 빈 문자열
  */
 export async function planScript(net, cuts, options = {}) {
@@ -1481,16 +1757,21 @@ export async function planScript(net, cuts, options = {}) {
 
   const batches = []
   for (let i = 0; i < list.length; i += SCRIPT_BATCH) batches.push(list.slice(i, i + SCRIPT_BATCH))
-  const got = await Promise.allSettled(batches.map((b, i) => net.plan({
-    prompt: scriptFormatPrompt(b, { ...options, part: { i: i + 1, n: batches.length, from: i * SCRIPT_BATCH } }),
-    maxTokens: 4000,
-    think: false,
-  })))
+  const got = await Promise.allSettled(batches.map((b, i) => net.plan(planSpec(
+    scriptFormatPrompt(b, { ...options, part: { i: i + 1, n: batches.length, from: i * SCRIPT_BATCH } }),
+    SCRIPT_TOKENS, options.model))))
 
   const out = []
   let failed = 0
   got.forEach((r, i) => {
-    const text = r.status === 'fulfilled' ? String(r.value?.text ?? '').trim() : ''
+    // 뒤쪽 묶음이 {"script": "S#5…"} 로 감싸 오는 일이 있다 — 래핑을 벗겨 텍스트만 이어 붙인다
+    const text = r.status === 'fulfilled' ? scriptText(r.value?.text) : ''
+    // 상한에서 잘려도 앞부분은 쓸 수 있다. 다만 뒤 컷이 사라진 것이므로 콘솔에 남긴다 —
+    // 자주 보이면 SCRIPT_BATCH 를 줄일 자리다
+    if (text && r.value?.stop === 'max_tokens') {
+      console.warn(`[story] 대본 ${i + 1}/${batches.length} 묶음이 응답 상한에서 잘렸다`
+        + ` — 컷 ${batches[i].length}개, ${text.length}자`)
+    }
     if (text) { out.push(text); return }
     // 묶음 하나가 비어 오면 그 자리만 로컬 형식으로 메운다. 전부 비면 에러다 —
     // 형식만 갖춘 대본을 모델이 쓴 것처럼 내놓지 않는다

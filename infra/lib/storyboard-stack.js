@@ -29,8 +29,8 @@ const MODEL = 'chroma'
 const CF_ORIGINS = 'pl-3b927c52'
 const NEPTUNE_VERSION = '1.3.4.0'
 const NEPTUNE_PORT = 8182
-// 데모용 NCU 폭. 최소로 놔둬도 쓰지 않는 동안에는 거의 붙지 않는다
-const NEPTUNE_NCU = { min: 1, max: 8 }
+// 데모용 기본 인스턴스 클래스. --context neptuneInstance=db.r6g.large 로 덮어쓴다
+const NEPTUNE_INSTANCE_DEFAULT = 'db.t4g.medium'
 
 class StoryboardStack extends Stack {
   constructor(scope, id, props) {
@@ -41,6 +41,15 @@ class StoryboardStack extends Stack {
       sortKey: { name: 'sk', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       timeToLiveAttribute: 'ttl',
+      removalPolicy: RemovalPolicy.DESTROY,
+    })
+
+    // 프로젝트별 기획 이력. Ops 와 달리 TTL 이 없다 — 영구 보관이다.
+    // GraphFn 이 읽고 쓴다 (HISTORY_TABLE).
+    const history = new dynamodb.Table(this, 'StoryHistory', {
+      partitionKey: { name: 'projectId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'timestamp', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: RemovalPolicy.DESTROY,
     })
 
@@ -80,18 +89,6 @@ class StoryboardStack extends Stack {
     const ops = api.addDynamoDbDataSource('OpsDs', table)
     const bus = api.addNoneDataSource('PubSubDs')
 
-    const bedrock = api.addHttpDataSource('BedrockDs',
-      `https://bedrock-runtime.${this.region}.amazonaws.com`, {
-        authorizationConfig: { signingRegion: this.region, signingServiceName: 'bedrock' },
-      })
-    bedrock.grantPrincipal.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: ['bedrock:InvokeModel'],
-      resources: [
-        'arn:aws:bedrock:*::foundation-model/anthropic.claude-*',
-        `arn:aws:bedrock:${this.region}:${this.account}:inference-profile/*`,
-      ],
-    }))
-
     const js = (ds, name, typeName, fieldName, file) =>
       ds.createResolver(name, {
         typeName,
@@ -103,7 +100,10 @@ class StoryboardStack extends Stack {
     js(ops, 'PutOp', 'Mutation', 'publishOp', 'putOp.js')
     js(ops, 'ListOps', 'Query', 'listOps', 'listOps.js')
     js(bus, 'Presence', 'Mutation', 'publishPresence', 'presence.js')
-    js(bedrock, 'Plan', 'Query', 'plan', 'plan.js')
+    // plan 결과는 GraphFn 이 Ops 테이블에 적어 둔 것을 읽어 온다
+    js(ops, 'PlanResult', 'Query', 'planResult', 'planResult.js')
+    // plan 자체는 GraphFn 이 받는다 — 데이터소스는 graphDs 를 만든 뒤에 붙인다.
+    // Bedrock 을 치던 HTTP 데이터소스(BedrockDs)는 지웠다.
 
     const realtimeUrl = api.node.defaultChild.attrRealtimeUrl
 
@@ -115,10 +115,15 @@ class StoryboardStack extends Stack {
 
     const net = ec2.Vpc.fromLookup(this, 'Net', { isDefault: true })
 
-    // ── 관계 그래프 (Neptune Serverless) ─────────────────────────────────────
+    // ── 관계 그래프 (Neptune Provisioned) ────────────────────────────────────
     // 브라우저의 graph-engine.js 가 조회를 들고 있고, 사실은 여기에 남는다.
     // 기본 VPC 를 그대로 쓴다 — 서브넷 그룹은 AZ 두 곳 이상이 필요하다.
+    //
+    // Provisioned 라서 시간당 요금이 붙는다. 쓰지 않는 동안에는 클러스터를 세워라 —
+    // scripts/stop.sh / scripts/start.sh. 인스턴스 클래스는 컨텍스트로 바꿀 수 있다:
+    //   npx cdk deploy --context neptuneInstance=db.r6g.large
     const slug = id.toLowerCase()
+    const NEPTUNE_INSTANCE = this.node.tryGetContext('neptuneInstance') || NEPTUNE_INSTANCE_DEFAULT
 
     const neptuneSubnets = new neptune.CfnDBSubnetGroup(this, 'GraphSubnets', {
       dbSubnetGroupDescription: 'storyboard graph',
@@ -131,10 +136,6 @@ class StoryboardStack extends Stack {
     const graph = new neptune.CfnDBCluster(this, 'Graph', {
       dbClusterIdentifier: `${slug}-graph`,
       engineVersion: NEPTUNE_VERSION,
-      serverlessScalingConfiguration: {
-        minCapacity: NEPTUNE_NCU.min,
-        maxCapacity: NEPTUNE_NCU.max,
-      },
       vpcSecurityGroupIds: [neptuneSg.securityGroupId],
       dbSubnetGroupName: neptuneSubnets.dbSubnetGroupName,
       iamAuthEnabled: false, // 데모용. 프로덕션에서는 켜고 Lambda 에 SigV4 서명을 붙인다
@@ -144,23 +145,38 @@ class StoryboardStack extends Stack {
     graph.node.addDependency(neptuneSubnets)
     graph.applyRemovalPolicy(RemovalPolicy.DESTROY)
 
-    // Serverless 여도 인스턴스는 최소 한 대 있어야 한다
+    // 클러스터에는 인스턴스가 최소 한 대 있어야 한다 (쓰기 노드)
     const graphInstance = new neptune.CfnDBInstance(this, 'GraphInstance', {
       dbClusterIdentifier: graph.dbClusterIdentifier,
-      dbInstanceClass: 'db.serverless',
+      dbInstanceClass: NEPTUNE_INSTANCE,
       dbInstanceIdentifier: `${slug}-graph-instance`,
     })
     graphInstance.node.addDependency(graph)
     graphInstance.applyRemovalPolicy(RemovalPolicy.DESTROY)
 
-    // Gremlin 을 도는 Lambda. 이 스택의 첫 Lambda 다.
-    // 기본 VPC 에는 Private 서브넷이 없으므로 Public 에 넣는다 — 인터넷으로 나가지는
-    // 못하지만(NAT 없음) 같은 VPC 안의 Neptune 은 닿는다. 이 함수는 그것만 필요하다.
+    // Gremlin 과 Bedrock 을 도는 Lambda. 이 스택의 첫 Lambda 다.
+    // 기본 VPC 에는 Private 서브넷이 없으므로 Public 에 넣는다 — Lambda ENI 는 퍼블릭 IP 를
+    // 받지 못해서 NAT 없이는 인터넷으로 나가지 못한다. 같은 VPC 안의 Neptune 은 닿는다.
     const graphFnSg = new ec2.SecurityGroup(this, 'GraphFnSg', { vpc: net, description: 'storyboard graph lambda' })
     neptuneSg.addIngressRule(graphFnSg, ec2.Port.tcp(NEPTUNE_PORT), 'Lambda to Neptune')
 
-    if (!fs.existsSync(path.join(GRAPH_FN, 'node_modules', 'gremlin'))) {
-      throw new Error('infra/graph 의 의존성이 없다. `cd infra/graph && npm install` 을 먼저 돌려라 — CDK 는 이 디렉터리를 그대로 올린다.')
+    // 그래서 Bedrock 은 인터페이스 엔드포인트로 닿는다. 이게 없으면 plan 오퍼레이션이
+    // 응답 없이 Lambda 타임아웃까지 매달린다 — NAT 게이트웨이보다 싸다.
+    // privateDnsEnabled(기본값)라 SDK 는 평소 호스트명을 그대로 쓴다.
+    const bedrockEp = net.addInterfaceEndpoint('BedrockEp', {
+      service: ec2.InterfaceVpcEndpointAwsService.BEDROCK_RUNTIME,
+      subnets: { subnetType: ec2.SubnetType.PUBLIC },
+      open: false, // VPC 전체가 아니라 이 Lambda 만 들여보낸다
+    })
+    bedrockEp.connections.allowFrom(graphFnSg, ec2.Port.tcp(443), 'Lambda to Bedrock')
+
+    // plan 결과를 Ops 테이블에 적어야 한다. DynamoDB 는 게이트웨이 엔드포인트라
+    // ENI 도 시간당 요금도 없다 — 라우트 테이블에 프리픽스만 얹는다.
+    net.addGatewayEndpoint('DdbEp', { service: ec2.GatewayVpcEndpointAwsService.DYNAMODB })
+
+    for (const dep of ['gremlin', '@aws-sdk/client-bedrock-runtime']) {
+      if (fs.existsSync(path.join(GRAPH_FN, 'node_modules', ...dep.split('/')))) continue
+      throw new Error(`infra/graph 의 의존성(${dep})이 없다. \`cd infra/graph && npm install\` 을 먼저 돌려라 — CDK 는 이 디렉터리를 그대로 올린다.`)
     }
 
     const graphFn = new lambda.Function(this, 'GraphFn', {
@@ -172,20 +188,42 @@ class StoryboardStack extends Stack {
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
       allowPublicSubnet: true,
       securityGroups: [graphFnSg],
-      timeout: Duration.seconds(30),
+      // Neptune 조회는 초 단위로 끝난다. 길게 잡는 것은 plan(Bedrock) 때문이다 —
+      // 느린 모델에서 대본 한 편이 1분을 넘긴다.
+      timeout: Duration.seconds(120),
+      // plan 은 Event(비동기)로 들어온다. 기본값 2 로 두면 실패한 잡이 Bedrock 을
+      // 세 번까지 부른다 — 핸들러도 던지지 않게 짜 두었지만 여기서 한 번 더 막는다.
+      retryAttempts: 0,
       memorySize: 512,
       environment: {
         NEPTUNE_ENDPOINT: graph.attrEndpoint,
         NEPTUNE_PORT: String(NEPTUNE_PORT),
+        OPS_TABLE: table.tableName,
+        HISTORY_TABLE: history.tableName,
       },
     })
     graphFn.node.addDependency(graphInstance)
+    // plan 결과를 적는다. 읽기는 planResult 리졸버(OpsDs)가 한다
+    table.grantWriteData(graphFn)
+    history.grantReadWriteData(graphFn)
+
+    // 교차 리전 추론 프로필을 부르면 Bedrock 이 뒤에서 다른 리전의 파운데이션 모델을
+    // 부른다. 그래서 프로필 ARN 과 모델 ARN 을 둘 다 열어 둔다.
+    graphFn.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['bedrock:InvokeModel'],
+      resources: [
+        'arn:aws:bedrock:*::foundation-model/anthropic.claude-*',
+        `arn:aws:bedrock:${this.region}:${this.account}:inference-profile/*`,
+      ],
+    }))
 
     const graphDs = api.addLambdaDataSource('GraphDs', graphFn)
     js(graphDs, 'LoadGraph', 'Query', 'loadGraph', 'loadGraph.js')
     js(graphDs, 'QueryGraph', 'Query', 'queryGraph', 'queryGraph.js')
     js(graphDs, 'SaveGraph', 'Mutation', 'saveGraph', 'saveGraph.js')
     js(graphDs, 'UpdateGraph', 'Mutation', 'updateGraph', 'updateGraph.js')
+    // Query 가 아니라 Mutation 이다. 리졸버가 Lambda 를 Event 로 띄우고 jobId 만 돌려준다
+    js(graphDs, 'Plan', 'Mutation', 'plan', 'plan.js')
 
     const sg = new ec2.SecurityGroup(this, 'GpuSg', { vpc: net, description: 'storyboard gpu' })
 
@@ -331,6 +369,7 @@ class StoryboardStack extends Stack {
     new CfnOutput(this, 'GpuAsg', { value: gpu.autoScalingGroupName })
     new CfnOutput(this, 'GpuAddr', { value: alb.loadBalancerDnsName })
     new CfnOutput(this, 'NeptuneEndpoint', { value: graph.attrEndpoint })
+    new CfnOutput(this, 'HistoryTable', { value: history.tableName })
     new CfnOutput(this, 'GraphFnArn', { value: graphFn.functionArn })
   }
 }

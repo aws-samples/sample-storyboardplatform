@@ -1,12 +1,12 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>core.js · graph-schema.js · graph-engine.js · graph-probes.js · story.js 자체 검사</title>
+<title>core.js · graph-schema.js · graph-engine.js · graph-probes.js · story.js · graph-view.js 자체 검사</title>
 <style>
   body { font: 14px/1.6 ui-monospace, Menlo, monospace; background: #16181C; color: #E8E4DA; padding: 32px; }
   .pass { color: #6FCF97 } .fail { color: #FF6B5E; font-weight: 700 }
   h1 { font-size: 16px; letter-spacing: .12em; text-transform: uppercase; color: #E3A93C }
 </style>
-<h1>core.js · graph-schema.js · graph-engine.js · graph-probes.js · story.js 자체 검사</h1>
+<h1>core.js · graph-schema.js · graph-engine.js · graph-probes.js · story.js · graph-view.js 자체 검사</h1>
 <pre id="out"></pre>
 <script type="module">
   const {
@@ -27,12 +27,16 @@
     probeBetrayalPotential, probeIdentityCrisis, probeForbiddenBond, probePowerVacuum,
   } = await import(`./graph-probes.js?t=${Date.now()}`)
   const { extractGraphPrompt, scriptToText, chunkText, contextPackPrompt, branchPrompt,
+    summarizePrompt, summarizeForExtraction, planGraph, planCuts,
     freeDirectionPrompt, localBranches, planBranches, planFreeBranches, parseJson,
     branchToSpec, branchOutlinePrompt, planBranchOutline, localBranchOutline,
     applyWriteback, validateWritebackBeforeApply,
     scriptFormatPrompt, planScript, localScript, scriptBlob, scriptFileName, SCRIPT_FORMATS,
   } = await import(`./story.js?t=${Date.now()}`)
-  const { parseField } = await import(`./net.js?t=${Date.now()}`)
+  const { edgeLabel, graphDelta, EDGE_LABELS_KR } = await import(`./graph-view.js?t=${Date.now()}`)
+  const { parseField, runPlanJob, PLAN_TIMEOUT_MS } = await import(`./net.js?t=${Date.now()}`)
+  const { NAV_TABS, navTab, isSoonTab, navTabFromSearch, soonMarkup, mountNav,
+  } = await import(`./nav-tabs.js?t=${Date.now()}`)
 
   const out = document.getElementById('out')
   let failed = 0
@@ -631,6 +635,105 @@
     return parts.length > 1 && parts.every((p) => p.length <= 500)
   })())
 
+  // 요약 → 추출 2단계. 긴 대본은 조각마다 뽑지 않고 한 번 줄인 뒤 한 번만 뽑는다
+  const SUM_TEXT = '루미(22, 헌트릭스 리더)는 진우를 사랑한다. 진우는 귀마를 섬긴다.'
+  const GRAPH_TEXT = '{"nodes":[{"id":"rumi","kind":"Character","name":"루미"}],"edges":[]}'
+  const isSummary = (p) => /자 이내로 요약해/.test(p)
+
+  ok('요약 프롬프트는 인물·관계·사건·비밀을 빠짐없이 요구한다', (() => {
+    const p = summarizePrompt('루미는 진우를 사랑한다.', { title: '케데헌' })
+    return p.includes('핵심 인물, 관계, 사건, 비밀만 2000자 이내로 요약해')
+      && p.includes('인물 이름, 나이, 역할, 관계를 빠짐없이 포함할 것')
+      && p.includes('루미는 진우를 사랑한다.') && p.includes('작품: 케데헌')
+      // 여기서는 그래프가 아니라 요약문을 받는다 — JSON 모양을 주지 않는다
+      && !p.includes('"nodes"') && !p.includes('"kind":"Character"')
+  })())
+  ok('요약 조각 번호와 글자 몫은 프롬프트에 적힌다', (() => {
+    const one = summarizePrompt('가', { limit: 500, part: { i: 1, n: 1 } })
+    const two = summarizePrompt('가', { limit: 500, part: { i: 2, n: 3 } })
+    return !one.includes('조각으로 나눈 것') && two.includes('3조각으로 나눈 것 중 2번째')
+      && two.includes('500자 이내로 요약해')
+  })())
+
+  const twoStep = await (async () => {
+    const sent = []
+    const net = { plan: async (spec) => { sent.push(spec); return { text: isSummary(spec.prompt) ? SUM_TEXT : GRAPH_TEXT } } }
+    const long = Array.from({ length: 60 }, (_, i) => `문단 ${i} 루미와 진우가 만난다. ${'가'.repeat(60)}`).join('\n\n')
+    const g = await planGraph(net, long)
+    return { sent, g, long }
+  })()
+  ok('긴 대본은 요약 한 번 + 추출 한 번으로 끝난다',
+    twoStep.long.length > 3000 && twoStep.sent.length === 2
+    && isSummary(twoStep.sent[0].prompt) && !isSummary(twoStep.sent[1].prompt),
+    `${twoStep.long.length}자 → 호출 ${twoStep.sent.length}번`)
+  ok('요약 응답 토큰은 1500 으로 묶는다', twoStep.sent[0]?.maxTokens === 1500 && twoStep.sent[0]?.think === false)
+  ok('추출에는 원문이 아니라 요약본이 들어간다',
+    twoStep.sent[1]?.prompt.includes(SUM_TEXT) && !twoStep.sent[1]?.prompt.includes('문단 30 ')
+    && !twoStep.sent[1]?.prompt.includes('조각으로 나눈 것'))
+  ok('요약을 거쳤다는 것을 경고로 남긴다',
+    twoStep.g.nodes.length === 1 && twoStep.g.warnings.some((w) => w.includes('요약한 뒤 뽑았다')))
+
+  ok('짧은 대본은 예전처럼 바로 뽑는다', await (async () => {
+    const sent = []
+    const net = { plan: async (spec) => { sent.push(spec); return { text: GRAPH_TEXT } } }
+    await planGraph(net, '루미는 진우를 사랑한다.')
+    return sent.length === 1 && !isSummary(sent[0].prompt) && sent[0].prompt.includes('루미는 진우를 사랑한다.')
+  })())
+
+  ok('요약이 실패하면 원문을 조각내서 뽑는 예전 길로 내려간다', await (async () => {
+    const sent = []
+    const net = { plan: async (spec) => {
+      if (isSummary(spec.prompt)) throw new Error('요약 다운')
+      sent.push(spec)
+      return { text: GRAPH_TEXT }
+    } }
+    const g = await planGraph(net, '루미와 진우. '.repeat(600))
+    return sent.length === 2 && g.nodes.length === 1
+      && g.warnings.some((w) => w.includes('대본 요약 실패'))
+  })())
+
+  // 모델 선택. 화면에서 고른 이름이 net.plan 의 spec.model 로 그대로 실려 나가야 한다
+  // (리졸버 infra/resolvers/plan.js 가 허용 목록에 없는 이름은 기본 모델로 내린다)
+  ok('고른 모델은 요약과 추출 두 호출에 모두 실린다', await (async () => {
+    const sent = []
+    const net = { plan: async (spec) => { sent.push(spec); return { text: isSummary(spec.prompt) ? SUM_TEXT : GRAPH_TEXT } } }
+    await planGraph(net, '루미와 진우. '.repeat(400), { model: 'opus-4.8' })
+    return sent.length === 2 && sent.every((x) => x.model === 'opus-4.8')
+  })())
+  ok('모델을 고르지 않으면 spec 에 model 을 싣지 않는다 — 리졸버 기본값으로 간다', await (async () => {
+    const sent = []
+    const net = { plan: async (spec) => { sent.push(spec); return { text: GRAPH_TEXT } } }
+    await planGraph(net, '루미는 진우를 사랑한다.')
+    return sent.length === 1 && !('model' in sent[0]) && sent[0].maxTokens === 4000 && sent[0].think === false
+  })())
+  ok('분기·컷·대본화 호출도 고른 모델을 싣는다', await (async () => {
+    const sent = []
+    const net = { plan: async (spec) => {
+      sent.push(spec)
+      return { text: '{"title":"t","logline":"l","branches":[],"cuts":[{"scene":"S1","action":"간다","secs":2}]}' }
+    } }
+    const st = createGraphStore(G([N('a', 'Character', '가온'), N('b', 'Character', '노을')], [E('a', 'loves', 'b')]))
+    await planBranches(net, null, st, { model: 'haiku-4.5' })
+    await planCuts(net, { cuts: 4, tone: '담백한' }, { title: 't', logline: 'l', chars: [], beats: [{ scene: 'S1', action: '간다', secs: 2, cast: [] }] },
+      { model: 'haiku-4.5' })
+    await planScript(net, [{ scene: 'S1', action: '간다', secs: 2 }], { model: 'haiku-4.5' })
+    return sent.length === 3 && sent.every((x) => x.model === 'haiku-4.5')
+  })())
+  ok('planCuts 는 opts 에 없으면 spec.model 을 쓴다', await (async () => {
+    const sent = []
+    const net = { plan: async (spec) => { sent.push(spec); return { text: '{"cuts":[{"scene":"S1","action":"간다","secs":2}]}' } } }
+    await planCuts(net, { cuts: 4, model: 'opus-4.8' }, { title: 't', logline: 'l', chars: [], beats: [{ scene: 'S1', action: '간다', secs: 2, cast: [] }] })
+    return sent.length === 1 && sent[0].model === 'opus-4.8'
+  })())
+
+  ok('원문이 한 프롬프트에 안 들어가면 조각으로 나눠 요약하고 이어 붙인다', await (async () => {
+    const sent = []
+    const net = { plan: async (spec) => { sent.push(spec); return { text: `조각 요약 ${sent.length}` } } }
+    const r = await summarizeForExtraction(net, '가'.repeat(20000), { title: '제목' })
+    return sent.length === 4 && r.text.includes('조각 요약 1') && r.text.includes('조각 요약 4')
+      && sent.every((x) => x.prompt.includes('4조각으로 나눈 것') && x.prompt.includes('500자 이내로 요약해'))
+  })())
+
   ok('평문 대본은 그대로 둔다', scriptToText('S1. 무대\n루미: 간다') === 'S1. 무대\n루미: 간다')
   ok('fdx 는 지시문과 대사만 남긴다', (() => {
     const fdx = `<?xml version="1.0"?><FinalDraft>
@@ -1099,10 +1202,71 @@
       return p.length <= PROMPT_MAX && !p.includes('잘랐다') && p.includes(c)
     })
   })())
+  ok('요약 프롬프트도 8000자를 넘지 않는다 — 대본이 길면 대본만 자른다', (() => {
+    const p = summarizePrompt('가'.repeat(20000), { title: '제목' })
+    return p.length <= PROMPT_MAX && p.includes('(대본이 길어 여기서 잘랐다)')
+      && p.includes('요약문만 출력한다') && p.includes('- 한국어로 쓴다.')
+  })())
+  ok('요약 조각 하나는 프롬프트에 통째로 들어간다', (() => {
+    // 6000 = story.js 의 SUMMARY_CHUNK. 조각 하나가 잘리면 요약이 앞부분만 보게 된다
+    const c = '가'.repeat(6000)
+    const p = summarizePrompt(c, { title: '제목', part: { i: 1, n: 4 } })
+    return p.length <= PROMPT_MAX && !p.includes('잘랐다') && p.includes(c)
+  })())
   ok('판에 노드가 많아도 기존 노드 목록은 40줄에서 접는다', (() => {
     const known = Array.from({ length: 90 }, (_, i) => ({ id: `n${i}`, kind: 'Character', name: `인물${i}` }))
     const p = extractGraphPrompt('짧은 글', { known })
     return p.includes('- (그 외 50개는 생략했다)') && !p.includes('- n80 (Character) 인물80')
+  })())
+
+  // ── nav-tabs.js: 상단 기능 탭 ──────────────────────────────────────────────
+  // 두 화면(index.html · story-graph.html)이 이 한 벌을 나눠 쓴다. 탭이 늘거나
+  // 이동 주소가 어긋나면 여기서 걸린다.
+  ok('탭은 다섯이고 순서가 정해져 있다',
+    NAV_TABS.map((t) => t.id).join(',') === 'board,develop,script,translate,keyvisual')
+  ok('탭마다 이름과 한 줄 설명이 있다', NAV_TABS.every((t) => t.label && t.desc))
+  ok('스토리보드·디벨롭·대본화는 갈 곳이 있고, 나머지는 준비 중이다', (() => {
+    const go = NAV_TABS.filter((t) => t.href).map((t) => t.id).join(',')
+    const later = NAV_TABS.filter((t) => t.soon).map((t) => t.id).join(',')
+    return go === 'board,develop,script' && later === 'translate,keyvisual'
+  })())
+  ok('대본화는 story-graph 의 안쪽 대본화 탭으로 데려간다',
+    navTab('script').href === './story-graph.html?tab=script')
+  ok('디벨롭은 파라미터 없이 story-graph 로 간다', navTab('develop').href === './story-graph.html')
+  ok('준비 중 탭 판별', isSoonTab('translate') && isSoonTab('keyvisual') && !isSoonTab('board'))
+  ok('?tab=script 는 대본화로 읽는다', navTabFromSearch('?tab=script', 'develop') === 'script')
+  ok('모르는 tab 값은 기본 탭으로 떨어진다', navTabFromSearch('?tab=없는것', 'develop') === 'develop')
+  ok('파라미터가 없으면 기본 탭', navTabFromSearch('', 'board') === 'board'
+    && navTabFromSearch(undefined, 'board') === 'board')
+  ok('? 없이 넘겨도 읽는다', navTabFromSearch('tab=keyvisual', 'board') === 'keyvisual')
+  ok('준비 중 안내에 문구가 다 들어 있다', (() => {
+    const html = soonMarkup('translate')
+    return html.includes('준비 중입니다') && html.includes('이 기능은 곧 추가됩니다')
+      && html.includes('대본 번역')
+  })())
+
+  ok('탭 바는 내가 처리할 탭만 버튼으로, 나머지는 링크로 그린다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    const picked = []
+    const nav = mountNav({
+      mount, active: 'develop',
+      handled: ['develop', 'script', 'translate', 'keyvisual'],
+      onSelect: (id) => picked.push(id),
+    })
+    const at = (id) => mount.querySelector(`[data-nav="${id}"]`)
+    const shape = at('board').tagName === 'A' && at('board').getAttribute('href').endsWith('index.html')
+      && at('script').tagName === 'BUTTON'
+    const on = at('develop').getAttribute('aria-current') === 'page'
+      && at('script').getAttribute('aria-current') === null
+    at('keyvisual').click()
+    const moved = picked.join(',') === 'keyvisual'
+      && at('keyvisual').getAttribute('aria-current') === 'page'
+      && at('develop').getAttribute('aria-current') === null
+    nav.setActive('script')
+    const synced = nav.active() === 'script' && at('script').getAttribute('aria-current') === 'page'
+    mount.remove()
+    return shape && on && moved && synced
   })())
 
   // ── net.js: AWSJSON 필드 풀기 ─────────────────────────────────────────────
@@ -1136,6 +1300,80 @@
       && parseField(JSON.stringify('true')) === 'true'
   })())
   ok('두 번째 파싱이 깨지면 문자열을 그대로 준다', parseField(JSON.stringify('{깨진 JSON')) === '{깨진 JSON')
+
+  // ── net.js: 비동기 plan (30초 상한 우회) ──────────────────────────────────
+  // AppSync 요청 실행 시간 상한은 30초이고 상향이 불가다. 그래서 plan 은 mutation 으로
+  // 잡을 띄우고 planResult(jobId) 를 폴링한다. story.js 의 호출부는 그대로여야 하므로
+  // 돌려주는 모양({text, usage, stop})을 여기서 못 박는다.
+  const FAST = { pollMs: 1, timeoutMs: 300 }
+  // 리졸버가 JSON.stringify 한 것을 AppSync 가 한 번 더 감싼다
+  const asWire = (v) => JSON.stringify(JSON.stringify(v))
+  // pending 을 n 번 준 뒤 last 를 주는 가짜 서버
+  const fakePlanServer = (n, last, jobId = 'job-1') => {
+    const seen = { queries: [], polls: 0, spec: null }
+    const post = async (query, variables) => {
+      seen.queries.push(query.trim().split('(')[0])
+      if (query.startsWith('mutation')) {
+        seen.spec = JSON.parse(variables.spec)
+        return { plan: { jobId, status: 'pending' } }
+      }
+      seen.polls++
+      return { planResult: asWire(seen.polls <= n ? { status: 'pending' } : last) }
+    }
+    return { post, seen }
+  }
+
+  ok('plan 은 mutation 으로 띄우고 planResult 를 폴링한다', await (async () => {
+    const { post, seen } = fakePlanServer(2, {
+      status: 'done', text: '{"title":"제목"}', usage: { outputTokens: 7 }, stop: 'end_turn',
+    })
+    const got = await runPlanJob(post, { prompt: '충분히 긴 프롬프트다', model: 'opus-4.8' }, FAST)
+    return got.text === '{"title":"제목"}' && got.stop === 'end_turn' && got.usage.outputTokens === 7
+      && seen.polls === 3 && seen.queries[0] === 'mutation Plan'
+      && seen.queries.slice(1).every((q) => q === 'query PlanResult')
+      // spec 은 손대지 않고 그대로 실려 나가야 한다 — 모델 선택이 여기서 죽으면 안 된다
+      && seen.spec.model === 'opus-4.8'
+  })())
+  ok('pending 이 계속 와도 끝난 뒤에만 값을 준다 — story.js 는 await 만 한다', await (async () => {
+    const { post } = fakePlanServer(5, { status: 'done', text: 'S#1. 빵집 - 낮', usage: {}, stop: 'end_turn' })
+    // 진짜 문자열인 text 가 한 겹 더 풀려 타입이 바뀌지 않아야 한다
+    return (await runPlanJob(post, { prompt: '충분히 긴 프롬프트다' }, FAST)).text === 'S#1. 빵집 - 낮'
+  })())
+  ok('Lambda 가 적은 error 결과는 예외로 올라온다', await (async () => {
+    const { post } = fakePlanServer(1, { status: 'error', error: 'Bedrock AccessDeniedException' })
+    try { await runPlanJob(post, { prompt: '충분히 긴 프롬프트다' }, FAST); return false }
+    catch (e) { return e.message === 'Bedrock AccessDeniedException' }
+  })())
+  ok('jobId 를 못 받으면 폴링하지 않고 바로 실패한다', await (async () => {
+    let polls = 0
+    const post = async (q) => { if (q.startsWith('mutation')) return { plan: null }; polls++; return {} }
+    try { await runPlanJob(post, { prompt: '충분히 긴 프롬프트다' }, FAST); return false }
+    catch { return polls === 0 }
+  })())
+  ok('폴링이 몇 번 끊겨도 잡을 버리지 않는다 — Bedrock 은 계속 돌고 있다', await (async () => {
+    let polls = 0
+    const post = async (q) => {
+      if (q.startsWith('mutation')) return { plan: { jobId: 'j' } }
+      if (++polls <= 4) throw new Error('네트워크 끊김')
+      return { planResult: asWire({ status: 'done', text: '살아남았다', usage: {}, stop: 'end_turn' }) }
+    }
+    return (await runPlanJob(post, { prompt: '충분히 긴 프롬프트다' }, FAST)).text === '살아남았다'
+  })())
+  ok('연속 폴링 실패가 이어지면 포기한다', await (async () => {
+    const post = async (q) => {
+      if (q.startsWith('mutation')) return { plan: { jobId: 'j' } }
+      throw new Error('계속 끊김')
+    }
+    try { await runPlanJob(post, { prompt: '충분히 긴 프롬프트다' }, FAST); return false }
+    catch (e) { return e.message === '계속 끊김' }
+  })())
+  ok('끝나지 않으면 타임아웃으로 끊는다 — 무한정 기다리지 않는다', await (async () => {
+    const { post } = fakePlanServer(1e9, null)
+    const t0 = Date.now()
+    try { await runPlanJob(post, { prompt: '충분히 긴 프롬프트다' }, { pollMs: 1, timeoutMs: 120 }); return false }
+    catch (e) { return e.message.includes('안에 끝나지 않았다') && Date.now() - t0 < 3000 }
+  })())
+  ok('기본 대기 상한은 Lambda 타임아웃과 같은 120초', PLAN_TIMEOUT_MS === 120_000)
 
   // ── parseJson: 모델 응답에서 JSON 꺼내기 ───────────────────────────────────
   // "JSON 하나만" 을 못 박아도 코드펜스·앞말이 붙어 오고, 응답 상한에 걸리면 문장 중간에서
@@ -1358,6 +1596,39 @@
   ok('새 인물이 0명이면 chars 를 비우라고 적는다',
     branchOutlinePrompt(demoBranch, branchToSpec(demoBranch, { newChars: 0 }), bCtx).includes('chars는 빈 배열'))
 
+  // 비트가 한 줄로 오던 자리. 2~3문장 + 내면 변화 + 관계 변화를 프롬프트가 요구한다
+  ok('비트를 2~3문장으로 쓰게 하고 clip(300) 안쪽으로 묶는다', (() => {
+    const p = branchOutlinePrompt(demoBranch, bSpec, bCtx)
+    return p.includes('2~3문장') && p.includes('280자 안쪽')
+      && p.includes('한 줄로 끝내지 않는다')
+  })())
+  ok('비트에 내면 변화와 관계 변화를 담게 한다', (() => {
+    const p = branchOutlinePrompt(demoBranch, bSpec, bCtx)
+    return p.includes('인물의 안에서 무엇을 바꾸는지') && p.includes('관계가 어느 쪽으로 움직이는지')
+      && p.includes('보이는 사건 + 인물의 내면 변화 + 관계 변화')
+  })())
+  ok('내면은 감정 단어가 아니라 선택으로 적게 한다', (() => {
+    const p = branchOutlinePrompt(demoBranch, bSpec, bCtx)
+    return p.includes('감정 단어로 이름 붙이지 않고') && p.includes('묻지 않기로 하고 자리를 옮긴다')
+      && p.includes('같은 상태를 두 번 적지 않는다')
+  })())
+  ok('대사 금지는 남기되 인물의 변화는 적게 한다', (() => {
+    const p = branchOutlinePrompt(demoBranch, bSpec, bCtx)
+    return p.includes('대사는 여기서 쓰지 않는다')
+      && p.includes('인물을 어떻게 바꾸는지만 적는다')
+  })())
+  ok('분기 개요 프롬프트도 8000자를 넘지 않는다 — 판의 컨텍스트만 자른다', (() => {
+    const big = {
+      title: '아주 긴 제목'.repeat(20),
+      scenario: '이 판에서 지금까지 벌어진 일. '.repeat(200),
+      chars: Array.from({ length: 90 }, (_, i) => ({ name: `인물${i}`, brief: '나이·처지·분위기를 적은 줄. '.repeat(3) })),
+      centerName: '인물0',
+    }
+    const p = branchOutlinePrompt(demoBranch, bSpec, big)
+    return p.length <= PROMPT_MAX && p.includes('(판의 컨텍스트를 여기서 잘랐다)')
+      && p.includes('2~3문장') && p.includes('- 한국어로 쓴다.') && p.includes('A. 드러낸다')
+  })())
+
   ok('로컬 폴백 개요는 분기의 비트를 그대로 세운다', (() => {
     const o = localBranchOutline(demoBranch, bSpec, bCtx)
     return o.local === true && o.beats.length === 3 && o.title === '드러낸다'
@@ -1383,6 +1654,15 @@
   ok('비트를 못 받으면 planBranchOutline 이 에러를 낸다', await (async () => {
     const fake = { plan: async () => ({ text: '{"title":"T","beats":[]}' }) }
     try { await planBranchOutline(fake, demoBranch, bSpec, bCtx); return false } catch { return true }
+  })())
+  ok('긴 비트를 받으려면 응답 상한이 4000 이어야 한다', await (async () => {
+    let spec = null
+    const fake = { plan: async (s) => {
+      spec = s
+      return { text: '{"title":"T","beats":[{"scene":"S1","summary":"가온이 말한다","secs":5}]}' }
+    } }
+    await planBranchOutline(fake, demoBranch, bSpec, bCtx)
+    return spec.maxTokens === 4000
   })())
 
   // ── 그래프 역기입: validateWritebackBeforeApply / applyWriteback ────────────
@@ -1547,6 +1827,45 @@
   })())
   ok('컷이 없어도 프롬프트는 만들어진다', typeof scriptFormatPrompt([], {}) === 'string')
 
+  // 대본이 짧고 부실하게 오던 자리. 분량·지문·대사·씬 전환을 프롬프트가 못 박는다
+  ok('대본화 프롬프트가 컷당 최소 줄 수를 못 박는다', (() => {
+    const p = scriptFormatPrompt(demoCuts, {})
+    return p.includes('15줄 이상으로 편다') && p.includes('한두 줄로 요약하지 않는다')
+      && p.includes('최소 10줄')
+  })())
+  ok('지문 규칙은 앵글·조명·미세한 표정을 예시까지 들어 요구한다', (() => {
+    const p = scriptFormatPrompt(demoCuts, {})
+    return p.includes('카메라 앵글') && p.includes('조명') && p.includes('미세한 표정')
+      && p.includes('해인의 왼손 약지') && p.includes('한 동작을 한 줄로 끊어 쓴다')
+  })())
+  ok('감정은 설명하지 말고 보여주라고 적는다', (() => {
+    const p = scriptFormatPrompt(demoCuts, {})
+    return p.includes('감정을 이름으로 설명하지 않는다') && p.includes('시선·호흡')
+  })())
+  ok('대사 규칙은 말투 차이와 대사 사이 지문을 요구한다', (() => {
+    const p = scriptFormatPrompt(demoCuts, {})
+    return p.includes('인물마다 말투가 달라야 한다') && p.includes('재벌가에서 자란 인물')
+      && p.includes('농촌에서 자란 인물') && p.includes('대사를 연달아 붙이지 않는다')
+  })())
+  ok('씬 전환에서 시간·공간·감정의 변화를 적게 한다', (() => {
+    const p = scriptFormatPrompt(demoCuts, {})
+    return p.includes('시간과 장소가 어떻게 변했는지') && p.includes('감정이 어디까지 왔는지 이어 받는다')
+  })())
+  ok('분량을 늘려도 없는 사건을 만들지는 말라고 한다', (() => {
+    const p = scriptFormatPrompt(demoCuts, {})
+    return p.includes('컷에 없는 사건이나 인물을 새로 만들지 않는다')
+      && p.includes('이미 컷에 있는 순간을 더 자세히 봐서 채운다')
+  })())
+  ok('대본화 프롬프트도 8000자를 넘지 않는다 — 컷이 많으면 컷 목록만 자른다', (() => {
+    const many = Array.from({ length: 120 }, (_, i) => ({
+      scene: `S${i + 1} 아주 긴 장소 이름을 가진 어느 방`, secs: 3, camera: 'MS',
+      action: '인물이 무언가를 한다. '.repeat(4), dialogue: '길게 말한다. '.repeat(3), cast: ['가온', '노을'],
+    }))
+    const p = scriptFormatPrompt(many, { title: '제목', chars: [{ name: '가온', brief: '주인' }] })
+    return p.length <= PROMPT_MAX && p.includes('(컷이 많아 여기서 잘랐다)')
+      && p.includes('15줄 이상으로 편다') && p.includes('- 한국어로 쓴다.')
+  })())
+
   ok('localScript 는 컷 3개를 S#1~S#3 으로 낸다', (() => {
     const t = localScript(demoCuts, {})
     return t.includes('S#1.') && t.includes('S#2.') && t.includes('S#3.')
@@ -1576,24 +1895,61 @@
   ok('net 이 없으면 planScript 가 localScript 와 같다',
     (await planScript(null, demoCuts, { format: 'drama' })) === localScript(demoCuts, { format: 'drama' }))
   ok('컷이 없으면 planScript 는 빈 문자열이다', (await planScript(null, [], {})) === '')
-  ok('planScript 는 모델이 준 텍스트를 그대로 쓴다 (JSON 파싱을 하지 않는다)', await (async () => {
+  ok('planScript 는 평문 대본을 모델이 준 그대로 쓴다', await (async () => {
     const fake = { plan: async () => ({ text: 'S#1. 빵집\n  가온: 문 열었습니다' }) }
     const t = await planScript(fake, demoCuts, {})
     return t === 'S#1. 빵집\n  가온: 문 열었습니다'
   })())
-  ok('컷이 많으면 묶음으로 나눠 부르고 이어 붙인다', await (async () => {
+  ok('planScript 는 {"script": …} 래핑을 벗겨 텍스트만 남긴다', await (async () => {
+    const fake = { plan: async () => ({ text: '{"script": "S#5. 빵집\\n  가온: 왔어요"}' }) }
+    return (await planScript(fake, demoCuts, {})) === 'S#5. 빵집\n  가온: 왔어요'
+  })())
+  ok('코드펜스로 감싼 JSON 래핑도 벗긴다', await (async () => {
+    const fake = { plan: async () => ({ text: '```json\n{"text": "S#5. 빵집"}\n```' }) }
+    return (await planScript(fake, demoCuts, {})) === 'S#5. 빵집'
+  })())
+  ok('상한에서 잘려 닫히지 않은 래핑도 값만 벗긴다', await (async () => {
+    const fake = { plan: async () => ({ text: '{"script": "S#5. 빵집\\n  가온: 왔어', stop: 'max_tokens' }) }
+    return (await planScript(fake, demoCuts, {})) === 'S#5. 빵집\n  가온: 왔어'
+  })())
+  ok('묶음마다 래핑 여부가 달라도 이어 붙는다', await (async () => {
+    const many = Array.from({ length: 8 }, (_, i) => ({ ...demoCuts[0], scene: `S${i + 1}` }))
+    let calls = 0
+    const fake = { plan: async () => (++calls === 1 ? { text: 'S#1. 앞' } : { text: '{"script": "S#5. 뒤"}' }) }
+    return (await planScript(fake, many, {})) === 'S#1. 앞\n\nS#5. 뒤'
+  })())
+  ok('대본 텍스트를 담은 배열 래핑도 벗긴다', await (async () => {
+    const fake = { plan: async () => ({ text: '["S#5. 빵집", "S#6. 골목"]' }) }
+    return (await planScript(fake, demoCuts, {})) === 'S#5. 빵집\n\nS#6. 골목'
+  })())
+  ok('webdrama 의 [씬 n] 은 JSON 으로 보지 않는다', await (async () => {
+    const fake = { plan: async () => ({ text: '[씬 1 - 빵집]\n가온: 문 열었습니다' }) }
+    return (await planScript(fake, demoCuts, { format: 'webdrama' })) === '[씬 1 - 빵집]\n가온: 문 열었습니다'
+  })())
+  ok('텍스트가 없는 JSON 이 오면 그 자리를 로컬 형식으로 메운다', await (async () => {
+    const many = Array.from({ length: 8 }, (_, i) => ({ ...demoCuts[0], scene: `S${i + 1}` }))
+    let calls = 0
+    const fake = { plan: async () => (++calls === 1 ? { text: 'S#1. 앞' } : { text: '{"cuts": [], "note": ""}' }) }
+    const t = await planScript(fake, many, {})
+    // 두 번째 묶음은 5~8번째 컷이다 — 감싼 JSON 대신 이어지는 씬 번호가 나와야 한다
+    return !t.includes('"note"') && t.includes('S#1. 앞') && t.includes('S#5.')
+  })())
+  // 4 = story.js 의 SCRIPT_BATCH. 컷 하나를 15줄 이상으로 펴게 했으므로 묶음이 작다 —
+  // 10컷씩 보내면 응답이 4000 토큰 상한에서 잘린다
+  ok('컷이 많으면 4컷씩 묶어 나눠 부르고 이어 붙인다', await (async () => {
     const many = Array.from({ length: 25 }, (_, i) => ({ ...demoCuts[0], scene: `S${i + 1}` }))
     let calls = 0
-    const fake = { plan: async () => { calls++; return { text: `조각 ${calls}` } } }
+    const fake = { plan: async (spec) => { calls++; return { text: `조각 ${calls}`, spec } } }
     const t = await planScript(fake, many, {})
-    return calls === 3 && t.split('\n\n').length === 3
+    return calls === 7 && t.split('\n\n').length === 7
   })())
-  ok('묶음 하나가 실패하면 로컬 형식으로 메운다', await (async () => {
+  ok('묶음 하나가 실패하면 그 자리를 로컬 형식으로 메운다', await (async () => {
     const many = Array.from({ length: 15 }, (_, i) => ({ ...demoCuts[0], scene: `S${i + 1}` }))
     let calls = 0
     const fake = { plan: async () => { calls++; if (calls === 2) throw new Error('끊김'); return { text: '조각' } } }
     const t = await planScript(fake, many, {})
-    return t.includes('조각') && t.includes('S#11.')
+    // 두 번째 묶음은 5~8번째 컷이다 — 메운 자리의 씬 번호가 이어져야 한다
+    return t.includes('조각') && t.includes('S#5.')
   })())
   ok('모든 묶음이 빈 텍스트면 에러를 낸다', await (async () => {
     const fake = { plan: async () => ({ text: '' }) }
@@ -1608,6 +1964,74 @@
   ok('대본 파일 이름에 제목이 들어간다', scriptFileName('마지막 레시피') === '마지막 레시피_대본.txt')
   ok('제목이 없으면 무제로 둔다', scriptFileName('') === '무제_대본.txt' && scriptFileName(null) === '무제_대본.txt')
   ok('파일 이름에서 경로 문자를 뺀다', scriptFileName('A/B:C*D') === 'A B C D_대본.txt')
+
+  // ── graph-view.js: 엣지 라벨과 역기입 전후 비교 ────────────────────────────
+  // 캔버스 그리기는 여기서 못 돌린다 — 순수 함수인 라벨 표와 판 비교만 본다
+  ok('엣지 라벨은 "A ─라벨→ B" 로 읽힌다', edgeLabel('conceals') === '을 은닉함'
+    && edgeLabel('serves') === '을 보좌함' && edgeLabel('member_of') === '에 소속됨')
+  ok('표에 없는 술어는 원본 영문 그대로 둔다',
+    edgeLabel('reveals') === 'reveals' && edgeLabel('calls_true_name') === 'calls_true_name')
+  ok('술어가 없으면 빈 문자열이다', edgeLabel(null) === '' && edgeLabel(undefined) === '')
+  ok('kin_of 는 props.type 으로 부모·자녀·형제를 가른다',
+    edgeLabel('kin_of', { type: 'parent' }) === '의 부모임'
+    && edgeLabel('kin_of', { type: 'child' }) === '의 자녀임'
+    && edgeLabel('kin_of', { type: 'sibling' }) === '의 형제임')
+  ok('kin_of 의 type 이 없으면 술어를 그대로 둔다',
+    edgeLabel('kin_of') === 'kin_of' && edgeLabel('kin_of', { type: '?' }) === 'kin_of')
+  ok('파생 전용 술어에도 라벨이 있다', edgeLabel('has_leverage_over') === '의 약점을 쥠')
+  ok('라벨 표는 어휘의 실제 술어를 덮는다', (() => {
+    // 표에 있으면서 어휘에 없는 키는 kin_of 로 갈라 읽는 셋과 owns/wants 뿐이다
+    const extra = Object.keys(EDGE_LABELS_KR).filter((p) => !GRAPH_SCHEMA.edgeRels.includes(p))
+    return extra.every((p) => ['child_of', 'parent_of', 'sibling_of', 'owns', 'wants'].includes(p))
+  })())
+
+  ok('graphDelta 는 새 노드·엣지와 끊긴 엣지를 가른다', (() => {
+    const before = {
+      nodes: [{ id: 'a' }, { id: 'b' }],
+      edges: [{ s: 'a', p: 'loves', o: 'b' }, { s: 'b', p: 'distrusts', o: 'a' }],
+    }
+    const after = {
+      nodes: [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
+      edges: [{ s: 'a', p: 'loves', o: 'b' }, { s: 'a', p: 'knows', o: 'c' }],
+    }
+    const d = graphDelta(before, after)
+    return d.nodes.join() === 'c' && d.edges.join() === 'a|knows|c'
+      && d.removed.length === 1 && d.removed[0].p === 'distrusts'
+  })())
+  ok('바뀐 것이 없으면 delta 가 비어 있다', (() => {
+    const g = { nodes: [{ id: 'a' }], edges: [{ s: 'a', p: 'loves', o: 'a' }] }
+    const d = graphDelta(g, g)
+    return !d.nodes.length && !d.edges.length && !d.removed.length
+  })())
+  ok('graphDelta 는 판이 없어도 죽지 않는다', (() => {
+    const d = graphDelta(null, undefined)
+    const e = graphDelta({}, { nodes: [{ id: 'a' }] })
+    return !d.nodes.length && !d.removed.length && e.nodes.join() === 'a'
+  })())
+  ok('같은 쌍의 다른 술어는 다른 엣지로 센다', (() => {
+    const before = { nodes: [{ id: 'a' }, { id: 'b' }], edges: [{ s: 'a', p: 'loves', o: 'b' }] }
+    const after = {
+      nodes: before.nodes,
+      edges: [{ s: 'a', p: 'loves', o: 'b' }, { s: 'a', p: 'distrusts', o: 'b' }],
+    }
+    return graphDelta(before, after).edges.join() === 'a|distrusts|b'
+  })())
+  ok('실제 저장소의 역기입 전후를 견줘도 맞는다', (() => {
+    const store = createGraphStore({
+      nodes: [{ id: 'a', kind: 'Character', name: '가' }, { id: 'b', kind: 'Character', name: '나' }],
+      edges: [{ s: 'a', p: 'loves', o: 'b', asserted: true }],
+    })
+    const before = store.toJSON()
+    const applied = applyWriteback(store, {
+      nodes: [{ id: 's1', kind: 'Secret', name: '숨긴 일', props: { claim: '한 줄' } }],
+      edges: [{ s: 'a', p: 'conceals', o: 's1' }],
+      remove_edges: [{ s: 'a', p: 'loves', o: 'b' }],
+    })
+    const d = graphDelta(before, store.toJSON())
+    // applied 는 개수만 준다 — 그 개수와 delta 의 id 개수가 어긋나지 않아야 한다
+    return applied.applied.nodesAdded === d.nodes.length && d.nodes.join() === 's1'
+      && d.edges.includes('a|conceals|s1') && d.removed.some((e) => e.p === 'loves')
+  })())
 
   // ── mock/graph.json 과의 호환: 추출 결과를 그대로 뷰어에 넣을 수 있는가 ──────
   const grab = async (p) => {

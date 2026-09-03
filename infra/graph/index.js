@@ -1,10 +1,14 @@
-// Neptune 그래프 저장소를 도는 Lambda. AppSync 의 GraphDs 데이터소스가 부른다.
+// AppSync 의 GraphDs 데이터소스가 부르는 Lambda. 두 가지 일을 한다.
 //
-// 브라우저의 graph-engine.js 가 이 핸들러에 기대는 것은 네 가지다.
+// Neptune 그래프 저장소 — 브라우저의 graph-engine.js 가 기대는 것은 네 가지다.
 //   loadGraph    projectId 의 노드·명시 엣지를 mock/graph.json 모양으로 돌려준다
 //   saveGraph    그래프 하나를 통째로 덮어쓴다 (추출 직후 한 번)
 //   queryGraph   이웃·서브그래프처럼 그래프를 걸어야 답이 나오는 조회
 //   updateGraph  역기입. 엣지 끊기 → 노드 얹기 → 엣지 얹기 순서로 돈다
+//
+// Bedrock 호출 — 대본·분기 생성이 쓴다. 이것만 Event(비동기)로 들어온다.
+//   plan         Converse 로 모델을 부르고 결과를 Ops 테이블에 적는다.
+//                브라우저는 planResult(jobId) 로 받아 간다 — AppSync 30초 상한 우회.
 //
 // 파생 엣지는 Neptune 에 넣지 않는다. 규칙은 graph-schema.js 의 deriveEdges 뿐이고
 // 그것은 브라우저에서만 돈다. 저장해 두면 규칙을 고친 뒤에도 낡은 파생이 남는다.
@@ -12,6 +16,9 @@
 // props 는 JSON 문자열 한 칸(propsJson)에 담는다. Neptune 프로퍼티는 원시값만 받는다.
 
 const gremlin = require('gremlin')
+const { BedrockRuntimeClient, ConverseCommand } = require('@aws-sdk/client-bedrock-runtime')
+const { DynamoDBClient } = require('@aws-sdk/client-dynamodb')
+const { DynamoDBDocumentClient, PutCommand } = require('@aws-sdk/lib-dynamodb')
 
 const __ = gremlin.process.statics
 const P = gremlin.process.P
@@ -275,10 +282,146 @@ async function updateGraph(g, payload) {
   return out
 }
 
-const OPS = { loadGraph, saveGraph, queryGraph, updateGraph }
+// ── Bedrock ──────────────────────────────────────────────────────────────────
+// 원래 AppSync 의 HTTP 데이터소스(BedrockDs)가 /model/{id}/converse 를 직접 쳤다.
+// 느린 모델에서 Execution timeout 이 나서 여기로 옮겼다. 보내는 몸통은 그때와 같다 —
+// Converse API 를 SDK 로 부르는 것뿐이라 요청·응답 모양이 바뀌지 않는다.
+
+// 프론트엔드가 spec.model 로 고르는 이름 → Bedrock 모델 id.
+// 이름은 화면(demo/story-graph.html 의 #modelSel)과 짝이 맞아야 한다.
+// id 는 지금 쓰는 교차 리전 추론 프로필 형식(us.anthropic.…)을 그대로 따른다 —
+// 리전에 있는 것과 다르면 Bedrock 이 ValidationException 을 낸다.
+// 확인: aws bedrock list-inference-profiles --region <리전>
+const MODELS = {
+  'haiku-4.5': 'us.anthropic.claude-haiku-4-5',
+  'sonnet-5': 'us.anthropic.claude-sonnet-5',
+  'opus-4.8': 'us.anthropic.claude-opus-4-8',
+}
+/** 허용 목록. MODELS 를 이름으로 바로 찾으면 'constructor' 같은 이름이 프로토타입을 짚는다 */
+const MODEL_NAMES = ['haiku-4.5', 'sonnet-5', 'opus-4.8']
+const DEFAULT_MODEL = 'sonnet-5'
+
+const SYSTEM = '당신은 광고·단편 영상의 콘티 기획자다. 요청받은 JSON 하나만 출력한다. 설명·머리말·코드펜스를 붙이지 않는다.'
+
+// 재시도까지 합쳐 Lambda 타임아웃(120초) 안에 끝나도록 잡는다.
+// 55초 × 2회 = 110초. 스로틀링에는 한 번 더 해 보고, 그 이상은 Lambda 가 끊는다.
+let bedrock = null
+const openBedrock = () => (bedrock ||= new BedrockRuntimeClient({
+  maxAttempts: 2,
+  requestHandler: { connectionTimeout: 5000, requestTimeout: 55000 },
+}))
+
+/**
+ * Bedrock Converse 를 한 번 부른다. 역할 체크는 리졸버가 이미 했다.
+ * @param {Object} payload - {prompt, maxTokens?, model?, think?}
+ * @returns {Promise<{text: string, usage: Object, stop: string}>}
+ */
+async function converse(payload) {
+  const prompt = str(payload?.prompt)
+  // 리졸버에서 이미 걸렀다. 여기서도 막아 두는 것은 Lambda 를 직접 부를 때를 위한 것이다
+  if (prompt.length < 8 || prompt.length > 8000) throw new Error('프롬프트 길이가 8~8000자여야 합니다')
+
+  const want = Number(payload?.maxTokens)
+  const maxTokens = Math.min(4000, Math.max(300, Number.isFinite(want) ? Math.round(want) : 2000))
+
+  const asked = str(payload?.model)
+  const modelId = MODELS[MODEL_NAMES.includes(asked) ? asked : DEFAULT_MODEL]
+
+  const input = {
+    modelId,
+    system: [{ text: SYSTEM }],
+    messages: [{ role: 'user', content: [{ text: prompt }] }],
+    inferenceConfig: { maxTokens },
+  }
+  if (payload?.think !== true) input.additionalModelRequestFields = { thinking: { type: 'disabled' } }
+
+  let out
+  try {
+    out = await openBedrock().send(new ConverseCommand(input))
+  } catch (err) {
+    console.error('[graph] Bedrock Converse 실패', modelId, err)
+    throw new Error(`Bedrock ${err.name || 'Error'}: ${err.message}`)
+  }
+
+  // 여러 칸으로 쪼개져 올 수 있다. text 인 칸만 이어 붙인다 (thinking 칸은 버린다)
+  let text = ''
+  for (const c of out.output?.message?.content || []) if (typeof c.text === 'string') text += c.text
+  return { text, usage: out.usage, stop: out.stopReason }
+}
+
+// ── plan 잡 ──────────────────────────────────────────────────────────────────
+// AppSync 는 이 오퍼레이션을 Event(비동기)로 띄우고 즉시 jobId 만 돌려준다.
+// 요청 실행 시간 상한이 30초(변경 불가)라서 Bedrock 을 동기로 기다릴 수 없다.
+// 그래서 결과를 Ops 테이블에 적어 두고, 브라우저가 planResult 로 받아 간다.
+
+const TABLE = process.env.OPS_TABLE
+/** 결과를 들고 있는 시간. 브라우저가 120초 안에 받아 가므로 넉넉하다 */
+const PLAN_TTL_SEC = 60 * 60
+
+let ddb = null
+const openDdb = () => (ddb ||= DynamoDBDocumentClient.from(new DynamoDBClient({})))
+
+/**
+ * 잡 결과 한 건을 적는다. planResult 리졸버가 이 키를 읽는다.
+ * @param {string} jobId
+ * @param {string} owner - 잡을 띄운 사람. 리졸버가 이것과 호출자를 대조한다
+ * @param {Object} body - {status:'done', text, usage, stop} 또는 {status:'error', error}
+ */
+async function putPlanResult(jobId, owner, body) {
+  await openDdb().send(new PutCommand({
+    TableName: TABLE,
+    Item: {
+      pk: `PLAN#${jobId}`,
+      sk: 'RESULT',
+      owner,
+      status: body.status,
+      body: JSON.stringify(body),
+      ttl: Math.floor(Date.now() / 1000) + PLAN_TTL_SEC,
+    },
+  }))
+}
+
+/**
+ * Bedrock 을 부르고 결과를 적는다. 성공이든 실패든 반드시 한 건 적는다 —
+ * 안 적으면 브라우저가 타임아웃까지 빈손으로 기다린다.
+ *
+ * 던지지 않는 것이 중요하다. Event 호출에서 던지면 Lambda 가 비동기 재시도를 돌려
+ * Bedrock 을 또 부른다 (스택에서 retryAttempts 를 0 으로 잡아 두었지만 여기서도 막는다).
+ *
+ * @param {Object} payload - {jobId, owner, prompt, maxTokens?, model?, think?}
+ */
+async function plan(payload) {
+  const jobId = str(payload?.jobId)
+  const owner = str(payload?.owner)
+  if (!jobId) throw new Error('plan 에 jobId 가 없다')
+  if (!TABLE) throw new Error('OPS_TABLE 이 비어 있다')
+
+  try {
+    await putPlanResult(jobId, owner, { status: 'done', ...(await converse(payload)) })
+  } catch (err) {
+    console.error('[graph] plan 실패', jobId, err)
+    await putPlanResult(jobId, owner, { status: 'error', error: str(err?.message) || 'plan 실패' })
+  }
+  return { jobId, status: 'accepted' }
+}
+
+// ── 핸들러 ───────────────────────────────────────────────────────────────────
+
+/** Neptune 을 여는 오퍼레이션. 끊긴 소켓 재연결이 붙는다 */
+const GRAPH_OPS = { loadGraph, saveGraph, queryGraph, updateGraph }
+/** Neptune 을 쓰지 않는 오퍼레이션. payload 하나만 받는다 */
+const PLAIN_OPS = { plan }
+
+/** 프로토타입의 값('constructor' 등)이 오퍼레이션으로 잡히지 않게 자기 키만 본다 */
+const pick = (table, name) => (Object.hasOwn(table, name) ? table[name] : null)
 
 exports.handler = async (event) => {
-  const op = OPS[event?.operation]
+  const name = str(event?.operation)
+
+  const plain = pick(PLAIN_OPS, name)
+  if (plain) return await plain(event.payload)
+
+  const op = pick(GRAPH_OPS, name)
   if (!op) throw new Error(`알 수 없는 오퍼레이션: ${event?.operation}`)
   if (!ENDPOINT) throw new Error('NEPTUNE_ENDPOINT 가 비어 있다')
 
@@ -290,8 +433,8 @@ exports.handler = async (event) => {
     try {
       return await op(open(), event.payload)
     } catch (again) {
-      console.error('[graph] Neptune 쿼리 실패', event.operation, again)
-      throw new Error(`Neptune ${event.operation} 실패: ${again.message || err.message}`)
+      console.error('[graph] Neptune 쿼리 실패', name, again)
+      throw new Error(`Neptune ${name} 실패: ${again.message || err.message}`)
     }
   }
 }

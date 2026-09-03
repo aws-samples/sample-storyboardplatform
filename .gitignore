@@ -13,3 +13,6 @@ __pycache__/
 # CDK가 VPC 조회 결과를 캐시하는 파일. 계정 번호가 들어가므로 공개 리포지토리에는 올리지 않는다.
 # 없으면 배포할 때 다시 조회한다.
 cdk.context.json
+
+# CloudShell에서 받은 임시 자격증명을 PowerShell 세션에 넣는 스크립트. 절대 올리지 않는다.
+set-creds.ps1

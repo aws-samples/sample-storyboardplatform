@@ -57,7 +57,10 @@ const M_PRESENCE = `mutation Beat($boardId: ID!, $actor: ID!, $body: String!) {
   publishPresence(boardId: $boardId, actor: $actor, body: $body) { boardId actor body }
 }`
 
-const Q_PLAN = `query Plan($spec: AWSJSON!) { plan(spec: $spec) }`
+// plan 은 Query 가 아니라 Mutation 이다. AppSync 요청 실행 시간 상한이 30초(변경 불가)라서
+// 느린 모델을 동기로 기다리면 Execution timeout 이 난다. 띄우고 결과를 따로 받아 간다.
+const M_PLAN = `mutation Plan($spec: AWSJSON!) { plan(spec: $spec) { jobId status } }`
+const Q_PLAN_RESULT = `query PlanResult($jobId: ID!) { planResult(jobId: $jobId) }`
 
 const S_OP = `subscription OnOp($boardId: ID!) { onOp(boardId: $boardId) { ${OP_FIELDS} } }`
 const S_PRESENCE = `subscription OnBeat($boardId: ID!) {
@@ -101,8 +104,59 @@ export const parseField = (raw) => {
   }
 }
 
+/** Lambda 타임아웃과 같다. 이보다 오래 걸리면 결과가 올 곳이 없다 */
+export const PLAN_TIMEOUT_MS = 120_000
+const PLAN_POLL_MS = 1500
+/** 연속 폴링 실패 허용치. 한 번 끊긴 것으로 잡을 버리지 않는다 */
+const PLAN_POLL_FAILS = 5
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
 /**
- * plan 쿼리만 쓰는 최소 클라이언트. story-graph.html 처럼 보드 동기화(구독·프레즌스)는
+ * plan 한 건을 띄우고 끝날 때까지 기다린다. 30초 상한을 우회하는 곳이다.
+ *
+ * 1) mutation 으로 잡을 띄운다 — Lambda 를 Event 로 부르고 jobId 만 즉시 온다 (1초 이내)
+ * 2) planResult(jobId) 를 폴링한다. 결과는 잡을 띄운 사람만 읽을 수 있다 —
+ *    브로드캐스트가 아니라 자기 jobId 를 직접 읽는 것이라 남의 화면에 새지 않는다
+ * 3) done 이면 {text, usage, stop} 을 돌려준다. 예전 동기 plan 과 같은 모양이라
+ *    story.js 의 호출부는 그대로다
+ *
+ * @param {Function} post - (query, variables) => Promise<data>
+ * @param {Object} spec - {prompt, maxTokens?, model?, think?}
+ * @param {Object} [opts] - {pollMs, timeoutMs}. 테스트에서 기다리지 않게 두는 문이다
+ * @returns {Promise<{text: string, usage: Object, stop: string}>}
+ */
+export async function runPlanJob(post, spec, opts = {}) {
+  const pollMs = opts.pollMs ?? PLAN_POLL_MS
+  const timeoutMs = opts.timeoutMs ?? PLAN_TIMEOUT_MS
+
+  const started = await post(M_PLAN, { spec: JSON.stringify(spec) })
+  const jobId = started?.plan?.jobId
+  if (!jobId) throw new Error('plan jobId 를 받지 못했다')
+
+  const deadline = Date.now() + timeoutMs
+  let fails = 0
+  while (Date.now() < deadline) {
+    await sleep(pollMs)
+
+    let got
+    try {
+      got = parseField((await post(Q_PLAN_RESULT, { jobId })).planResult)
+      fails = 0
+    } catch (e) {
+      // Bedrock 은 계속 돌고 있다. 몇 번은 참고 다시 물어본다
+      if (++fails > PLAN_POLL_FAILS) throw e
+      continue
+    }
+
+    if (got?.status === 'done') return { text: got.text, usage: got.usage, stop: got.stop }
+    if (got?.status === 'error') throw new Error(got.error || 'plan 실패')
+  }
+  throw new Error(`plan 이 ${Math.round(timeoutMs / 1000)}초 안에 끝나지 않았다`)
+}
+
+/**
+ * plan 만 쓰는 최소 클라이언트. story-graph.html 처럼 보드 동기화(구독·프레즌스)는
  * 필요 없고 Bedrock 호출만 하는 화면에서 쓴다.
  *
  * @returns {{plan: Function}|null} 설정이 없으면 null — 부르는 쪽은 로컬 모드로 내려간다
@@ -110,7 +164,7 @@ export const parseField = (raw) => {
 export function planClient() {
   const cfg = window.SB_CONFIG
   if (!cfg?.graphqlUrl) return null
-  return { plan: async (spec) => parseField((await gqlPost(cfg, Q_PLAN, { spec: JSON.stringify(spec) })).plan) }
+  return { plan: (spec) => runPlanJob((query, variables) => gqlPost(cfg, query, variables), spec) }
 }
 
 const Q_LOAD_GRAPH = `query LoadGraph($projectId: String) { loadGraph(projectId: $projectId) }`
@@ -203,7 +257,7 @@ async function awsTransport(cfg, h) {
       } while (token)
       return out.sort((a, b) => a.ts - b.ts)
     },
-    plan: async (spec) => parseField((await post(Q_PLAN, { spec: JSON.stringify(spec) })).plan),
+    plan: (spec) => runPlanJob(post, spec),
     setLatency: (ms) => { latency = ms },
   }
 }

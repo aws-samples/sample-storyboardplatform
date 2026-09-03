@@ -18,7 +18,7 @@ const asList = (v) => (Array.isArray(v) ? v : [])
  */
 export const PROBES = {
   secret_leverage: {
-    weight: 1.2, label: '비밀 레버리지',
+    weight: 1.2, label: '비밀의 칼자루',
     hint: '아는 사람과 모르는 사람이 갈린 비밀이다. 폭로 시점이 곧 사건이 된다.',
   },
   love_triangle: {
@@ -26,35 +26,35 @@ export const PROBES = {
     hint: '한 사람을 두고 마음이 겹친다. 셋 중 누구도 물러나지 않으면 반드시 깨진다.',
   },
   unresolved_tension: {
-    weight: 1, label: '해소 안 된 긴장',
+    weight: 1, label: '풀리지 않은 갈등',
     hint: '긴장은 높은데 두 사람이 함께 겪은 사건이 없다. 부딪힐 자리가 아직 안 만들어졌다.',
   },
   chekhov_object: {
-    weight: 1, label: '회수 안 된 사물',
+    weight: 1, label: '회수되지 않은 복선',
     hint: '등장했는데 아무 일도 일으키지 않은 물건이다. 언젠가는 발사돼야 한다.',
   },
   strangers_shared_past: {
-    weight: 1, label: '같은 과거·남인 사이',
+    weight: 1, label: '스쳐간 인연',
     hint: '같은 사건에 있었는데 서로 관계가 없다. 한쪽이 먼저 알아보는 순간이 사건이 된다.',
   },
   severed_bond: {
-    weight: 1, label: '끊어진 사제',
+    weight: 1, label: '갈라선 사제',
     hint: '가르친 관계가 끊어진 채 남아 있다. 화해도 결별도 아직 기록되지 않았다.',
   },
   dangling_consequence: {
-    weight: 1, label: '값 안 치른 사건',
+    weight: 1, label: '치르지 않은 대가',
     hint: '사건이 있었는데 그 뒤가 그래프에 없다. 아직 아무도 값을 치르지 않았다.',
   },
   contested_goal: {
-    weight: 1, label: '겹친 목표',
+    weight: 1, label: '같은 것을 원하는 자들',
     hint: '여러 사람이 같은 것을 원한다. 하나뿐이면 나머지는 잃는다.',
   },
   betrayal_potential: {
-    weight: 1.2, label: '배신 가능',
+    weight: 1.2, label: '안에서 갈라지는 충성',
     hint: '섬기는 주인의 적과 이미 얽혀 있다. 어느 쪽을 택해도 배신이 된다.',
   },
   identity_crisis: {
-    weight: 1, label: '정체성 갈등',
+    weight: 1, label: '두 얼굴의 소속',
     hint: '자기가 무엇인지 스스로 감추거나, 서로 적인 곳에 동시에 속해 있다.',
   },
   forbidden_bond: {
@@ -62,7 +62,7 @@ export const PROBES = {
     hint: '사랑해선 안 될 상대다. 관계를 지키려면 소속이나 계약을 버려야 한다.',
   },
   power_vacuum: {
-    weight: 1, label: '권력 공백',
+    weight: 1, label: '빈 자리의 무게',
     hint: '이끄는 자리가 비어 있다. 누가 그 자리를 채우느냐가 다음 갈등이다.',
   },
 }

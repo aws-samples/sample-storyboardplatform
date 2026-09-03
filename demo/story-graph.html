@@ -4,157 +4,369 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Story Graph · 대본에서 씨앗과 분기까지</title>
-<script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
 <style>
+  /* 밝은 톤 한 벌. 색·그림자·둥근 정도를 여기 변수로 모아 둔다 */
+  :root {
+    --bg: #F5F3EF;
+    --bg-soft: #FAFAF8;
+    --panel: #FFFFFF;
+    --ink: #1F2430;
+    --ink2: #565E70;
+    --ink3: #8A92A6;
+    --line: #E9E5DE;
+    --line2: #EDEFF4;
+    --acc: #6366F1;
+    --acc-ink: #4338CA;
+    --acc-soft: #EEF0FF;
+    --ok: #0F9D6E;
+    --ok-ink: #0B7355;
+    --ok-soft: #E9F9F2;
+    --warn: #B45309;
+    --warn-soft: #FFF7E8;
+    --bad: #DC2626;
+    --bad-soft: #FEF1F1;
+    --sh1: 0 1px 2px rgba(26,34,60,.04), 0 4px 20px rgba(26,34,60,.08);
+    --sh2: 0 10px 34px rgba(26,34,60,.14);
+    --r: 14px;
+  }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; background: #0d1117; color: #e6edf3; height: 100vh; overflow: hidden; }
-  .app { display: grid; grid-template-columns: 1fr 400px; grid-template-rows: 52px 1fr; height: 100vh; }
-  .topbar { grid-column: 1 / -1; background: #161b22; border-bottom: 1px solid #30363d; display: flex; align-items: center; padding: 0 20px; gap: 10px; }
-  .topbar h1 { font-size: 14px; font-weight: 600; color: #e6edf3; margin-right: 6px; }
-  .badge { font-size: 11px; background: #21262d; border: 1px solid #30363d; border-radius: 12px; padding: 2px 10px; color: #8b949e; white-space: nowrap; }
-  .badge--live { background: #071a0c; border-color: #1a7f37; color: #3fb950; }
+  [hidden] { display: none !important; }
+  body {
+    font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+    background: var(--bg); color: var(--ink);
+    font-size: 15px; line-height: 1.7; letter-spacing: -.005em;
+    height: 100vh; overflow: hidden; -webkit-font-smoothing: antialiased;
+  }
+  /* 줄: 위 띠 · 기능 탭 바 · 내용 */
+  .app { display: grid; grid-template-columns: 1fr 468px; grid-template-rows: 66px auto 1fr; height: 100vh; }
+  /* 탭 바와 준비 중 안내는 두 칸을 다 쓴다. 탭 바 모양은 nav-tabs.js 가 들고 있다 */
+  #navMount, .soonpage { grid-column: 1 / -1; min-width: 0; }
+  #navMount { z-index: 19; }
+
+  /* ── 위 띠 ─────────────────────────────────────────────────────────────── */
+  .topbar {
+    grid-column: 1 / -1; background: rgba(255,255,255,.88); backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line); display: flex; align-items: center;
+    padding: 0 22px; gap: 10px; box-shadow: 0 1px 12px rgba(26,34,60,.05); z-index: 20;
+  }
+  .topbar h1 {
+    font-size: 19px; font-weight: 800; letter-spacing: -.02em; margin-right: 8px;
+    background: linear-gradient(120deg, #4F46E5, #14B8A6);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .badge {
+    font-size: 13px; font-weight: 600; background: var(--bg-soft); border: 1px solid var(--line);
+    border-radius: 999px; padding: 5px 12px; color: var(--ink3); white-space: nowrap;
+  }
+  .badge--live { background: var(--ok-soft); border-color: #B6E8D4; color: var(--ok-ink); }
+  .who { font-size: 14px; font-weight: 700; color: var(--ink2); white-space: nowrap; }
   .grow { flex: 1; }
-  .graph-area { position: relative; overflow: hidden; background: #0d1117; }
-  .sidebar { background: #161b22; border-left: 1px solid #30363d; display: flex; flex-direction: column; overflow: hidden; }
+  .graph-area { position: relative; overflow: hidden; background: var(--bg); }
+  .sidebar { background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; overflow: hidden; }
   #network { width: 100%; height: 100%; }
 
+  /* ── 버튼 · 입력 ────────────────────────────────────────────────────────── */
   button { font-family: inherit; }
-  .btn { padding: 9px 12px; background: #238636; border: 1px solid #2ea043; border-radius: 6px; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; transition: background .15s; }
-  .btn:hover:not(:disabled) { background: #2ea043; }
-  .btn:disabled { opacity: .5; cursor: default; }
-  .btn--line { background: #21262d; border-color: #30363d; color: #c9d1d9; font-weight: 500; }
-  .btn--line:hover:not(:disabled) { background: #30363d; border-color: #58a6ff; }
+  .btn {
+    padding: 12px 17px; background: linear-gradient(180deg, #7174F5, #5457E5);
+    border: none; border-radius: 11px; color: #fff; font-size: 14.5px; font-weight: 700;
+    letter-spacing: -.01em; cursor: pointer; box-shadow: 0 2px 10px rgba(84,87,229,.26);
+    transition: transform .14s, box-shadow .14s, filter .14s;
+  }
+  .btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(84,87,229,.32); }
+  .btn:active:not(:disabled) { transform: translateY(0); filter: brightness(.97); }
+  .btn:disabled { opacity: .45; cursor: default; box-shadow: none; }
+  .btn--line {
+    background: #fff; border: 1.5px solid var(--line2); color: var(--ink2);
+    font-weight: 600; box-shadow: 0 1px 2px rgba(26,34,60,.04);
+  }
+  .btn--line:hover:not(:disabled) { border-color: #C7CBF6; color: var(--acc-ink); background: var(--acc-soft); }
   .btn--wide { width: 100%; }
-  .btn--mini { padding: 4px 9px; font-size: 11px; }
+  .btn--mini { padding: 8px 12px; font-size: 13px; border-radius: 9px; }
 
-  textarea { width: 100%; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; font-family: inherit; font-size: 11.5px; line-height: 1.6; padding: 8px; resize: vertical; }
-  textarea:focus { outline: none; border-color: #58a6ff; }
-  select { width: 100%; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; font-family: inherit; font-size: 11.5px; padding: 6px 7px; }
-  select:focus { outline: none; border-color: #58a6ff; }
+  textarea, select, input[type="text"], input[type="password"] {
+    width: 100%; background: #fff; border: 1.5px solid var(--line2); border-radius: 12px;
+    color: var(--ink); font-family: inherit; font-size: 15px; line-height: 1.7; padding: 11px 13px;
+    transition: border-color .14s, box-shadow .14s;
+  }
+  textarea { resize: vertical; }
+  textarea:focus, select:focus, input:focus {
+    outline: none; border-color: var(--acc); box-shadow: 0 0 0 4px rgba(99,102,241,.12);
+  }
+  textarea::placeholder { color: #AEB4C4; }
 
-  /* 그래프 위에 얹는 카드 */
-  .card { position: absolute; z-index: 5; background: #161b22ee; border: 1px solid #30363d; border-radius: 8px; padding: 12px; backdrop-filter: blur(3px); }
-  .card h3 { font-size: 11px; font-weight: 600; color: #8b949e; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
-  .card--input { top: 12px; left: 12px; width: 330px; }
-  .card--input.drop { border-color: #58a6ff; background: #0d2137ee; }
-  .card--node { bottom: 12px; left: 12px; width: 330px; max-height: 44%; overflow-y: auto; }
-  .card__row { display: flex; gap: 6px; margin-top: 8px; }
-  .hint { font-size: 10.5px; color: #6e7681; line-height: 1.55; margin-top: 6px; }
-  .warn { font-size: 10.5px; color: #e3b341; line-height: 1.55; margin-top: 6px; }
-  .err { font-size: 11px; color: #f85149; line-height: 1.6; margin-top: 6px; }
-  .legend { position: absolute; z-index: 5; right: 12px; bottom: 12px; display: flex; flex-wrap: wrap; gap: 4px 10px; max-width: 300px; justify-content: flex-end; }
-  .legend span { font-size: 10px; color: #8b949e; display: flex; align-items: center; gap: 4px; }
-  .legend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-  .legend i.dia { border-radius: 0; transform: rotate(45deg); }
-  .legend i.line { width: 14px; height: 0; border-top: 1px solid #c9d1d9; border-radius: 0; }
-  .legend i.dash { width: 14px; height: 0; border-top: 1px dashed #6e7681; border-radius: 0; }
-  .canvas-msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; color: #484f58; font-size: 12.5px; line-height: 1.8; padding: 40px; pointer-events: none; }
+  /* ── 모델 고르기 ────────────────────────────────────────────────────────────
+     이 화면의 모든 Bedrock 호출(추출·요약·분기·대본)이 여기서 고른 모델로 간다.
+     이름은 infra/resolvers/plan.js 의 MODELS 키와 짝이 맞아야 한다. */
+  .model-pick { margin-bottom: 13px; }
+  .model-pick label {
+    display: block; font-size: 12px; font-weight: 800; color: var(--ink3);
+    text-transform: uppercase; letter-spacing: .07em; margin-bottom: 6px;
+  }
+  .model-pick select {
+    font-size: 13.5px; line-height: 1.5; padding: 9px 11px; border-radius: 11px;
+    cursor: pointer; font-weight: 600; color: var(--ink);
+  }
+  .model-pick select:disabled { background: var(--bg-soft); color: var(--ink3); cursor: default; }
+  .model-pick .hint { margin-top: 6px; font-size: 12.5px; }
 
-  .kv { display: grid; grid-template-columns: 58px 1fr; gap: 2px 8px; font-size: 11px; }
-  .kv .k { color: #6e7681; }
-  .kv .v { color: #c9d1d9; word-break: break-all; }
-  .edge-line { font-size: 10.5px; color: #c9d1d9; line-height: 1.7; }
-  .edge-line b { color: #d2a8ff; font-weight: 500; }
-  .edge-line.der { color: #6e7681; }
+  /* ── 그래프 위에 얹는 카드 ─────────────────────────────────────────────── */
+  .card {
+    position: absolute; z-index: 5; background: rgba(255,255,255,.94); backdrop-filter: blur(10px);
+    border: 1px solid rgba(233,229,222,.9); border-radius: 18px; padding: 17px; box-shadow: var(--sh1);
+  }
+  .card h3 {
+    font-size: 12.5px; font-weight: 800; color: var(--ink3); text-transform: uppercase;
+    letter-spacing: .08em; margin-bottom: 11px; display: flex; align-items: center; gap: 8px;
+  }
+  .card--input { top: 18px; left: 18px; width: 392px; }
+  .card--input.drop { border-color: var(--acc); box-shadow: 0 0 0 5px var(--acc-soft), var(--sh2); }
+  .card--node { bottom: 18px; left: 18px; width: 392px; max-height: 48%; overflow-y: auto; }
+  .card__row { display: flex; gap: 9px; margin-top: 12px; }
 
-  /* 사이드바 */
-  .stats-bar { display: flex; gap: 14px; padding: 8px 12px; border-bottom: 1px solid #30363d; background: #161b22; flex-shrink: 0; }
-  .stat { display: flex; flex-direction: column; gap: 1px; }
-  .stat .n { font-size: 16px; font-weight: 700; color: #e6edf3; }
-  .stat .l { font-size: 10px; color: #8b949e; }
-  .tabs { display: flex; border-bottom: 1px solid #30363d; background: #161b22; flex-shrink: 0; }
-  .tab { padding: 12px 16px; font-size: 12px; cursor: pointer; color: #8b949e; border-bottom: 2px solid transparent; transition: all .15s; user-select: none; }
-  .tab:hover { color: #e6edf3; }
-  .tab.active { color: #e6edf3; border-bottom-color: #f78166; }
+  .hint { font-size: 13.5px; color: var(--ink3); line-height: 1.7; margin-top: 9px; }
+  .warn { font-size: 14px; color: var(--warn); line-height: 1.7; margin-top: 9px; }
+  .err { font-size: 14.5px; color: var(--bad); line-height: 1.7; margin-top: 9px; font-weight: 500; }
+  .ok { font-size: 14.5px; color: var(--ok-ink); line-height: 1.7; margin-top: 9px; font-weight: 600; }
+
+  .legend {
+    position: absolute; z-index: 5; right: 18px; bottom: 18px; display: flex; flex-wrap: wrap;
+    gap: 8px 15px; max-width: 400px; justify-content: flex-end; align-items: center;
+    background: rgba(255,255,255,.92); backdrop-filter: blur(8px); border: 1px solid var(--line);
+    border-radius: 999px; padding: 11px 18px; box-shadow: var(--sh1);
+  }
+  .legend span { font-size: 13px; font-weight: 600; color: var(--ink2); display: flex; align-items: center; gap: 6px; }
+  .legend i {
+    width: 13px; height: 13px; border-radius: 50%; display: inline-block;
+    background: radial-gradient(circle at 33% 28%, rgba(255,255,255,.9), var(--c) 58%, rgba(0,0,0,.18));
+    box-shadow: 0 2px 4px rgba(26,34,60,.22);
+  }
+  .legend i.line { width: 18px; height: 0; border-radius: 0; background: none; box-shadow: none; border-top: 2px solid #79839E; }
+  .legend i.dash { width: 18px; height: 0; border-radius: 0; background: none; box-shadow: none; border-top: 2px dashed #A9B0C4; }
+  .canvas-msg {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    text-align: center; color: var(--ink3); font-size: 15.5px; line-height: 2; padding: 48px; pointer-events: none;
+  }
+  .canvas-msg b { color: var(--acc-ink); }
+
+  .kv { display: grid; grid-template-columns: 62px 1fr; gap: 5px 12px; font-size: 14.5px; }
+  .kv .k { color: var(--ink3); font-weight: 600; }
+  .kv .v { color: var(--ink); word-break: break-all; }
+  .edge-line { font-size: 14px; color: var(--ink2); line-height: 1.85; }
+  .edge-line b { color: var(--acc-ink); font-weight: 700; }
+  .edge-line.der { color: var(--ink3); }
+
+  /* ── 사이드바 ───────────────────────────────────────────────────────────── */
+  .stats-bar {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 16px 18px;
+    border-bottom: 1px solid var(--line2); background: var(--panel); flex-shrink: 0;
+  }
+  .stat { background: var(--bg-soft); border: 1px solid var(--line2); border-radius: 13px; padding: 11px 12px; }
+  .stat .n { font-size: 27px; font-weight: 800; line-height: 1.15; letter-spacing: -.03em; color: var(--ink); }
+  .stat .l { font-size: 12.5px; font-weight: 600; color: var(--ink3); margin-top: 3px; }
+
+  .tabs { display: flex; gap: 7px; padding: 12px 14px; border-bottom: 1px solid var(--line2); background: var(--panel); flex-shrink: 0; }
+  .tab {
+    padding: 10px 18px; font-size: 15px; font-weight: 700; cursor: pointer; color: var(--ink3);
+    border-radius: 11px; transition: all .15s; user-select: none;
+  }
+  .tab:hover { color: var(--ink); background: var(--bg-soft); }
+  .tab.active { color: var(--acc-ink); background: var(--acc-soft); }
   .panel { display: none; flex-direction: column; overflow: hidden; flex: 1; }
   .panel.active { display: flex; }
-  .panel-scroll { overflow-y: auto; flex: 1; padding: 12px; }
-  .panel-scroll::-webkit-scrollbar { width: 4px; }
+  .panel-scroll { overflow-y: auto; flex: 1; padding: 18px; }
+  .panel-scroll::-webkit-scrollbar { width: 9px; }
   .panel-scroll::-webkit-scrollbar-track { background: transparent; }
-  .panel-scroll::-webkit-scrollbar-thumb { background: #30363d; border-radius: 2px; }
+  .panel-scroll::-webkit-scrollbar-thumb { background: #DDE1EA; border: 3px solid #fff; border-radius: 999px; }
+  .panel-scroll::-webkit-scrollbar-thumb:hover { background: #C6CCDA; }
 
-  .seed-card { background: #21262d; border: 1px solid #30363d; border-radius: 8px; padding: 12px; margin-bottom: 8px; transition: all .15s; }
-  .seed-card:hover { border-color: #58a6ff; background: #1c2128; }
-  .seed-card.on { border-color: #f78166; }
-  .seed-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-  .probe-tag { font-size: 10px; background: #0d2137; border: 1px solid #1f6feb; color: #79c0ff; border-radius: 10px; padding: 1px 8px; white-space: nowrap; }
-  .seed-score { font-size: 11px; color: #8b949e; margin-left: auto; }
-  .seed-title { font-size: 12px; font-weight: 600; color: #e6edf3; margin-bottom: 4px; cursor: pointer; }
-  .seed-rationale { font-size: 11px; color: #8b949e; line-height: 1.5; margin-bottom: 8px; }
-  .seed-focus { font-size: 10px; color: #6e7681; margin-bottom: 8px; }
+  /* ── 씨앗 카드 ──────────────────────────────────────────────────────────── */
+  .seed-card {
+    background: #fff; border: 1.5px solid var(--line2); border-radius: 17px; margin-bottom: 14px;
+    box-shadow: var(--sh1); overflow: hidden;
+    transition: transform .16s, box-shadow .16s, border-color .16s;
+  }
+  .seed-card:hover { transform: translateY(-2px); box-shadow: var(--sh2); }
+  .seed-card.on { border-color: var(--acc); box-shadow: 0 0 0 4px var(--acc-soft), var(--sh2); }
+  /* 탐지기별 파스텔 그라디언트 머리. --p1/--p2/--pi 는 JS 가 씨앗마다 꽂아 준다 */
+  .seed-head {
+    display: flex; align-items: center; gap: 10px; padding: 13px 15px;
+    background: linear-gradient(135deg, var(--p1, #E9EAFB), var(--p2, #F6F7FE));
+    border-bottom: 1px solid rgba(255,255,255,.7);
+  }
+  .probe-tag {
+    font-size: 13px; font-weight: 800; letter-spacing: -.01em; color: var(--pi, var(--acc-ink));
+    background: rgba(255,255,255,.75); border-radius: 999px; padding: 6px 13px; white-space: nowrap;
+  }
+  .seed-score { margin-left: auto; font-size: 14px; font-weight: 800; color: var(--pi, var(--acc-ink)); }
+  /* 역기입 뒤에 새로 나온 씨앗. 판의 새 노드·엣지와 같은 녹색을 쓴다 (graph-view.js) */
+  .seed-card.is-new { border-color: #4CAF50; box-shadow: 0 0 0 4px rgba(76,175,80,.15), var(--sh1); }
+  .seed-new-tag {
+    display: flex; align-items: center; gap: 6px; padding: 7px 15px;
+    background: #4CAF50; color: #fff; font-size: 12.5px; font-weight: 800; letter-spacing: -.01em;
+  }
+  .seed-new-tag::before { content: '✦'; font-size: 11px; }
+  .new-badge {
+    font-size: 10.5px; font-weight: 800; letter-spacing: .04em; color: #fff;
+    background: #4CAF50; border-radius: 999px; padding: 4px 9px; line-height: 1;
+  }
+  .seed-body { padding: 15px 16px 16px; }
+  .seed-title { font-size: 19px; font-weight: 800; line-height: 1.45; letter-spacing: -.02em; color: var(--ink); margin-bottom: 9px; cursor: pointer; }
+  .seed-title:hover { color: var(--acc-ink); }
+  .seed-rationale { font-size: 15.5px; color: var(--ink2); line-height: 1.75; margin-bottom: 11px; }
+  .seed-focus { font-size: 13.5px; color: var(--ink3); margin-bottom: 14px; }
 
-  .story-content { padding: 16px; font-size: 12px; line-height: 1.7; }
-  .story-content h1 { font-size: 16px; font-weight: 700; color: #e6edf3; margin-bottom: 10px; }
-  .seed-info { background: #0d2137; border: 1px solid #1f6feb; border-radius: 6px; padding: 9px 11px; margin-bottom: 12px; font-size: 10.5px; color: #79c0ff; line-height: 1.6; }
-  .logline { color: #c9d1d9; font-size: 12px; line-height: 1.75; margin-bottom: 12px; }
-  .pivot-box { background: #1c1400; border: 1px solid #9e6a03; border-radius: 6px; padding: 9px 11px; margin-bottom: 12px; font-size: 10.5px; line-height: 1.6; }
-  .pivot-box .ttl { color: #e3b341; font-weight: 600; display: block; margin-bottom: 3px; }
-  .pivot-box .bd { color: #c9d1d9; }
+  /* ── 스토리 · 분기 ──────────────────────────────────────────────────────── */
+  .story-content { font-size: 15.5px; line-height: 1.75; padding-bottom: 26px; }
+  .story-content h1 { font-size: 25px; font-weight: 800; letter-spacing: -.03em; line-height: 1.35; margin-bottom: 12px; }
+  .seed-info {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 9px;
+    background: linear-gradient(135deg, var(--p1, #EEF0FF), var(--p2, #F7F8FF));
+    border: 1px solid rgba(255,255,255,.8); border-radius: 14px; padding: 13px 15px;
+    margin-bottom: 16px; font-size: 14px; color: var(--ink2); line-height: 1.6;
+  }
+  .logline { color: var(--ink2); font-size: 16.5px; line-height: 1.8; margin-bottom: 16px; }
+  .pivot-box {
+    background: var(--warn-soft); border: 1px solid #F5DFB4; border-radius: 14px;
+    padding: 14px 16px; margin-bottom: 16px; font-size: 15px; line-height: 1.75;
+  }
+  .pivot-box .ttl { color: #92400E; font-weight: 800; font-size: 15.5px; display: block; margin-bottom: 5px; }
+  .pivot-box .bd { color: var(--ink2); }
 
-  .branch-chips { display: flex; gap: 5px; margin-bottom: 12px; }
-  .branch-chip { flex: 1; padding: 7px 4px; text-align: center; background: #21262d; border: 1px solid #30363d; border-radius: 5px; cursor: pointer; font-size: 10px; color: #8b949e; transition: all .12s; line-height: 1.35; }
-  .branch-chip:hover { border-color: #58a6ff; color: #e6edf3; }
-  .branch-chip.on { background: #1c1014; border-color: #f78166; color: #ffb3a0; }
-  .branch-chip .bid { display: block; font-size: 13px; font-weight: 700; }
+  .branch-chips { display: grid; grid-template-columns: repeat(auto-fit, minmax(98px, 1fr)); gap: 10px; margin-bottom: 18px; }
+  .branch-chip {
+    background: #fff; border: 1.5px solid var(--line2); border-radius: 15px; padding: 13px 10px;
+    text-align: center; cursor: pointer; font-size: 13.5px; font-weight: 600; color: var(--ink2);
+    line-height: 1.45; box-shadow: var(--sh1); transition: all .15s;
+  }
+  .branch-chip:hover { transform: translateY(-2px); border-color: #C7CBF6; color: var(--ink); box-shadow: var(--sh2); }
+  .branch-chip.on {
+    border-color: var(--acc); background: var(--acc-soft); color: var(--acc-ink);
+    box-shadow: 0 0 0 4px rgba(99,102,241,.13), var(--sh2);
+  }
+  .branch-chip .bid { display: block; font-size: 23px; font-weight: 800; letter-spacing: -.02em; color: var(--ink); margin-bottom: 3px; }
+  .branch-chip.on .bid { color: var(--acc-ink); }
 
-  .branch-head { font-size: 13px; font-weight: 700; color: #e6edf3; margin-bottom: 3px; }
-  .branch-tone { display: inline-block; font-size: 9.5px; background: #21262d; border: 1px solid #30363d; border-radius: 9px; padding: 1px 7px; color: #8b949e; margin-bottom: 8px; }
-  .branch-premise { font-size: 11px; color: #8b949e; line-height: 1.65; margin-bottom: 11px; padding-left: 8px; border-left: 2px solid #30363d; }
+  .branch-head { font-size: 22px; font-weight: 800; letter-spacing: -.025em; line-height: 1.4; margin-bottom: 7px; }
+  .branch-tone {
+    display: inline-block; font-size: 13px; font-weight: 700; background: var(--bg-soft);
+    border: 1px solid var(--line2); border-radius: 999px; padding: 4px 12px; color: var(--ink2); margin-bottom: 11px;
+  }
+  .branch-premise {
+    font-size: 15.5px; color: var(--ink2); line-height: 1.8; margin-bottom: 16px;
+    padding: 2px 0 2px 14px; border-left: 3px solid #D9DCFB;
+  }
 
-  .beats { margin-bottom: 12px; }
-  .beat { display: flex; gap: 8px; font-size: 11px; color: #c9d1d9; line-height: 1.65; margin-bottom: 7px; }
-  .beat .no { flex-shrink: 0; width: 16px; height: 16px; margin-top: 2px; border-radius: 50%; background: #21262d; border: 1px solid #30363d; color: #8b949e; font-size: 9px; display: flex; align-items: center; justify-content: center; }
+  .beats { margin-bottom: 16px; }
+  .beat { display: flex; gap: 12px; font-size: 15.5px; color: var(--ink); line-height: 1.75; margin-bottom: 12px; }
+  .beat .no {
+    flex-shrink: 0; width: 25px; height: 25px; margin-top: 2px; border-radius: 9px;
+    background: var(--acc-soft); color: var(--acc-ink); font-size: 13px; font-weight: 800;
+    display: flex; align-items: center; justify-content: center;
+  }
 
-  .sec-label { font-size: 10px; color: #6e7681; text-transform: uppercase; letter-spacing: .04em; margin: 12px 0 5px; }
-  .outcome { display: grid; grid-template-columns: 62px 1fr; gap: 3px 8px; font-size: 10.5px; margin-bottom: 4px; }
-  .outcome .k { color: #8b949e; }
-  .outcome .v { color: #e6edf3; }
+  .sec-label {
+    font-size: 12.5px; font-weight: 800; color: var(--ink3); text-transform: uppercase;
+    letter-spacing: .09em; margin: 24px 0 11px;
+  }
+  .outcome { display: grid; grid-template-columns: 88px 1fr; gap: 4px 12px; font-size: 15px; margin-bottom: 8px; }
+  .outcome .k { color: var(--ink3); font-weight: 700; }
+  .outcome .v { color: var(--ink); }
 
-  .wb-box { background: #071a0c; border: 1px solid #1a7f37; border-radius: 6px; padding: 9px 11px; font-size: 10px; line-height: 1.6; }
-  .wb-box .item { color: #c9d1d9; padding: 1px 0; }
-  .wb-box .item::before { content: "+ "; color: #3fb950; }
-  .wb-box .item.cut::before { content: "− "; color: #f85149; }
-  .wb-box .item.cut { color: #8b949e; text-decoration: line-through; }
-  .wb-box .item .p { color: #d2a8ff; }
-  .wb-box .item .nt { color: #6e7681; }
-  .wb-sum { font-size: 10.5px; color: #8b949e; margin-bottom: 6px; }
-  .wb-sum b { color: #3fb950; font-weight: 600; }
-  .wb-sum i { color: #f85149; font-style: normal; font-weight: 600; }
+  .wb-box { background: var(--ok-soft); border: 1px solid #BFE9D8; border-radius: 14px; padding: 13px 15px; font-size: 14px; line-height: 1.75; }
+  .wb-box .item { color: var(--ink2); padding: 2px 0; }
+  .wb-box .item::before { content: "+ "; color: var(--ok); font-weight: 800; }
+  .wb-box .item.cut::before { content: "− "; color: var(--bad); }
+  .wb-box .item.cut { color: var(--ink3); text-decoration: line-through; }
+  .wb-box .item .p { color: var(--acc-ink); font-weight: 600; }
+  .wb-box .item .nt { color: var(--ink3); font-size: 12.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+  .wb-sum { font-size: 14.5px; color: var(--ink2); margin-bottom: 9px; }
+  .wb-sum b { color: var(--ok-ink); font-weight: 800; }
+  .wb-sum i { color: var(--bad); font-style: normal; font-weight: 800; }
 
-  .free-box { background: #161b22; border: 1px dashed #30363d; border-radius: 6px; padding: 10px; margin-top: 14px; }
-  .free-box h4 { font-size: 11px; color: #c9d1d9; margin-bottom: 6px; }
+  .free-box { background: var(--bg-soft); border: 1.5px dashed #DCD8CF; border-radius: 16px; padding: 17px; margin-top: 20px; }
+  .free-box h4 { font-size: 15.5px; font-weight: 800; color: var(--ink); margin-bottom: 9px; }
 
-  .placeholder { text-align: center; color: #484f58; padding: 22px 16px; font-size: 12px; line-height: 1.8; }
-  .load-error { padding: 20px; color: #f85149; font-size: 12px; line-height: 1.8; }
-  .spin { display: inline-block; width: 11px; height: 11px; border: 2px solid #30363d; border-top-color: #58a6ff; border-radius: 50%; animation: sp .7s linear infinite; vertical-align: -1px; }
+  .placeholder { text-align: center; color: var(--ink3); padding: 30px 18px; font-size: 15px; line-height: 1.95; }
+  .placeholder b { color: var(--acc-ink); }
+  .load-error { padding: 26px; color: var(--bad); font-size: 15px; line-height: 1.9; }
+  .spin {
+    display: inline-block; width: 15px; height: 15px; border: 2.5px solid var(--line2);
+    border-top-color: var(--acc); border-radius: 50%; animation: sp .7s linear infinite; vertical-align: -2px;
+  }
   @keyframes sp { to { transform: rotate(360deg) } }
-  .busy { display: flex; align-items: center; gap: 8px; color: #8b949e; font-size: 11.5px; padding: 16px 4px; }
+  .busy { display: flex; align-items: center; gap: 10px; color: var(--ink2); font-size: 15px; font-weight: 600; padding: 20px 4px; }
 
-  .cmp { width: 100%; border-collapse: collapse; font-size: 9.5px; margin-top: 6px; }
-  .cmp th { background: #21262d; color: #8b949e; padding: 4px 5px; border: 1px solid #30363d; font-weight: 500; text-align: left; }
-  .cmp tr > th:first-child { white-space: nowrap; }
-  .cmp td { padding: 4px 5px; border: 1px solid #21262d; color: #c9d1d9; vertical-align: top; }
-  .cmp td.on { background: #1c1014; color: #ffb3a0; }
-  details.warns { margin-top: 10px; font-size: 10.5px; color: #e3b341; }
-  details.warns ul { margin: 6px 0 0 14px; color: #8b949e; line-height: 1.6; }
+  .cmp { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; margin-top: 8px; border-radius: 12px; overflow: hidden; border: 1px solid var(--line2); }
+  .cmp th { background: var(--bg-soft); color: var(--ink2); padding: 9px 10px; border-bottom: 1px solid var(--line2); font-weight: 700; text-align: left; }
+  .cmp tr > th:first-child { white-space: nowrap; color: var(--ink3); }
+  .cmp td { padding: 9px 10px; border-bottom: 1px solid var(--line2); color: var(--ink2); vertical-align: top; line-height: 1.6; }
+  .cmp tr:last-child td, .cmp tr:last-child th { border-bottom: none; }
+  .cmp td.on { background: var(--acc-soft); color: var(--acc-ink); font-weight: 600; }
+  details.warns { margin-top: 14px; font-size: 14px; color: var(--warn); }
+  details.warns summary { cursor: pointer; font-weight: 700; }
+  details.warns ul { margin: 8px 0 0 18px; color: var(--ink2); line-height: 1.75; }
 
-  /* 분기 → 대본 생성 · 대본화 */
-  .ok { font-size: 10.5px; color: #3fb950; line-height: 1.6; margin-top: 6px; }
-  .opt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 11px; }
-  .opt-grid label { font-size: 10px; color: #8b949e; display: flex; flex-direction: column; gap: 3px; }
+  /* ── 분기 → 대본 · 대본화 ───────────────────────────────────────────────── */
+  .opt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px; }
+  .opt-grid label { font-size: 13px; font-weight: 700; color: var(--ink3); display: flex; flex-direction: column; gap: 6px; }
   .opt-grid label.wide { grid-column: 1 / -1; }
-  .step-bar { display: flex; gap: 4px; margin-bottom: 12px; }
-  .step { flex: 1; font-size: 9.5px; text-align: center; padding: 4px 2px; border-radius: 4px; background: #21262d; border: 1px solid #30363d; color: #6e7681; }
-  .step.done { border-color: #1a7f37; color: #3fb950; }
-  .step.on { background: #1c1014; border-color: #f78166; color: #ffb3a0; }
-  .cut-row { border: 1px solid #21262d; border-radius: 6px; padding: 7px 9px; margin-bottom: 6px; font-size: 10.5px; line-height: 1.6; }
-  .cut-row .hd { display: flex; flex-wrap: wrap; gap: 7px; font-size: 9.5px; color: #6e7681; margin-bottom: 3px; }
-  .cut-row .hd .no { color: #8b949e; font-weight: 600; }
-  .cut-row .ac { color: #c9d1d9; }
-  .cut-row .dl { color: #79c0ff; }
-  pre.script { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 11px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; line-height: 1.8; color: #e6edf3; white-space: pre-wrap; word-break: break-word; max-height: 44vh; overflow: auto; }
-  .ep-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 11px; }
-  .ep-chips .branch-chip { flex: 0 0 auto; padding: 5px 9px; }
+  .step-bar { display: flex; gap: 7px; margin-bottom: 16px; }
+  .step {
+    flex: 1; font-size: 12.5px; font-weight: 700; text-align: center; padding: 8px 4px;
+    border-radius: 10px; background: var(--bg-soft); border: 1.5px solid var(--line2); color: var(--ink3);
+  }
+  .step.done { border-color: #BFE9D8; background: var(--ok-soft); color: var(--ok-ink); }
+  .step.on { background: var(--acc-soft); border-color: var(--acc); color: var(--acc-ink); }
+  .cut-row {
+    background: #fff; border: 1px solid var(--line2); border-radius: 13px; padding: 12px 14px;
+    margin-bottom: 9px; font-size: 15px; line-height: 1.75; box-shadow: 0 1px 2px rgba(26,34,60,.04);
+  }
+  .cut-row .hd { display: flex; flex-wrap: wrap; gap: 9px; font-size: 12.5px; font-weight: 600; color: var(--ink3); margin-bottom: 5px; }
+  .cut-row .hd .no { color: var(--acc-ink); font-weight: 800; }
+  .cut-row .ac { color: var(--ink); }
+  .cut-row .dl { color: var(--acc-ink); font-weight: 500; }
+  pre.script {
+    background: #FFFEFB; border: 1px solid var(--line); border-radius: 14px; padding: 17px;
+    font-family: ui-monospace, Menlo, 'Malgun Gothic', monospace; font-size: 15px; line-height: 1.95;
+    color: var(--ink); white-space: pre-wrap; word-break: break-word; max-height: 46vh; overflow: auto;
+    box-shadow: inset 0 1px 3px rgba(26,34,60,.04);
+  }
+  .ep-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 15px; }
+  .ep-chips .branch-chip { flex: 0 0 auto; padding: 9px 15px; font-size: 14px; }
+
+  /* ── 로그인 문 ──────────────────────────────────────────────────────────── */
+  .gate {
+    position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
+    padding: 28px; overflow: auto;
+    background: linear-gradient(140deg, #F3F1FF 0%, var(--bg) 48%, #EBFBF7 100%);
+  }
+  .gate__card {
+    width: 100%; max-width: 470px; background: #fff; border-radius: 24px; padding: 34px;
+    box-shadow: 0 24px 70px rgba(30,40,80,.16); border: 1px solid rgba(255,255,255,.9);
+  }
+  .gate__eyebrow { font-size: 13px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--acc); margin-bottom: 8px; }
+  .gate__title { font-size: 27px; font-weight: 800; letter-spacing: -.03em; margin-bottom: 10px; }
+  .gate__sub { font-size: 15px; color: var(--ink2); line-height: 1.75; margin-bottom: 22px; }
+  .gate__list { display: grid; gap: 8px; margin-bottom: 6px; }
+  .gate__who {
+    display: flex; align-items: center; gap: 11px; width: 100%; text-align: left; cursor: pointer;
+    padding: 11px 14px; border: 1.5px solid var(--line2); border-radius: 13px; background: #fff;
+    font-family: inherit; font-size: 14.5px; transition: all .14s;
+  }
+  .gate__who:hover:not(:disabled) { border-color: #C7CBF6; background: var(--acc-soft); transform: translateY(-1px); }
+  .gate__who:disabled { opacity: .5; cursor: default; }
+  .gate__dot { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 1px 3px rgba(26,34,60,.25); }
+  .gate__name { font-size: 15px; font-weight: 700; color: var(--ink); }
+  .gate__role { font-size: 12.5px; color: var(--ink3); }
+  .gate__job { margin-left: auto; font-size: 12.5px; color: var(--ink3); text-align: right; }
+  .lf { display: block; margin-bottom: 14px; }
+  .lf__label { display: block; font-size: 13.5px; font-weight: 700; color: var(--ink2); margin-bottom: 7px; }
+  .lf--check { display: flex; align-items: center; gap: 9px; font-size: 14.5px; color: var(--ink2); }
+  .lf--check input { width: 17px; height: 17px; accent-color: var(--acc); }
+  .lf__or { text-align: center; font-size: 13px; font-weight: 700; color: var(--ink3); margin: 16px 0 14px; }
+  .lf__why { min-height: 22px; font-size: 14px; font-weight: 600; color: var(--bad); line-height: 1.6; margin-top: 10px; }
+  .lf__note { font-size: 13px; color: var(--ink3); line-height: 1.75; }
 </style>
 </head>
 <body>
@@ -164,8 +376,13 @@
     <span class="badge" id="modeBadge">모드 확인 중</span>
     <span class="badge" id="srcBadge">graph: mock/graph.json</span>
     <div class="grow"></div>
+    <span class="who" id="whoAmI" hidden></span>
+    <button class="btn btn--line btn--mini" id="logoutBtn" hidden>로그아웃</button>
     <button class="btn btn--line btn--mini" id="inputToggle">대본 입력 접기</button>
   </div>
+
+  <!-- 상단 기능 탭. index.html 과 같은 탭 바를 nav-tabs.js 에서 받아 쓴다 -->
+  <div id="navMount"></div>
 
   <div class="graph-area">
     <div id="network"></div>
@@ -173,6 +390,18 @@
 
     <section class="card card--input" id="inputCard">
       <h3>대본 · 시놉시스</h3>
+
+      <!-- 고른 모델은 이 화면의 모든 생성에 쓰인다. 값은 plan 리졸버의 MODELS 키다 -->
+      <div class="model-pick">
+        <label for="modelSel">모델</label>
+        <select id="modelSel">
+          <option value="haiku-4.5">Haiku 4.5 · 빠른 초안 — 구조와 뼈대를 빠르게 잡을 때</option>
+          <option value="sonnet-5" selected>Sonnet 5 · 균형잡힌 작업 — 대부분의 작업에 추천 (기본값)</option>
+          <option value="opus-4.8">Opus 4.8 · 깊이 있는 창작 — 캐릭터 심리와 대사에 강함, 느리고 비용 높음</option>
+        </select>
+        <div class="hint" id="modelHint">추출 · 요약 · 분기 · 대본 생성에 모두 이 모델을 씁니다.</div>
+      </div>
+
       <textarea id="scriptIn" rows="7" spellcheck="false"
         placeholder="시놉시스나 대본을 붙여 넣거나 .txt / .fdx 파일을 이 카드로 끌어다 놓습니다.
 예: 새벽에 문 여는 동네 빵집. 주인은 첫 손님이 오기까지..."></textarea>
@@ -188,16 +417,8 @@
       <div id="nodeBody"></div>
     </section>
 
-    <div class="legend">
-      <span><i style="background:#4A90D9"></i>인물</span>
-      <span><i style="background:#E3A93C"></i>집단</span>
-      <span><i style="background:#27AE60"></i>장소</span>
-      <span><i style="background:#E67E22"></i>사건</span>
-      <span><i class="dia" style="background:#9B59B6"></i>비밀</span>
-      <span><i style="background:#F1C40F"></i>사물</span>
-      <span><i class="line"></i>명시</span>
-      <span><i class="dash"></i>추론</span>
-    </div>
+    <!-- 종류별 구체 색은 graph-view.js 의 KIND_COLOR 한 곳에서 온다 -->
+    <div class="legend" id="legend"></div>
   </div>
 
   <div class="sidebar">
@@ -222,7 +443,13 @@
       <div class="panel-scroll" id="scriptPanel"></div>
     </div>
   </div>
+
+  <!-- 아직 화면이 없는 탭(대본 번역 · 키비주얼)을 눌렀을 때 그래프 대신 나오는 자리 -->
+  <section class="soonpage" id="soon" hidden></section>
 </div>
+
+<!-- 이 화면을 새 탭에서 바로 열었을 때의 로그인 문. 토큰이 있으면 아예 안 나온다 -->
+<div class="gate" id="gate" hidden></div>
 
 <script src="./aws-config.js"></script>
 <script type="module">
@@ -245,6 +472,10 @@ import {
   GENRES, TONES, LENGTHS, CUTCOUNTS,
 } from './story.js'
 import { planClient, graphClient } from './net.js'
+import { createGraphView, graphDelta, KIND_COLOR, KIND_LABEL } from './graph-view.js'
+import { configured, session, login, setNewPassword, logout } from './auth.js'
+import { DEMO_USERS } from './login.js'
+import { mountNav, soonMarkup, isSoonTab, navTabFromSearch } from './nav-tabs.js'
 
 const $ = (id) => document.getElementById(id)
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) =>
@@ -258,9 +489,43 @@ const SEEDS_SHOWN = 12
 const NET = planClient()
 // 그래프 저장소. 배포에서 hasGraph 가 켜져 있을 때만 나온다 — 없으면 인메모리로 돈다
 const GRAPH_NET = graphClient()
-const KIND_COLOR = {
-  Character: '#4A90D9', Faction: '#E3A93C', Location: '#27AE60',
-  Event: '#E67E22', Secret: '#9B59B6', Object: '#F1C40F',
+
+/**
+ * 지금 고른 모델. 이 화면의 Bedrock 호출은 모두 이것을 실어 보낸다 (추출·요약·분기·대본).
+ * 값은 infra/resolvers/plan.js 의 MODELS 키다 — 모르는 값이 가면 리졸버가 기본 모델로 내린다.
+ * 로컬 모드(NET 없음)에서는 드롭다운을 잠가 두고, 이 값은 아무 데도 쓰이지 않는다.
+ *
+ * @returns {string} 'haiku-4.5' | 'sonnet-5' | 'opus-4.8'
+ */
+const MODEL = () => $('modelSel')?.value || 'sonnet-5'
+
+/** 고른 모델의 짧은 이름. 진행 안내에 적어 무엇으로 돌고 있는지 보이게 한다 */
+const modelLabel = () =>
+  ($('modelSel')?.selectedOptions?.[0]?.textContent || '').split('·')[0].trim() || '기본 모델'
+
+/**
+ * 탐지기별 색. 씨앗 카드 머리의 파스텔 그라디언트(--p1 → --p2)와 글자색(--pi)이다.
+ * 12종을 한눈에 갈라 보이게 하는 것이 목적이라 탐지기 목록과 같은 순서로 둔다.
+ */
+const PROBE_TINT = {
+  secret_leverage: ['#EDE3FF', '#F8F3FF', '#6D28D9'],
+  love_triangle: ['#FFE1EF', '#FFF2F7', '#BE185D'],
+  unresolved_tension: ['#FFE2DB', '#FFF3EF', '#C2410C'],
+  chekhov_object: ['#DCEDFF', '#F0F7FF', '#1D4ED8'],
+  strangers_shared_past: ['#D7F5F0', '#EEFCFA', '#0F766E'],
+  severed_bond: ['#E3E8F7', '#F3F5FC', '#3F4B75'],
+  dangling_consequence: ['#FFEFD1', '#FFF9EC', '#A16207'],
+  contested_goal: ['#E6F6D7', '#F5FBEC', '#4D7C0F'],
+  betrayal_potential: ['#FFDFDF', '#FFF1F1', '#B91C1C'],
+  identity_crisis: ['#E5E4FF', '#F3F2FF', '#4338CA'],
+  forbidden_bond: ['#FAE1FF', '#FDF2FF', '#A21CAF'],
+  power_vacuum: ['#ECE9E1', '#F8F6F1', '#78716C'],
+}
+
+/** 탐지기 색을 CSS 변수로. 씨앗 카드와 스토리 머리가 같은 색을 쓴다 */
+const tint = (probe) => {
+  const [p1, p2, pi] = PROBE_TINT[probe] || ['#EEF0FF', '#F7F8FF', '#4338CA']
+  return `--p1:${p1};--p2:${p2};--pi:${pi}`
 }
 
 let STORE = null
@@ -274,6 +539,9 @@ let showAllSeeds = false
 let EXPAND = null       // 분기 → 대본 흐름의 상태. null 이면 분기 화면을 그린다
 let EPISODES = []       // 이 화면에서 만든 회차. 대본화 탭이 여기서 컷을 가져온다
 let SCRIPT = { ep: 0, format: 'drama', text: '', busy: false, err: '' }
+let NEW_SEEDS = new Set() // 역기입 뒤에 새로 나온 씨앗의 키. 카드에 NEW 뱃지를 붙인다
+let NAV = null           // 상단 기능 탭. mountNav 가 만든다
+let LAST_DEV_TAB = 'seeds' // 상단 [스토리 디벨롭] 으로 돌아왔을 때 열어 줄 안쪽 탭
 
 // ── 데이터 읽기 ───────────────────────────────────────────────────────────────
 async function loadJson(path) {
@@ -320,6 +588,7 @@ function build(store, { keepSeeds = null } = {}) {
   STORIES = new Map()
   CUR = { seed: -1, branch: 0 }
   showAllSeeds = false
+  NEW_SEEDS = new Set()
   EXPAND = null
   EPISODES = []
   SCRIPT = { ep: 0, format: SCRIPT.format, text: '', busy: false, err: '' }
@@ -341,6 +610,16 @@ function renderStats() {
   $('s-seeds').textContent = SEEDS.length
 }
 
+/** 범례. 구체 색과 엣지 모양을 graph-view.js 의 표에서 그대로 가져온다 */
+function renderLegend() {
+  $('legend').innerHTML = Object.keys(KIND_COLOR).map((k) =>
+    `<span><i style="--c:${KIND_COLOR[k]}"></i>${esc(KIND_LABEL[k] || k)}</span>`).join('')
+    + '<span><i class="line"></i>명시</span><span><i class="dash"></i>추론</span>'
+}
+
+/** 대본 카드와 범례가 가리는 자리. 판은 이만큼 비켜 앉는다 */
+const insets = () => ({ l: $('inputCard').hidden ? 24 : 428, t: 24, r: 24, b: 78 })
+
 function renderNetwork() {
   const g = STORE.toJSON()
   const msg = $('canvasMsg')
@@ -350,43 +629,20 @@ function renderNetwork() {
   } else {
     msg.hidden = true
   }
-
-  const nodes = new vis.DataSet(g.nodes.map((n) => ({
-    id: n.id,
-    label: n.name,
-    title: `${n.kind} · ${n.name}`,
-    color: { background: KIND_COLOR[n.kind] || '#4A90D9', border: KIND_COLOR[n.kind] || '#4A90D9' },
-    font: { size: 12, color: '#e6edf3' },
-    size: n.kind === 'Character' ? 22 : 14,
-    shape: n.kind === 'Secret' ? 'diamond' : 'dot',
-  })))
-  const edges = new vis.DataSet(g.edges.map((e, i) => ({
-    id: i,
-    from: e.s,
-    to: e.o,
-    label: e.p,
-    color: { color: e.asserted ? '#c9d1d9' : '#484f58' },
-    dashes: !e.asserted,
-    width: e.asserted ? 1.2 : 1,
-    font: { size: 9, color: e.asserted ? '#8b949e' : '#6e7681', strokeWidth: 0 },
-  })))
-
-  if (VIS) VIS.destroy()
-  $('network').innerHTML = '' // 로드 실패 안내가 남아 있을 수 있다
-  VIS = new vis.Network($('network'), { nodes, edges }, {
-    physics: { stabilization: { iterations: 200 } },
-    interaction: { hover: true },
-    nodes: { borderWidth: 0 },
-  })
-  VIS.on('click', (p) => (p.nodes.length ? showNode(p.nodes[0]) : hideNode()))
+  // 판은 한 번만 만들고 계속 쓴다. 노드를 옮겨 둔 자리도 그대로 이어진다
+  if (!VIS) {
+    $('network').innerHTML = '' // 로드 실패 안내가 남아 있을 수 있다
+    VIS = createGraphView($('network'), { onPick: (id) => (id ? showNode(id) : hideNode()) })
+  }
+  VIS.setInsets(insets())
+  VIS.render(g)
 }
 
 function highlight(ids) {
   if (!VIS) return
   const live = ids.filter((id) => STORE.getNode(id))
   if (!live.length) return
-  VIS.selectNodes(live)
-  VIS.fit({ nodes: live, animation: { duration: 300 } })
+  VIS.focus(live)
 }
 
 function showNode(id) {
@@ -420,6 +676,12 @@ const hideNode = () => { $('nodeCard').hidden = true }
 // ── 씨앗 ─────────────────────────────────────────────────────────────────────
 const probeLabel = (id) => PROBES[id]?.label || id
 
+/**
+ * 씨앗 하나를 알아보는 키. 탐지기 + 초점 노드다 (graph-probes.js 의 trim 이 쓰는 것과 같다).
+ * 역기입 전후로 이 키를 견줘 새로 나온 씨앗을 가른다 — 씨앗에는 id 가 없다.
+ */
+const seedKey = (s) => `${s.probe}|${[...(s.focus || [])].sort().join(',')}`
+
 function renderSeeds() {
   const list = $('seedsList')
   if (!SEEDS.length) {
@@ -429,19 +691,29 @@ function renderSeeds() {
     return
   }
   const shown = showAllSeeds ? SEEDS : SEEDS.slice(0, SEEDS_SHOWN)
-  const cards = shown.map((s, i) => `
-    <div class="seed-card ${i === CUR.seed ? 'on' : ''}">
-      <div class="seed-meta">
+  const cards = shown.map((s, i) => {
+    const fresh = NEW_SEEDS.has(seedKey(s))
+    return `
+    <div class="seed-card ${i === CUR.seed ? 'on' : ''}${fresh ? ' is-new' : ''}" style="${tint(s.probe)}">
+      ${fresh ? '<div class="seed-new-tag">역기입 후 새로 발견</div>' : ''}
+      <div class="seed-head">
         <span class="probe-tag">${esc(probeLabel(s.probe))}</span>
+        ${fresh ? '<span class="new-badge">NEW</span>' : ''}
         <span class="seed-score">▲${Number(s.score).toFixed(2)}</span>
       </div>
-      <div class="seed-title" data-focus="${i}">${esc(s.title)}</div>
-      <div class="seed-rationale">${esc(s.desc)}</div>
-      <div class="seed-focus">초점: ${esc((s.focus || []).map((id) => STORE.getNode(id)?.name || id).join(', '))}</div>
-      <button class="btn btn--wide" data-seed="${i}">스토리 생성</button>
-    </div>`).join('')
+      <div class="seed-body">
+        <div class="seed-title" data-focus="${i}">${esc(s.title)}</div>
+        <div class="seed-rationale">${esc(s.desc)}</div>
+        <div class="seed-focus">초점: ${esc((s.focus || []).map((id) => STORE.getNode(id)?.name || id).join(', '))}</div>
+        <button class="btn btn--wide" data-seed="${i}">스토리 생성</button>
+      </div>
+    </div>`
+  }).join('')
+  // 새 씨앗이 잘린 자리 뒤에 있을 수 있다 — 몇 개가 숨어 있는지 버튼에 적어 준다
+  const hiddenNew = SEEDS.slice(shown.length).filter((s) => NEW_SEEDS.has(seedKey(s))).length
   const more = SEEDS.length > shown.length
-    ? `<button class="btn btn--line btn--wide" id="moreSeeds">더 보기 (+${SEEDS.length - shown.length})</button>`
+    ? `<button class="btn btn--line btn--wide" id="moreSeeds">더 보기 (+${SEEDS.length - shown.length}${
+      hiddenNew ? `, NEW ${hiddenNew}개` : ''})</button>`
     : ''
   list.innerHTML = cards + more
   list.querySelectorAll('[data-seed]').forEach((b) => {
@@ -453,9 +725,35 @@ function renderSeeds() {
   if (more) $('moreSeeds').onclick = () => { showAllSeeds = true; renderSeeds() }
 }
 
+// ── 준비 중 안내 ─────────────────────────────────────────────────────────────
+// 화면이 아직 없는 탭은 판과 사이드바를 접고 안내만 보여준다. 판은 접혀 있어도
+// 살아 있고, 다시 펼치면 ResizeObserver 가 크기를 잡아 준다.
+function showSoon(id) {
+  $('soon').innerHTML = soonMarkup(id)
+  $('soon').hidden = false
+  document.querySelector('.graph-area').hidden = true
+  document.querySelector('.sidebar').hidden = true
+}
+
+function hideSoon() {
+  if ($('soon').hidden) return
+  $('soon').hidden = true
+  $('soon').innerHTML = ''
+  document.querySelector('.graph-area').hidden = false
+  document.querySelector('.sidebar').hidden = false
+  VIS?.setInsets(insets())
+}
+
+/**
+ * 사이드바 안쪽 탭. 상단 기능 탭과는 별개지만 서로를 비추게 해 둔다 —
+ * 안쪽 [대본화] 는 상단 [대본화], 씨앗·스토리는 상단 [스토리 디벨롭] 이다.
+ */
 const openTab = (name) => {
-  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name))
+  document.querySelectorAll('.tabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name))
   document.querySelectorAll('.panel').forEach((p) => p.classList.toggle('active', p.id === `panel-${name}`))
+  if (name !== 'script') LAST_DEV_TAB = name
+  hideSoon()
+  NAV?.setActive(name === 'script' ? 'script' : 'develop')
   if (name === 'script') renderScriptPanel()
 }
 
@@ -469,7 +767,7 @@ async function pickSeed(i) {
   openTab('story')
   highlight(SEEDS[i].focus || [])
   if (STORIES.has(String(i))) return renderStory()
-  await generate((onTry) => planBranches(NET, SEEDS[i], STORE, { pool: POOL, onTry }),
+  await generate((onTry) => planBranches(NET, SEEDS[i], STORE, { pool: POOL, onTry, model: MODEL() }),
     String(i), '분기를 만들고 있습니다')
 }
 
@@ -551,7 +849,7 @@ function bindFree() {
     const seed = CUR.seed >= 0 ? SEEDS[CUR.seed] : null
     CUR = { ...CUR, branch: 0 }
     EXPAND = null
-    generate((onTry) => planFreeBranches(NET, text, seed, STORE, { pool: POOL, onTry }), curKey(),
+    generate((onTry) => planFreeBranches(NET, text, seed, STORE, { pool: POOL, onTry, model: MODEL() }), curKey(),
       '기획자의 방향으로 다시 만들고 있습니다')
   }
 }
@@ -611,7 +909,7 @@ function renderStory() {
 
   $('storyPanel').innerHTML = `
     <div class="story-content">
-      ${seed ? `<div class="seed-info">
+      ${seed ? `<div class="seed-info" style="${tint(seed.probe)}">
         <span class="probe-tag">${esc(probeLabel(seed.probe))}</span>
         <span class="seed-score">▲${Number(seed.score).toFixed(2)}</span>
         <span>초점: ${esc((seed.focus || []).map((id) => STORE.getNode(id)?.name || id).join(', '))}</span>
@@ -702,6 +1000,7 @@ function expandCtx(x) {
     scenario: [x.story?.logline, x.story?.pivot?.body].filter(Boolean).join('\n'),
     chars,
     centerName: focus?.name || chars[0]?.name || '',
+    model: MODEL(),
   }
 }
 
@@ -830,7 +1129,8 @@ const expandDone = (x) => {
       <button class="btn btn--line" id="exScript">대본화</button>
     </div>
     <div class="card__row"><button class="btn btn--line btn--wide" id="exClose">닫기</button></div>
-    <div class="hint">씨앗을 다시 고르면 자란 그래프에서 다음 회차가 갈라집니다.</div>`
+    <div class="hint">새로 생긴 노드·엣지는 판에서 녹색으로 표시했습니다. 끊긴 엣지 자리는 붉은 점선으로 잠깐 남습니다.<br>
+      씨앗을 다시 고르면 자란 그래프에서 다음 회차가 갈라집니다.</div>`
 }
 
 function bindExpand() {
@@ -888,7 +1188,7 @@ async function runCuts() {
   x.err = ''
   renderExpand()
   try {
-    const cuts = await planCuts(NET, x.spec, x.outline)
+    const cuts = await planCuts(NET, x.spec, x.outline, { model: MODEL() })
     if (!cuts.length) throw new Error('컷을 받지 못했습니다.')
     x.cuts = cuts
     x.step = 'cuts'
@@ -926,14 +1226,21 @@ function stashEpisode() {
 async function applyToBoard() {
   const x = EXPAND
   stashEpisode()
+  // 무엇이 새로 생겼는지는 개수(applied)만으로는 알 수 없다 — 전후 판을 견줘 id 를 뽑는다
+  const before = STORE.toJSON()
+  const seedsBefore = new Set(SEEDS.map(seedKey))
   x.applied = applyWriteback(STORE, x.branch.writeback)
+  x.delta = graphDelta(before, STORE.toJSON())
   x.step = 'done'
   SEEDS = x.applied.newSeeds
+  NEW_SEEDS = new Set(SEEDS.map(seedKey).filter((k) => !seedsBefore.has(k)))
   STORIES = new Map()
   CUR = { seed: -1, branch: 0 }
   showAllSeeds = false
   renderStats()
   renderNetwork()
+  // 판을 다시 그린 다음이어야 표시가 남는다 (render 가 표시를 지운다)
+  VIS?.markNew(x.delta)
   renderSeeds()
   renderExpand()
 
@@ -1007,7 +1314,7 @@ async function runScript() {
   renderScriptPanel()
   try {
     SCRIPT.text = await planScript(NET, ep.cuts, {
-      format: SCRIPT.format, title: ep.title, chars: ep.chars,
+      format: SCRIPT.format, title: ep.title, chars: ep.chars, model: MODEL(),
     })
   } catch (err) {
     console.warn('[story-graph] 대본화 실패', err)
@@ -1056,10 +1363,11 @@ async function extract() {
   }
   $('extractBtn').disabled = true
   hint.className = 'hint'
-  hint.innerHTML = '<span class="spin"></span> 그래프를 뽑고 있습니다. 대본이 길면 조각으로 나눠 읽습니다.'
+  hint.innerHTML = `<span class="spin"></span> ${esc(modelLabel())} 로 그래프를 뽑고 있습니다.`
+    + ' 대본이 길면 먼저 요약한 뒤 읽습니다.'
   try {
     // 새 대본은 빈 판에서 뽑는다. 지금 그래프를 canon 으로 주면 남의 작품 id 를 물려받는다
-    const g = await planGraph(NET, text)
+    const g = await planGraph(NET, text, { model: MODEL() })
     build(newStore(g))
     $('srcBadge').textContent = `graph: 대본 추출 (노드 ${g.nodes.length})`
     const bad = [...(g.warnings || []), ...(g.conflicts || []).map((c) => `${c.level}: ${c.msg}`)]
@@ -1077,13 +1385,32 @@ async function extract() {
 }
 
 // ── 시동 ─────────────────────────────────────────────────────────────────────
-document.querySelectorAll('.tab').forEach((t) => { t.onclick = () => openTab(t.dataset.tab) })
+document.querySelectorAll('.tabs .tab').forEach((t) => { t.onclick = () => openTab(t.dataset.tab) })
+
+// 상단 기능 탭. 스토리보드만 index.html 로 나가고(링크), 나머지는 이 화면에서 받는다.
+// ?tab=script 로 들어오면 안쪽 [대본화] 가 처음부터 열려 있다.
+{
+  const asked = navTabFromSearch(location.search, 'develop')
+  const first = asked === 'board' ? 'develop' : asked
+  NAV = mountNav({
+    mount: $('navMount'),
+    active: first,
+    handled: ['develop', 'script', 'translate', 'keyvisual'],
+    onSelect: (id) => {
+      if (isSoonTab(id)) return showSoon(id)
+      openTab(id === 'script' ? 'script' : LAST_DEV_TAB)
+    },
+  })
+  if (isSoonTab(first)) showSoon(first)
+  else if (first === 'script') openTab('script')
+}
 $('nodeClose').onclick = hideNode
 $('extractBtn').onclick = extract
 $('inputToggle').onclick = () => {
   const card = $('inputCard')
   card.hidden = !card.hidden
   $('inputToggle').textContent = card.hidden ? '대본 입력 펼치기' : '대본 입력 접기'
+  VIS?.setInsets(insets()) // 카드가 접히면 판이 그 자리까지 쓴다
 }
 
 const drop = $('inputCard')
@@ -1111,7 +1438,15 @@ $('modeBadge').textContent = NET
 $('modeBadge').className = NET ? 'badge badge--live' : 'badge'
 $('srcBadge').textContent = `graph: ${GRAPH_SRC}${SEED_SRC === 'mock' ? ' · seeds: mock' : ''}`
 
+// 로컬 모드에서는 고를 것이 없다 — 생성이 전부 로컬 폴백으로 돌아 모델을 쓰지 않는다
+if (!NET) {
+  $('modelSel').disabled = true
+  $('modelHint').textContent = '로컬 모드에서는 모델을 쓰지 않습니다. Bedrock 에 연결하면 여기서 고릅니다.'
+}
+
 function fail(err) {
+  // 안내를 넣으려면 판 자리를 비워야 한다 — 캔버스를 걷어내고 VIS 를 다시 만들게 한다
+  if (VIS) { VIS.destroy(); VIS = null }
   $('network').innerHTML = `<div class="load-error">목데이터를 불러오지 못했습니다: ${esc(err.message)}<br>
     파일 경로가 아니라 HTTP 로 열어야 합니다. 예: python3 -m http.server 8000 --directory demo<br>
     <button class="btn" id="retryLoad" style="margin-top:10px">다시 시도</button></div>`
@@ -1159,8 +1494,141 @@ async function start() {
   $('srcBadge').textContent = `graph: Neptune (노드 ${stored.stats().nodes})`
 }
 
+// ── 로그인 문 ────────────────────────────────────────────────────────────────
+// 이 화면을 새 탭에서 바로 열면 sessionStorage 에 sb.auth 가 없어서 plan·graph 호출이
+// 401 로 떨어진다. 그래서 Cognito 가 설정돼 있고 토큰이 없을 때는 판을 시동하지 않고
+// 문을 먼저 세운다. 로그인 로직은 auth.js 를, 데모 계정 목록은 login.js 를 그대로 쓴다.
+// 성공하면 sb.auth 가 저장된 상태에서 새로고침해 처음부터 다시 돈다.
+
+const DEMO_PW = window.SB_CONFIG?.demoPw || ''
+const gate = $('gate')
+const gateSay = (msg) => { const el = $('lgWhy'); if (el) el.textContent = msg || '' }
+
+function gateBusy(on) {
+  const b = $('lgGo')
+  if (!b) return
+  b.disabled = on
+  gate.querySelectorAll('[data-demo]').forEach((x) => { x.disabled = on })
+  b.textContent = on ? '확인 중…' : '로그인'
+  if (on) gateSay('')
+}
+
+/** 로그인 폼. 데모 계정을 누르면 아이디를 채우고, demoPw 가 있으면 바로 들어간다 */
+function showGate() {
+  gate.hidden = false
+  gate.innerHTML = `
+    <form class="gate__card" id="lgForm" autocomplete="on">
+      <div class="gate__eyebrow">Story Graph</div>
+      <h2 class="gate__title">로그인</h2>
+      <p class="gate__sub">이 화면은 Bedrock·Neptune 을 직접 부릅니다. 등록된 팀원만 들어올 수 있습니다.</p>
+      <span class="lf__label">데모 계정 — 눌러서 바로 들어가기</span>
+      <div class="gate__list">
+        ${DEMO_USERS.map((u) => `
+          <button class="gate__who" type="button" data-demo="${esc(u.id)}">
+            <span class="gate__dot" style="background:${esc(u.color)}"></span>
+            <span><span class="gate__name">${esc(u.name)}</span><br>
+              <span class="gate__role">${esc(u.role)} · ${esc(u.id)}</span></span>
+            <span class="gate__job">${esc(u.job)}</span>
+          </button>`).join('')}
+      </div>
+      <div class="lf__or">직접 입력</div>
+      <label class="lf">
+        <span class="lf__label">이메일 또는 아이디</span>
+        <input type="text" id="lgId" name="username" autocomplete="username"
+          autocapitalize="off" spellcheck="false" required>
+      </label>
+      <label class="lf">
+        <span class="lf__label">비밀번호</span>
+        <input type="password" id="lgPw" name="password" autocomplete="current-password" required>
+      </label>
+      <label class="lf lf--check"><input type="checkbox" id="lgKeep">
+        <span>이 브라우저에 로그인 유지</span></label>
+      <button class="btn btn--wide" id="lgGo" type="submit">로그인</button>
+      <p class="lf__why" id="lgWhy" role="alert" aria-live="polite"></p>
+      <p class="lf__note">${DEMO_PW
+        ? '데모 계정을 누르면 바로 들어갑니다.'
+        : '데모 계정을 누르면 아이디가 채워집니다. 비밀번호는 관리자에게 받은 값을 넣어주세요.'}</p>
+    </form>`
+  $('lgId').focus()
+
+  $('lgForm').addEventListener('click', (e) => {
+    const id = e.target.closest('[data-demo]')?.dataset.demo
+    if (!id) return
+    $('lgId').value = id
+    if (!DEMO_PW) return $('lgPw').focus()
+    $('lgPw').value = DEMO_PW
+    $('lgForm').requestSubmit()
+  })
+
+  $('lgForm').addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const id = $('lgId').value.trim()
+    const pw = $('lgPw').value
+    if (!id || !pw) return gateSay('아이디와 비밀번호를 입력해주세요.')
+    gateBusy(true)
+    try {
+      const r = await login(id, pw, $('lgKeep').checked)
+      if (r.challenge) return askNewPassword(r.need)
+      location.reload()
+    } catch (err) {
+      gateSay(err.message)
+      $('lgPw').select()
+    } finally {
+      gateBusy(false)
+    }
+  })
+}
+
+/** 임시 비밀번호로 들어온 첫 로그인. auth.js 의 setNewPassword 를 그대로 쓴다 */
+function askNewPassword(need) {
+  gate.innerHTML = `
+    <form class="gate__card" id="pwForm">
+      <div class="gate__eyebrow">첫 로그인</div>
+      <h2 class="gate__title">새 비밀번호를 정해주세요</h2>
+      <p class="gate__sub">임시 비밀번호는 이번 한 번만 쓰입니다. 8자 이상, 영문과 숫자를 섞어주세요.</p>
+      ${need?.includes('name') ? `<label class="lf"><span class="lf__label">이름</span>
+        <input type="text" id="pwName" required></label>` : ''}
+      <label class="lf"><span class="lf__label">새 비밀번호</span>
+        <input type="password" id="pwNew" autocomplete="new-password" required></label>
+      <label class="lf"><span class="lf__label">한 번 더</span>
+        <input type="password" id="pwAgain" autocomplete="new-password" required></label>
+      <button class="btn btn--wide" type="submit">설정하고 들어가기</button>
+      <p class="lf__why" id="lgWhy" role="alert" aria-live="polite"></p>
+    </form>`
+  $('pwNew').focus()
+  $('pwForm').addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const pw = $('pwNew').value
+    if (pw.length < 8) return gateSay('8자 이상으로 정해주세요.')
+    if (pw !== $('pwAgain').value) return gateSay('두 비밀번호가 다릅니다.')
+    try {
+      await setNewPassword(pw, $('pwName') ? { name: $('pwName').value.trim() } : {})
+      location.reload()
+    } catch (err) {
+      gateSay(err.message)
+    }
+  })
+}
+
+/** 들어와 있으면 누구로 들어와 있는지 띠에 남긴다. 로그아웃은 토큰만 버리고 새로고침 */
+function showWho() {
+  const me = session()
+  if (!me) return
+  $('whoAmI').hidden = false
+  $('whoAmI').textContent = `${me.name} · ${me.role}`
+  $('logoutBtn').hidden = false
+  $('logoutBtn').onclick = () => { logout(); location.reload() }
+}
+
 $('mockBtn').onclick = boot
-start()
+renderLegend()
+if (configured && !session()) {
+  // 토큰이 없다 — 판을 시동하지 않고 문만 세운다 (호출이 401 로 떨어지지 않게)
+  showGate()
+} else {
+  showWho()
+  start()
+}
 </script>
 </body>
 </html>

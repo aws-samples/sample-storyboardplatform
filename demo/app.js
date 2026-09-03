@@ -14,6 +14,7 @@ import { SEED_ART } from './seed-art.js'
 import { connect } from './net.js'
 import { configured, idToken, session, logout } from './auth.js'
 import { showLogin } from './login.js'
+import { mountNav, soonMarkup, isSoonTab, navTabFromSearch } from './nav-tabs.js'
 
 const ROSTER = [
   { id: 'u1', name: '김하나', role: 'planner', color: '#E3A93C', job: '시나리오를 컷으로 쪼갠다' },
@@ -2950,6 +2951,30 @@ planDlg.addEventListener('click', (e) => {
 })
 
 byId('print').addEventListener('click', () => window.print())
+
+// ── 상단 기능 탭 ─────────────────────────────────────────────────────────────
+// 스토리보드는 이 화면이고, 스토리 디벨롭·대본화는 story-graph.html 로 넘어간다(링크).
+// 대본 번역·키비주얼은 아직 화면이 없어서 보드 자리에 안내만 띄운다.
+{
+  const soon = byId('soon')
+  const work = document.querySelector('.work')
+  const openNav = (id) => {
+    const later = isSoonTab(id)
+    setHtml(soon, later ? soonMarkup(id) : '')
+    soon.hidden = !later
+    work.hidden = later
+  }
+  // ?tab= 은 아직 화면이 없는 탭에만 쓴다. 나머지는 이 화면의 기본인 스토리보드다
+  const asked = navTabFromSearch(location.search, 'board')
+  const first = isSoonTab(asked) ? asked : 'board'
+  mountNav({
+    mount: byId('navMount'),
+    active: first,
+    handled: ['board', 'translate', 'keyvisual'],
+    onSelect: openNav,
+  })
+  openNav(first)
+}
 
 let picking = false
 
