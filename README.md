@@ -73,7 +73,7 @@ The reference-image column is the reason there are three. `chroma`/`hd` paint ov
 noise, so the layout survives and the face does not. `klein` takes it as a *condition*, so the face
 survives — that's what makes "one character, many shots" work.
 
-Only one of them fits in the card's 44 GB at a time, so **picking a model swaps it**: the server loads
+Only one of them fits in the card's 48 GB at a time, so **picking a model swaps it**: the server loads
 the new weights in the background and refuses generation until they're resident (~1 min from disk).
 The picker shows the wait. `chroma` is what a fresh deploy starts with.
 
@@ -140,30 +140,33 @@ committed empty: any account gets the same board on the first boot.
 Two commands: `cdk deploy` builds everything, `scripts/users.sh` creates the accounts. Four things
 have to be true before the first one — none of them are things CDK can do for you.
 
-1. **Region `ap-northeast-2` (Seoul).** Not a preference. The stack is pinned there in three places:
-   the CloudFront origin-facing prefix list ID (`pl-22a6434b` — different in every region), the `g6e`
-   AZ list, and the `global.anthropic.*` inference profiles in `infra/graph/index.js`. Elsewhere
-   means editing `infra/lib/storyboard-stack.js`.
-
-   Seoul supports neither In-Region nor Geo inference for these Claude models, so the *global*
-   cross-region profiles are the only ones that resolve — and they route worldwide, so this buys no
-   data residency. If requests must stay in-geo, deploy to `ap-northeast-1` (Tokyo) and switch the
-   IDs to the `jp.anthropic.*` profiles instead.
+1. **Region `ap-northeast-2`.** Not a preference. The stack is pinned there in four places: the
+   CloudFront origin-facing prefix list ID (`pl-22a6434b` — different in every region), the `g6e` AZ
+   list (only `2a` and `2b` sell it here), the `global.anthropic.claude-sonnet-4-6` inference profile
+   in `infra/resolvers/plan.js`, and `infra/scripts/seed-art.mjs`. Elsewhere means editing all four.
+   Two cautions learned the hard way. **Model prefix:** `us.*` profiles exist only in US regions —
+   outside them use `global.*`, or the plan resolver returns a Bedrock error. **Capacity vs.
+   availability:** `run-instances --dry-run` does *not* verify either. It reports "would have
+   succeeded" for a type the region does not even sell, so use
+   `aws ec2 describe-instance-types --region <r> --instance-types g6e.2xlarge` to check that a region
+   offers the card at all, and expect capacity itself to be provable only by launching.
+   This was `us-east-1`, then `us-west-2`; `g6e.2xlarge` ran dry in every AZ of both.
+   `ap-southeast-1` is not a fallback — it has no `g6e` at all (T4/T4g/A100 only).
 2. **A default VPC** in that region. The stack looks one up rather than creating one.
 3. **Bedrock model access for Anthropic Claude**, enabled once per account on the Bedrock console's
    Model access page. Story planning returns `AccessDeniedException` until it is. Check with
-   `aws bedrock get-foundation-model-availability --region ap-northeast-2 --model-id anthropic.claude-sonnet-5`
+   `aws bedrock get-foundation-model-availability --region ap-northeast-2 --model-id anthropic.claude-sonnet-4-6`
    — you want `"authorizationStatus": "AUTHORIZED"`.
 4. **At least 8 G-instance vCPUs.** `g6e.2xlarge` needs 8 under *Running On-Demand G and VT
-   instances* (`L-DB2E81BA`); a new account can start at 0. The stack still deploys — the ASG just
-   records a failed scaling activity and no GPU ever appears. Request the increase first.
+   instances* (`L-DB2E81BA`); a new account can start at 0. Without it the instance fails to launch
+   and the stack rolls back. Request the increase first.
 
 Then `npx cdk bootstrap` once per account and region. `cdk.context.json` is not committed, so the
 VPC lookup runs again on your first synth.
 
 ```sh
 cd infra && npm ci
-npx cdk deploy --outputs-file /tmp/sb-out.json    # prints Url, UserPoolId, ClientId, GpuAsg
+npx cdk deploy --outputs-file /tmp/sb-out.json    # prints Url, UserPoolId, ClientId, GpuInstance
 
 POOL=$(node -p "require('/tmp/sb-out.json').StoryboardDemo.UserPoolId")
 SB_PW='<pick a password>' bash scripts/users.sh "$POOL"  # the five demo accounts
@@ -178,15 +181,45 @@ demo, and setting it writes the password into `aws-config.js`, which anyone can 
 The GPU is only warm after it has pulled the model (tens of GB). When the generation-server chip in
 the header changes from `모델 올리는 중` to the model name, it's ready. First boot takes a few minutes.
 
-**Shut the GPU down when you're not using it.** That is where the hourly bill comes from.
+### Working hours, not idle detection
+
+The GPU is one EC2 instance, and two EventBridge Scheduler rules stop and start it — **weekdays
+09:00–20:00 KST** (`GPU_HOURS` in `infra/lib/storyboard-stack.js`, written in UTC). Outside those
+hours the instance is stopped and the hourly charge is not running. About $370/month instead of
+$1,600.
+
+Say what this is precisely: **it is a schedule, not idle detection.** The GPU is on at 09:00 whether
+anyone is using it or not, and it goes down at 20:00 whether they are or not. Nothing wakes it up
+when a request arrives — outside the window, generation fails until someone starts it.
+
+Editing `GPU_HOURS` is the whole configuration. The rules call `ec2:StartInstances` /
+`ec2:StopInstances` directly through Scheduler's universal target, so there is no Lambda to read.
+
+**The root volume survives a stop.** `deleteOnTermination: false`, so the ~67 GB of model weights on
+`/opt/hf` are still there in the morning and nothing is re-downloaded — that is the only reason a
+stop/start schedule is worth having here. Two consequences:
+
+- The instance is a single `ec2.Instance`, not an Auto Scaling group. An ASG *terminates* on
+  scale-in, so a retained volume would be left attached to nothing, billed monthly, and unusable by
+  whatever launched next.
+- `cdk destroy` does not delete the volume. Delete it yourself afterwards or it keeps costing
+  ~$27/month:
+  ```sh
+  aws ec2 describe-volumes --filters Name=status,Values=available \
+    --query "Volumes[?Size==\`200\`].[VolumeId,CreateTime]" --output table
+  aws ec2 delete-volume --volume-id vol-…
+  ```
+
+On and off by hand, when the schedule isn't what you want:
 
 ```sh
-ASG=$(aws cloudformation describe-stacks --stack-name StoryboardDemo \
-  --query "Stacks[0].Outputs[?OutputKey=='GpuAsg'].OutputValue" --output text)
-aws autoscaling set-desired-capacity --auto-scaling-group-name "$ASG" --desired-capacity 0   # off
-aws autoscaling set-desired-capacity --auto-scaling-group-name "$ASG" --desired-capacity 1   # on
+GPU=$(aws cloudformation describe-stacks --stack-name StoryboardDemo \
+  --query "Stacks[0].Outputs[?OutputKey=='GpuInstance'].OutputValue" --output text)
+aws ec2 stop-instances  --instance-ids "$GPU"   # off
+aws ec2 start-instances --instance-ids "$GPU"   # on
 ```
 
+<<<<<<< HEAD
 **Stop the graph database too.** Neptune runs on a provisioned instance (`db.t4g.medium` by default),
 so it bills by the hour whether or not anyone queries it. Stopping keeps the data and the endpoint —
 `start.sh` brings back the same cluster, and neither the graph Lambda nor the AppSync resolvers need
@@ -197,7 +230,7 @@ bash scripts/stop.sh    # stop  — takes a few minutes
 bash scripts/start.sh   # start — the graph Lambda errors until the status is `available`
 ```
 
-Both default to cluster `storyboarddemo-graph` in `ap-northeast-2`; override with `SB_NEPTUNE_CLUSTER`
+Both default to cluster `storyboarddemo-graph` in `us-east-1`; override with `SB_NEPTUNE_CLUSTER`
 and `AWS_REGION` if you deployed the stack under another name or region.
 
 > **Neptune restarts a stopped cluster by itself after 7 days.** That is an AWS limit, not something
@@ -211,6 +244,12 @@ npx cdk deploy --context neptuneInstance=db.r6g.large
 ```
 
 Tear everything down: `npx cdk destroy`
+=======
+A manual start does not disable the schedule: the next 20:00 rule still stops it. To keep it up
+overnight, disable the `GpuOff` schedule as well.
+
+Tear everything down: `npx cdk destroy` — then delete the volume above.
+>>>>>>> origin/main
 
 ## Using it
 
@@ -243,7 +282,7 @@ While you do this, watch the other window: everything lands there within a secon
 
 | Item | Roughly |
 | --- | --- |
-| EC2 `g6e.2xlarge` (L40S 48GB) | **$2.24/hour** · ~$54 for a full day (us-east-1 on-demand; ap-northeast-2 runs higher — check the pricing page) |
+| EC2 `g6e.2xlarge` (L40S 48GB) | **$2.24/hour** · ~$54 for a full day (us-east-1 on-demand) |
 | EBS 200GB gp3 @ 500 MB/s | ~$27/month (the extra throughput is what makes a model swap ~1 min instead of ~4) |
 | ALB | ~$0.025/hour + traffic |
 | Neptune `db.t4g.medium` | ~$0.09/hour while running · $0 stopped, storage aside (`scripts/stop.sh`) |
@@ -251,6 +290,13 @@ While you do this, watch the other window: everything lands there within a secon
 
 GPU uptime is essentially the entire bill. Nothing shuts it down for you, and nothing shuts Neptune
 down either — and Neptune wakes itself back up 7 days after you stop it.
+| EC2 `g6e.2xlarge` (L40S 48GB) | **$2.24/hour** · ~$370/month on the default 09–20 weekday schedule · over $1,600 if it never stops |
+| EBS 200GB gp3 @ 500 MB/s | ~$27/month, **including the stopped hours** — it is retained on purpose, and `cdk destroy` leaves it behind |
+| ALB | ~$0.025/hour + traffic, ~$19/month — it does not stop with the GPU |
+| CloudFront · S3 · Cognito · AppSync · DynamoDB | a few dollars at demo scale |
+
+GPU uptime is essentially the entire bill, and the schedule is what bounds it. Everything else keeps
+running while the GPU is stopped: the ALB, the retained volume, and the board itself.
 
 ## Known limits
 
@@ -287,8 +333,11 @@ Read all of the below before you deploy it yourself. The author takes no respons
 costs, or leaks resulting from using it as-is. This is not an official AWS product or sample and has
 no affiliation with AWS.
 
-**Cost** — the default configuration keeps the GPU instance running. About $2.24/hour, over $1,600
-if you leave it up for a month. There is no budget alarm and no auto-shutdown. Deploying starts the meter.
+**Cost** — the GPU is $2.24/hour while it runs. The default schedule holds that to weekday
+09:00–20:00 KST, about $370/month, but it is a fixed schedule and not a safety net: nothing notices
+that nobody is using the instance, and a manual start stays up until the next 20:00 rule. The ALB and
+the retained 200 GB volume are billed around the clock, and the volume outlives `cdk destroy`. There
+is no budget alarm. Deploying starts the meter.
 
 **Security — fix these before deploying to an organization**
 

@@ -1,0 +1,567 @@
+<mxfile host="Electron" pages="2">
+  <diagram name="키 비주얼 · 화면 목업" id="kv1">
+    <mxGraphModel dx="2357" dy="1417" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1620" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="ZjCZ1tqxJ3yBLtMzTPc8-1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="1407" width="1920" as="geometry" />
+        </mxCell>
+        <mxCell id="t1" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=20;fontStyle=1;fontColor=#1C1A17;" value="키 비주얼 · 화면 흐름" vertex="1">
+          <mxGeometry height="30" width="1000" x="40" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="t2" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=11;fontColor=#8A8377;" value="대본 → 씬 후보 8개 → 씬마다 이미지 프롬프트 → 한 번에 배치 렌더 → 대본과 나란히 놓는 보드 · 기존 /gen 경로를 그대로 쓴다" vertex="1">
+          <mxGeometry height="20" width="1300" x="40" y="74" as="geometry" />
+        </mxCell>
+        <mxCell id="p1" parent="1" style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CFC9BF;strokeWidth=1.5;verticalAlign=top;align=left;" value="" vertex="1">
+          <mxGeometry height="790" width="420" x="40" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="h1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1C1A17;strokeColor=none;fontColor=#FFFFFF;fontSize=14;fontStyle=1;align=left;spacingLeft=18;verticalAlign=middle;" value="STEP 1   ·   대본 → 씬 후보" vertex="1">
+          <mxGeometry height="56" width="416" x="42" y="152" as="geometry" />
+        </mxCell>
+        <mxCell id="p2" parent="1" style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CFC9BF;strokeWidth=1.5;verticalAlign=top;align=left;" value="" vertex="1">
+          <mxGeometry height="790" width="420" x="500" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="h2" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1C1A17;strokeColor=none;fontColor=#FFFFFF;fontSize=14;fontStyle=1;align=left;spacingLeft=18;verticalAlign=middle;" value="STEP 2   ·   씬마다 이미지 프롬프트" vertex="1">
+          <mxGeometry height="56" width="416" x="502" y="152" as="geometry" />
+        </mxCell>
+        <mxCell id="p3" parent="1" style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CFC9BF;strokeWidth=1.5;verticalAlign=top;align=left;" value="" vertex="1">
+          <mxGeometry height="790" width="420" x="960" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="h3" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1C1A17;strokeColor=none;fontColor=#FFFFFF;fontSize=14;fontStyle=1;align=left;spacingLeft=18;verticalAlign=middle;" value="STEP 3   ·   배치 생성" vertex="1">
+          <mxGeometry height="56" width="416" x="962" y="152" as="geometry" />
+        </mxCell>
+        <mxCell id="p4" parent="1" style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CFC9BF;strokeWidth=1.5;verticalAlign=top;align=left;" value="" vertex="1">
+          <mxGeometry height="790" width="420" x="1420" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="h4" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1C1A17;strokeColor=none;fontColor=#FFFFFF;fontSize=14;fontStyle=1;align=left;spacingLeft=18;verticalAlign=middle;" value="STEP 4   ·   대본과 맞춰 보는 보드" vertex="1">
+          <mxGeometry height="56" width="416" x="1422" y="152" as="geometry" />
+        </mxCell>
+        <mxCell id="fa" edge="1" parent="1" style="endArrow=block;endFill=1;html=1;strokeColor=#1C1A17;strokeWidth=2.5;" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="464" y="620" as="sourcePoint" />
+            <mxPoint x="496" y="620" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="fb" edge="1" parent="1" style="endArrow=block;endFill=1;html=1;strokeColor=#1C1A17;strokeWidth=2.5;" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="924" y="620" as="sourcePoint" />
+            <mxPoint x="956" y="620" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="fc" edge="1" parent="1" style="endArrow=block;endFill=1;html=1;strokeColor=#1C1A17;strokeWidth=2.5;" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1384" y="620" as="sourcePoint" />
+            <mxPoint x="1416" y="620" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="a01" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#8A8377;fontStyle=1;" value="대본 붙여넣기" vertex="1">
+          <mxGeometry height="16" width="372" x="64" y="230" as="geometry" />
+        </mxCell>
+        <mxCell id="a02" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#F2EFE8;strokeColor=#DCD6CB;fontFamily=Courier New;fontSize=10;align=left;spacingLeft=10;verticalAlign=top;spacingTop=8;fontColor=#4A443A;" value="INT. 극장 분장실 - 밤&#xa;거울 앞. 분장을 지우다 멈춘다.&#xa;&#xa;    수린&#xa;  그 이름을 어디서 들었어.&#xa;&#xa;INT. 극장 분장실 - 밤 (이어서)&#xa;문틈으로 복도의 빛이 새어든다.&#xa;&#xa;INT. 본무대 - 밤&#xa;객석의 웅성거림. 조명이 한 점으로." vertex="1">
+          <mxGeometry height="170" width="372" x="64" y="250" as="geometry" />
+        </mxCell>
+        <mxCell id="a03" parent="1" style="rounded=1;arcSize=24;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#1C1A17;strokeWidth=1.5;fontColor=#1C1A17;fontSize=12;fontStyle=1;align=center;verticalAlign=middle;" value="씬으로 나누기" vertex="1">
+          <mxGeometry height="38" width="372" x="64" y="432" as="geometry" />
+        </mxCell>
+        <mxCell id="a06" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#8A8377;fontStyle=1;" value="씬 후보   8" vertex="1">
+          <mxGeometry height="16" width="372" x="64" y="490" as="geometry" />
+        </mxCell>
+        <mxCell id="a07" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#DCD6CB;fontSize=10;align=left;spacingLeft=12;verticalAlign=middle;" value="S01     극장 분장실 · 밤                    블록 1" vertex="1">
+          <mxGeometry height="30" width="372" x="64" y="510" as="geometry" />
+        </mxCell>
+        <mxCell id="a08" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#DCD6CB;fontSize=10;align=left;spacingLeft=12;verticalAlign=middle;" value="S02     극장 분장실 · 밤                    블록 2–3 병합" vertex="1">
+          <mxGeometry height="30" width="372" x="64" y="544" as="geometry" />
+        </mxCell>
+        <mxCell id="a09" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#DCD6CB;fontSize=10;align=left;spacingLeft=12;verticalAlign=middle;" value="S03     본무대 · 밤                            블록 4" vertex="1">
+          <mxGeometry height="30" width="372" x="64" y="578" as="geometry" />
+        </mxCell>
+        <mxCell id="a10" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#DCD6CB;fontSize=10;align=left;spacingLeft=12;verticalAlign=middle;" value="S04     객석 · 밤                                블록 5–6 병합" vertex="1">
+          <mxGeometry height="30" width="372" x="64" y="612" as="geometry" />
+        </mxCell>
+        <mxCell id="a11" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#DCD6CB;fontSize=10;align=left;spacingLeft=12;verticalAlign=middle;" value="S05     분장실 앞 복도 · 새벽              블록 7" vertex="1">
+          <mxGeometry height="30" width="372" x="64" y="646" as="geometry" />
+        </mxCell>
+        <mxCell id="a12" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#DCD6CB;fontSize=10;align=left;spacingLeft=12;verticalAlign=middle;" value="S06     극장 옥상 · 새벽                      블록 8–9 병합" vertex="1">
+          <mxGeometry height="30" width="372" x="64" y="680" as="geometry" />
+        </mxCell>
+        <mxCell id="a13" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#DCD6CB;fontSize=10;align=left;spacingLeft=12;verticalAlign=middle;" value="S07     지하 연습실 · 낮                      블록 10" vertex="1">
+          <mxGeometry height="30" width="372" x="64" y="714" as="geometry" />
+        </mxCell>
+        <mxCell id="a14" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#DCD6CB;fontSize=10;align=left;spacingLeft=12;verticalAlign=middle;" value="S08     극장 앞 거리 · 낮                      블록 11–12 병합" vertex="1">
+          <mxGeometry height="30" width="372" x="64" y="748" as="geometry" />
+        </mxCell>
+        <mxCell id="a15" parent="1" style="rounded=1;arcSize=24;whiteSpace=wrap;html=1;fillColor=#C4553B;strokeColor=none;fontColor=#FFFFFF;fontSize=13;fontStyle=1;align=center;verticalAlign=middle;" value="키 비주얼 생성하기   ·   씬 8개" vertex="1">
+          <mxGeometry height="42" width="372" x="64" y="800" as="geometry" />
+        </mxCell>
+        <mxCell id="a16" parent="1" style="text;whiteSpace=wrap;html=1;fillColor=none;strokeColor=none;fontSize=10;fontColor=#8A8377;align=left;verticalAlign=top;fontStyle=2;" value="splitScenario() 가 블록으로 자르고&#xa;장소·시간이 같은 인접 블록을 하나로 합친다.&#xa;씬을 고르지 않는다. 목록 전체가 그대로 넘어간다." vertex="1">
+          <mxGeometry height="80" width="372" x="64" y="852" as="geometry" />
+        </mxCell>
+        <mxCell id="b01" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#8A8377;fontStyle=1;" value="keyVisualPrompt()   ·   씬 8개를 한 번에 · 각 줄은 고칠 수 있다" vertex="1">
+          <mxGeometry height="16" width="372" x="524" y="230" as="geometry" />
+        </mxCell>
+        <mxCell id="b02" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#DCD6CB;fontSize=10;fontColor=#4A443A;align=left;spacingLeft=12;verticalAlign=top;spacingTop=8;" value="S01   극장 분장실 · 밤 · 비 그친 뒤&#xa;dim dressing room, one bulb over a cracked&#xa;mirror, wide framing, muted amber" vertex="1">
+          <mxGeometry height="62" width="372" x="524" y="250" as="geometry" />
+        </mxCell>
+        <mxCell id="b02e" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=right;verticalAlign=middle;fontSize=9;fontColor=#C4553B;" value="고치기" vertex="1">
+          <mxGeometry height="14" width="52" x="832" y="256" as="geometry" />
+        </mxCell>
+        <mxCell id="b03" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9A937F;fontSize=10;fontColor=#4A443A;align=left;spacingLeft=12;verticalAlign=top;spacingTop=8;" value="S02   극장 분장실 · 밤 · 비 그친 뒤&#xa;a woman in half-removed stage makeup, hand&#xa;frozen mid-air, corridor light through the door" vertex="1">
+          <mxGeometry height="62" width="372" x="524" y="318" as="geometry" />
+        </mxCell>
+        <mxCell id="b03e" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=right;verticalAlign=middle;fontSize=9;fontColor=#C4553B;fontStyle=1;" value="고치는 중" vertex="1">
+          <mxGeometry height="14" width="64" x="820" y="324" as="geometry" />
+        </mxCell>
+        <mxCell id="b04" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#DCD6CB;fontSize=10;fontColor=#4A443A;align=left;spacingLeft=12;verticalAlign=top;spacingTop=8;" value="S03   본무대 · 밤&#xa;stage from the wings, a single spotlight&#xa;narrowing, murmuring house, wide framing" vertex="1">
+          <mxGeometry height="62" width="372" x="524" y="386" as="geometry" />
+        </mxCell>
+        <mxCell id="b04e" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=right;verticalAlign=middle;fontSize=9;fontColor=#C4553B;" value="고치기" vertex="1">
+          <mxGeometry height="14" width="52" x="832" y="392" as="geometry" />
+        </mxCell>
+        <mxCell id="b05" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#DCD6CB;fontSize=10;fontColor=#4A443A;align=left;spacingLeft=12;verticalAlign=top;spacingTop=8;" value="S04   객석 · 밤&#xa;rows of empty velvet seats seen from the&#xa;stage, one occupied, high angle" vertex="1">
+          <mxGeometry height="62" width="372" x="524" y="454" as="geometry" />
+        </mxCell>
+        <mxCell id="b05e" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=right;verticalAlign=middle;fontSize=9;fontColor=#C4553B;" value="고치기" vertex="1">
+          <mxGeometry height="14" width="52" x="832" y="460" as="geometry" />
+        </mxCell>
+        <mxCell id="b06" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#8A8377;" value="…   S05 – S08" vertex="1">
+          <mxGeometry height="16" width="372" x="536" y="522" as="geometry" />
+        </mxCell>
+        <mxCell id="b07" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#8A8377;fontStyle=1;" value="공통 옵션" vertex="1">
+          <mxGeometry height="16" width="372" x="524" y="548" as="geometry" />
+        </mxCell>
+        <mxCell id="b08" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#DCD6CB;fontSize=10;align=left;spacingLeft=12;verticalAlign=middle;" value="사이즈   key ▾              seed 고정  ☑  20260902" vertex="1">
+          <mxGeometry height="36" width="372" x="524" y="568" as="geometry" />
+        </mxCell>
+        <mxCell id="b09" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#8A8377;fontStyle=1;" value="응답 계약   ·   JSON 만" vertex="1">
+          <mxGeometry height="16" width="372" x="524" y="616" as="geometry" />
+        </mxCell>
+        <mxCell id="b10" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#F2EFE8;strokeColor=#DCD6CB;fontFamily=Courier New;fontSize=10;align=left;spacingLeft=10;verticalAlign=top;spacingTop=8;fontColor=#4A443A;" value="{&quot;visuals&quot;:[&#xa;  {&quot;scene&quot;:&quot;S01&quot;,&quot;place&quot;:&quot;극장 분장실&quot;,&#xa;   &quot;time&quot;:&quot;밤&quot;,&quot;weather&quot;:&quot;비 그친 뒤&quot;,&#xa;   &quot;cast&quot;:[&quot;수린&quot;,&quot;무영&quot;],&#xa;   &quot;beat&quot;:&quot;부정하려다 멈춘 손&quot;,&#xa;   &quot;framing&quot;:&quot;wide, 거울 반사 포함&quot;,&#xa;   &quot;prompt&quot;:&quot;dim dressing room, ...&quot;}&#xa; ]}" vertex="1">
+          <mxGeometry height="140" width="372" x="524" y="636" as="geometry" />
+        </mxCell>
+        <mxCell id="b11" parent="1" style="text;whiteSpace=wrap;html=1;fillColor=none;strokeColor=none;fontSize=10;fontColor=#8A8377;align=left;verticalAlign=top;fontStyle=2;" value="장소 · 시간 · 날씨 · 등장 인물(state.chars[id].brief)&#xa;· 드라마틱 비트 · 컷보다 넓은 프레이밍을 함께 싣는다.&#xa;키 비주얼에는 참조 이미지도 인물 앵커도 없다.&#xa;normalizePlan 옆에 정규화를 두고, 형식이 어긋난&#xa;응답은 보드 상태에 닿기 전에 막는다." vertex="1">
+          <mxGeometry height="110" width="372" x="524" y="788" as="geometry" />
+        </mxCell>
+        <mxCell id="c01" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#8A8377;fontStyle=1;" value="모델 미리 로드" vertex="1">
+          <mxGeometry height="16" width="372" x="984" y="230" as="geometry" />
+        </mxCell>
+        <mxCell id="c02" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#EFF5EC;strokeColor=#B9CFB0;fontSize=10;fontColor=#3D5C33;align=left;spacingLeft=12;verticalAlign=middle;" value="✓   /gen/load 완료 · 12s" vertex="1">
+          <mxGeometry height="36" width="372" x="984" y="250" as="geometry" />
+        </mxCell>
+        <mxCell id="c03" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#8A8377;fontStyle=1;" value="전체 진행" vertex="1">
+          <mxGeometry height="16" width="372" x="984" y="298" as="geometry" />
+        </mxCell>
+        <mxCell id="c04" parent="1" style="rounded=1;arcSize=40;whiteSpace=wrap;html=1;fillColor=#F0EDE6;strokeColor=#DCD6CB;" value="" vertex="1">
+          <mxGeometry height="20" width="372" x="984" y="318" as="geometry" />
+        </mxCell>
+        <mxCell id="c05" parent="1" style="rounded=1;arcSize=40;whiteSpace=wrap;html=1;fillColor=#C4553B;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="20" width="158" x="984" y="318" as="geometry" />
+        </mxCell>
+        <mxCell id="c06" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#6E675B;" value="3 / 8 완료   ·   1 실패   ·   남은 시간 약 4분" vertex="1">
+          <mxGeometry height="16" width="372" x="984" y="344" as="geometry" />
+        </mxCell>
+        <mxCell id="c07" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#8A8377;fontStyle=1;" value="씬별   ·   GPU 가 락으로 직렬 처리한다" vertex="1">
+          <mxGeometry height="16" width="372" x="984" y="368" as="geometry" />
+        </mxCell>
+        <mxCell id="c08" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#EFF5EC;strokeColor=#B9CFB0;fontSize=10;fontColor=#3D5C33;align=left;spacingLeft=12;verticalAlign=middle;" value="✓    S01   극장 분장실 · 밤                       24s      다시" vertex="1">
+          <mxGeometry height="32" width="372" x="984" y="388" as="geometry" />
+        </mxCell>
+        <mxCell id="c09" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#EFF5EC;strokeColor=#B9CFB0;fontSize=10;fontColor=#3D5C33;align=left;spacingLeft=12;verticalAlign=middle;" value="✓    S02   극장 분장실 · 밤                       22s      다시" vertex="1">
+          <mxGeometry height="32" width="372" x="984" y="426" as="geometry" />
+        </mxCell>
+        <mxCell id="c10" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#FBEFEA;strokeColor=#C4553B;strokeWidth=1.5;fontSize=10;fontColor=#8C3B26;align=left;spacingLeft=12;verticalAlign=middle;" value="⚠    S03   본무대 · 밤                    503 실패      다시" vertex="1">
+          <mxGeometry height="32" width="372" x="984" y="464" as="geometry" />
+        </mxCell>
+        <mxCell id="c11" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9A937F;fontSize=10;align=left;spacingLeft=12;verticalAlign=middle;" value="●    S04   객석 · 밤                            생성 중  38%" vertex="1">
+          <mxGeometry height="32" width="372" x="984" y="502" as="geometry" />
+        </mxCell>
+        <mxCell id="c12" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#DCD6CB;fontSize=10;fontColor=#8A8377;align=left;spacingLeft=12;verticalAlign=middle;" value="○    S05   분장실 앞 복도 · 새벽                       대기" vertex="1">
+          <mxGeometry height="32" width="372" x="984" y="540" as="geometry" />
+        </mxCell>
+        <mxCell id="c13" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#DCD6CB;fontSize=10;fontColor=#8A8377;align=left;spacingLeft=12;verticalAlign=middle;" value="○    S06   극장 옥상 · 새벽                             대기" vertex="1">
+          <mxGeometry height="32" width="372" x="984" y="578" as="geometry" />
+        </mxCell>
+        <mxCell id="c14" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#DCD6CB;fontSize=10;fontColor=#8A8377;align=left;spacingLeft=12;verticalAlign=middle;" value="○    S07   지하 연습실 · 낮                             대기" vertex="1">
+          <mxGeometry height="32" width="372" x="984" y="616" as="geometry" />
+        </mxCell>
+        <mxCell id="c15" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#DCD6CB;fontSize=10;fontColor=#8A8377;align=left;spacingLeft=12;verticalAlign=middle;" value="○    S08   극장 앞 거리 · 낮                             대기" vertex="1">
+          <mxGeometry height="32" width="372" x="984" y="654" as="geometry" />
+        </mxCell>
+        <mxCell id="c16" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#FBEFEA;strokeColor=#E2C0B4;fontSize=10;fontColor=#8C3B26;align=left;spacingLeft=12;verticalAlign=middle;" value="S03   GPU 가 아직 깨어나는 중입니다 (503).&#xa;         이 씬만 건너뛰고 나머지는 계속했습니다." vertex="1">
+          <mxGeometry height="52" width="372" x="984" y="698" as="geometry" />
+        </mxCell>
+        <mxCell id="c17" parent="1" style="rounded=1;arcSize=24;whiteSpace=wrap;html=1;fillColor=#C4553B;strokeColor=none;fontColor=#FFFFFF;fontSize=12;fontStyle=1;align=center;verticalAlign=middle;" value="실패한 씬만 다시 생성   ·   1개" vertex="1">
+          <mxGeometry height="36" width="372" x="984" y="762" as="geometry" />
+        </mxCell>
+        <mxCell id="c18" parent="1" style="text;whiteSpace=wrap;html=1;fillColor=none;strokeColor=none;fontSize=10;fontColor=#8A8377;align=left;verticalAlign=top;fontStyle=2;" value="askGpu(body, path) 를 그대로 쓴다.&#xa;한 씬의 실패가 배치를 끝내지 않는다.&#xa;한 씬만 따로 다시 돌릴 수 있다." vertex="1">
+          <mxGeometry height="80" width="372" x="984" y="810" as="geometry" />
+        </mxCell>
+        <mxCell id="d01" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#8A8377;fontStyle=1;" value="대본 ↔ 키 비주얼   ·   씬 순서대로" vertex="1">
+          <mxGeometry height="16" width="372" x="1444" y="230" as="geometry" />
+        </mxCell>
+        <mxCell id="d02" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#DCD6CB;" value="" vertex="1">
+          <mxGeometry height="76" width="372" x="1444" y="250" as="geometry" />
+        </mxCell>
+        <mxCell id="d02i" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#EDE8DF;strokeColor=#CFC9BF;fontSize=9;fontColor=#8A8377;align=center;verticalAlign=middle;" value="키 비주얼" vertex="1">
+          <mxGeometry height="60" width="90" x="1452" y="258" as="geometry" />
+        </mxCell>
+        <mxCell id="d02t" parent="1" style="text;whiteSpace=wrap;html=1;fillColor=none;strokeColor=none;fontSize=10;fontColor=#4A443A;align=left;verticalAlign=top;" value="S01   극장 분장실 · 밤&#xa;거울 앞. 분장을 지우다 멈춘다." vertex="1">
+          <mxGeometry height="60" width="252" x="1552" y="258" as="geometry" />
+        </mxCell>
+        <mxCell id="d03" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#FBEFEA;strokeColor=#C4553B;strokeWidth=1.5;" value="" vertex="1">
+          <mxGeometry height="76" width="372" x="1444" y="332" as="geometry" />
+        </mxCell>
+        <mxCell id="d03i" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#EDE8DF;strokeColor=#C4553B;fontSize=9;fontColor=#8A8377;align=center;verticalAlign=middle;" value="키 비주얼" vertex="1">
+          <mxGeometry height="60" width="90" x="1452" y="340" as="geometry" />
+        </mxCell>
+        <mxCell id="d03t" parent="1" style="text;whiteSpace=wrap;html=1;fillColor=none;strokeColor=none;fontSize=10;fontColor=#4A443A;align=left;verticalAlign=top;" value="S02   극장 분장실 · 밤 (이어서)&#xa;문틈으로 복도의 빛이 새어든다." vertex="1">
+          <mxGeometry height="60" width="252" x="1552" y="340" as="geometry" />
+        </mxCell>
+        <mxCell id="d04" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#DCD6CB;" value="" vertex="1">
+          <mxGeometry height="76" width="372" x="1444" y="414" as="geometry" />
+        </mxCell>
+        <mxCell id="d04i" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#C4553B;dashed=1;fontSize=9;fontColor=#8C3B26;align=center;verticalAlign=middle;" value="비어 있음" vertex="1">
+          <mxGeometry height="60" width="90" x="1452" y="422" as="geometry" />
+        </mxCell>
+        <mxCell id="d04t" parent="1" style="text;whiteSpace=wrap;html=1;fillColor=none;strokeColor=none;fontSize=10;fontColor=#4A443A;align=left;verticalAlign=top;" value="S03   본무대 · 밤&#xa;객석의 웅성거림. 조명이 한 점으로.&#xa;⚠ 503 실패 · 이 씬만 다시" vertex="1">
+          <mxGeometry height="60" width="252" x="1552" y="422" as="geometry" />
+        </mxCell>
+        <mxCell id="d05" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#DCD6CB;" value="" vertex="1">
+          <mxGeometry height="76" width="372" x="1444" y="496" as="geometry" />
+        </mxCell>
+        <mxCell id="d05i" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#F0EDE6;strokeColor=#CFC9BF;fontSize=9;fontColor=#8A8377;align=center;verticalAlign=middle;" value="생성 중" vertex="1">
+          <mxGeometry height="60" width="90" x="1452" y="504" as="geometry" />
+        </mxCell>
+        <mxCell id="d05t" parent="1" style="text;whiteSpace=wrap;html=1;fillColor=none;strokeColor=none;fontSize=10;fontColor=#4A443A;align=left;verticalAlign=top;" value="S04   객석 · 밤&#xa;빈 좌석 한가운데 한 사람." vertex="1">
+          <mxGeometry height="60" width="252" x="1552" y="504" as="geometry" />
+        </mxCell>
+        <mxCell id="d06" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#8A8377;" value="…   S05 – S08" vertex="1">
+          <mxGeometry height="16" width="372" x="1456" y="582" as="geometry" />
+        </mxCell>
+        <mxCell id="d09" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#8A8377;fontStyle=1;" value="권한" vertex="1">
+          <mxGeometry height="16" width="372" x="1444" y="706" as="geometry" />
+        </mxCell>
+        <mxCell id="d10" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#DCD6CB;fontSize=10;align=left;spacingLeft=12;verticalAlign=middle;" value="artist · planner    생성 가능&lt;br&gt;reviewer는 보기만" vertex="1">
+          <mxGeometry height="44" width="372" x="1444" y="726" as="geometry" />
+        </mxCell>
+        <mxCell id="d11" parent="1" style="rounded=1;arcSize=24;whiteSpace=wrap;html=1;fillColor=#C4553B;strokeColor=none;fontColor=#FFFFFF;fontSize=13;fontStyle=1;align=center;verticalAlign=middle;" value="보드에 붙이기   ·   7개" vertex="1">
+          <mxGeometry height="42" width="372" x="1444" y="790" as="geometry" />
+        </mxCell>
+        <mxCell id="d12" parent="1" style="text;whiteSpace=wrap;html=1;fillColor=none;strokeColor=none;fontSize=10;fontColor=#8A8377;align=left;verticalAlign=top;fontStyle=2;" value="op 으로 남으면 패널과 같은 방식으로&#xa;복제되고 새로고침을 견딘다." vertex="1">
+          <mxGeometry height="60" width="372" x="1444" y="846" as="geometry" />
+        </mxCell>
+        <mxCell id="w00" parent="1" style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CFC9BF;strokeWidth=1.5;verticalAlign=top;align=left;" value="" vertex="1">
+          <mxGeometry height="380" width="1800" x="40" y="990" as="geometry" />
+        </mxCell>
+        <mxCell id="w01" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1C1A17;strokeColor=none;fontColor=#FFFFFF;fontSize=14;fontStyle=1;align=left;spacingLeft=18;verticalAlign=middle;" value="STEP 4 확대   ·   매칭 보드 · 왼쪽 대본을 스크롤하면 오른쪽 키 비주얼이 따라온다" vertex="1">
+          <mxGeometry height="48" width="1796" x="42" y="992" as="geometry" />
+        </mxCell>
+        <mxCell id="w02" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#8A8377;fontStyle=1;" value="대본" vertex="1">
+          <mxGeometry height="16" width="300" x="64" y="1056" as="geometry" />
+        </mxCell>
+        <mxCell id="w03" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#F2EFE8;strokeColor=#DCD6CB;fontFamily=Courier New;fontSize=10;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;fontColor=#4A443A;" value="INT. 극장 분장실 - 밤&#xa;거울 앞. 분장을 지우다 멈춘다.&#xa;&#xa;    수린&#xa;  그 이름을 어디서 들었어.&#xa;&#xa;INT. 극장 분장실 - 밤 (이어서)&#xa;문틈으로 복도의 빛이 새어든다.&#xa;&#xa;INT. 본무대 - 밤&#xa;객석의 웅성거림. 조명이 한 점으로.&#xa;&#xa;INT. 객석 - 밤&#xa;빈 좌석 한가운데 한 사람." vertex="1">
+          <mxGeometry height="252" width="470" x="64" y="1076" as="geometry" />
+        </mxCell>
+        <mxCell id="w04" parent="1" style="rounded=1;arcSize=30;whiteSpace=wrap;html=1;fillColor=#F0EDE6;strokeColor=#CFC9BF;fontSize=9;fontColor=#6E675B;align=center;verticalAlign=middle;" value="S01" vertex="1">
+          <mxGeometry height="18" width="40" x="546" y="1082" as="geometry" />
+        </mxCell>
+        <mxCell id="w05" parent="1" style="rounded=1;arcSize=30;whiteSpace=wrap;html=1;fillColor=#C4553B;strokeColor=none;fontSize=9;fontColor=#FFFFFF;fontStyle=1;align=center;verticalAlign=middle;" value="S02" vertex="1">
+          <mxGeometry height="18" width="40" x="546" y="1168" as="geometry" />
+        </mxCell>
+        <mxCell id="w06" parent="1" style="rounded=1;arcSize=30;whiteSpace=wrap;html=1;fillColor=#F0EDE6;strokeColor=#CFC9BF;fontSize=9;fontColor=#6E675B;align=center;verticalAlign=middle;" value="S03" vertex="1">
+          <mxGeometry height="18" width="40" x="546" y="1218" as="geometry" />
+        </mxCell>
+        <mxCell id="w07" parent="1" style="rounded=1;arcSize=30;whiteSpace=wrap;html=1;fillColor=#F0EDE6;strokeColor=#CFC9BF;fontSize=9;fontColor=#6E675B;align=center;verticalAlign=middle;" value="S04" vertex="1">
+          <mxGeometry height="18" width="40" x="546" y="1268" as="geometry" />
+        </mxCell>
+        <mxCell id="w08" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#8A8377;fontStyle=1;" value="키 비주얼   ·   씬 머리글과 짝을 이룬다" vertex="1">
+          <mxGeometry height="16" width="400" x="640" y="1056" as="geometry" />
+        </mxCell>
+        <mxCell id="w09" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#EDE8DF;strokeColor=#CFC9BF;fontSize=10;fontColor=#6E675B;align=center;verticalAlign=bottom;spacingBottom=6;" value="S01   극장 분장실 · 밤" vertex="1">
+          <mxGeometry height="116" width="176" x="640" y="1076" as="geometry" />
+        </mxCell>
+        <mxCell id="w10" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#EDE8DF;strokeColor=#C4553B;strokeWidth=2;fontSize=10;fontColor=#6E675B;align=center;verticalAlign=bottom;spacingBottom=6;" value="S02   극장 분장실 · 밤" vertex="1">
+          <mxGeometry height="116" width="176" x="840" y="1076" as="geometry" />
+        </mxCell>
+        <mxCell id="w11" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#C4553B;dashed=1;fontSize=10;fontColor=#8C3B26;align=center;verticalAlign=middle;" value="S03&#xa;⚠ 503 실패&#xa;이 씬만 다시" vertex="1">
+          <mxGeometry height="116" width="176" x="1040" y="1076" as="geometry" />
+        </mxCell>
+        <mxCell id="w12" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#F0EDE6;strokeColor=#CFC9BF;fontSize=10;fontColor=#8A8377;align=center;verticalAlign=middle;" value="S04&#xa;생성 중  38%" vertex="1">
+          <mxGeometry height="116" width="176" x="1240" y="1076" as="geometry" />
+        </mxCell>
+        <mxCell id="w13" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#DCD6CB;fontSize=10;fontColor=#8A8377;align=center;verticalAlign=middle;" value="S05&#xa;대기" vertex="1">
+          <mxGeometry height="116" width="176" x="640" y="1212" as="geometry" />
+        </mxCell>
+        <mxCell id="w14" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#DCD6CB;fontSize=10;fontColor=#8A8377;align=center;verticalAlign=middle;" value="S06&#xa;대기" vertex="1">
+          <mxGeometry height="116" width="176" x="840" y="1212" as="geometry" />
+        </mxCell>
+        <mxCell id="w15" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#DCD6CB;fontSize=10;fontColor=#8A8377;align=center;verticalAlign=middle;" value="S07&#xa;대기" vertex="1">
+          <mxGeometry height="116" width="176" x="1040" y="1212" as="geometry" />
+        </mxCell>
+        <mxCell id="w16" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#DCD6CB;fontSize=10;fontColor=#8A8377;align=center;verticalAlign=middle;" value="S08&#xa;대기" vertex="1">
+          <mxGeometry height="116" width="176" x="1240" y="1212" as="geometry" />
+        </mxCell>
+        <mxCell id="we1" edge="1" parent="1" source="w05" style="endArrow=none;html=1;strokeColor=#C4553B;dashed=1;strokeWidth=1.5;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="w10" value="짝">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="w17" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#8A8377;fontStyle=1;" value="선택한 씬" vertex="1">
+          <mxGeometry height="16" width="360" x="1460" y="1056" as="geometry" />
+        </mxCell>
+        <mxCell id="w18" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#FBEFEA;strokeColor=#C4553B;strokeWidth=1.5;fontSize=10;fontColor=#4A443A;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" value="S02   극장 분장실 · 밤 · 비 그친 뒤&#xa;수린 · 무영&#xa;비트   불린 이름을 부정하려다 손이 멈춘다&#xa;seed 20260902 · key (2:3)" vertex="1">
+          <mxGeometry height="92" width="360" x="1460" y="1076" as="geometry" />
+        </mxCell>
+        <mxCell id="w19" parent="1" style="rounded=1;arcSize=24;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#1C1A17;strokeWidth=1.5;fontColor=#1C1A17;fontSize=11;fontStyle=1;align=center;verticalAlign=middle;" value="이 씬만 다시 생성" vertex="1">
+          <mxGeometry height="34" width="360" x="1460" y="1180" as="geometry" />
+        </mxCell>
+        <mxCell id="w20" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#DCD6CB;fontSize=10;align=left;spacingLeft=12;verticalAlign=middle;" value="☑  이 키 비주얼을 씬 안 컷들의 init 참조로&#xa;      asInit() 에 넘겨 씬의 화풍을 물려준다" vertex="1">
+          <mxGeometry height="46" width="360" x="1460" y="1228" as="geometry" />
+        </mxCell>
+        <mxCell id="w21" parent="1" style="text;whiteSpace=wrap;html=1;fillColor=none;strokeColor=none;fontSize=10;fontColor=#8A8377;align=left;verticalAlign=top;fontStyle=2;" value="보드에 이미 컷이 있으면 sceneGroups() 로&#xa;씬 경계를 보드와 맞춘다." vertex="1">
+          <mxGeometry height="50" width="360" x="1460" y="1288" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram name="온보딩 코치마크" id="kv2">
+    <mxGraphModel dx="2828" dy="1700" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1420" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="HxbWOC4h5BXdwPOUaTDx-1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="1127" width="1920" y="72" as="geometry" />
+        </mxCell>
+        <mxCell id="l1" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=11;fontColor=#8A8377;fontStyle=1;" value="1 / 4      STEP 1 의 대본 입력 자리를 밝힌다" vertex="1">
+          <mxGeometry height="18" width="900" x="40" y="96" as="geometry" />
+        </mxCell>
+        <mxCell id="f1" parent="1" style="rounded=1;arcSize=2;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CFC9BF;strokeWidth=1.5;" value="" vertex="1">
+          <mxGeometry height="500" width="900" x="40" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="f1b" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F0EDE6;strokeColor=none;align=left;verticalAlign=middle;fontSize=9;fontColor=#8A8377;spacingLeft=16;" value="스토리보드   ·   키 비주얼" vertex="1">
+          <mxGeometry height="28" width="896" x="42" y="122" as="geometry" />
+        </mxCell>
+        <mxCell id="f1c0" parent="1" style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#FBF9F4;strokeColor=#DCD6CB;fontSize=10;fontColor=#8A8377;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;" value="&lt;b&gt;STEP 1&lt;/b&gt;&lt;br&gt;&lt;br&gt;대본 붙여넣기&lt;br&gt;&lt;br&gt;&lt;br&gt;&lt;br&gt;&lt;br&gt;씬 후보 8&lt;br&gt;&lt;br&gt;키 비주얼 생성하기" vertex="1">
+          <mxGeometry height="434" width="206" x="60" y="164" as="geometry" />
+        </mxCell>
+        <mxCell id="f1c1" parent="1" style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#FBF9F4;strokeColor=#DCD6CB;fontSize=10;fontColor=#8A8377;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;" value="&lt;b&gt;STEP 2&lt;/b&gt;&lt;br&gt;&lt;br&gt;씬마다 이미지 프롬프트&lt;br&gt;&lt;br&gt;공통 옵션&lt;br&gt;&lt;br&gt;응답 계약" vertex="1">
+          <mxGeometry height="434" width="206" x="278" y="164" as="geometry" />
+        </mxCell>
+        <mxCell id="f1c2" parent="1" style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#FBF9F4;strokeColor=#DCD6CB;fontSize=10;fontColor=#8A8377;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;" value="&lt;b&gt;STEP 3&lt;/b&gt;&lt;br&gt;&lt;br&gt;모델 미리 로드&lt;br&gt;&lt;br&gt;전체 진행&lt;br&gt;&lt;br&gt;씬별 상태 8" vertex="1">
+          <mxGeometry height="434" width="206" x="496" y="164" as="geometry" />
+        </mxCell>
+        <mxCell id="f1c3" parent="1" style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#FBF9F4;strokeColor=#DCD6CB;fontSize=10;fontColor=#8A8377;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;" value="&lt;b&gt;STEP 4&lt;/b&gt;&lt;br&gt;&lt;br&gt;대본 ↔ 키 비주얼&lt;br&gt;&lt;br&gt;보드에 남기는 형태&lt;br&gt;&lt;br&gt;권한&lt;br&gt;&lt;br&gt;보드에 붙이기" vertex="1">
+          <mxGeometry height="434" width="206" x="714" y="164" as="geometry" />
+        </mxCell>
+        <mxCell id="f1dim" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1C1A17;strokeColor=none;opacity=62;" value="" vertex="1">
+          <mxGeometry height="496" width="896" x="42" y="122" as="geometry" />
+        </mxCell>
+        <mxCell id="f1halo" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=none;opacity=25;" value="" vertex="1">
+          <mxGeometry height="140" width="206" x="60" y="190" as="geometry" />
+        </mxCell>
+        <mxCell id="f1sp" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#F2EFE8;strokeColor=#C4553B;strokeWidth=2;fontFamily=Courier New;fontSize=9;align=left;spacingLeft=8;verticalAlign=top;spacingTop=8;fontColor=#4A443A;" value="INT. 극장 분장실 - 밤&#xa;거울 앞. 분장을 지우다 멈춘다.&#xa;&#xa;    수린&#xa;  그 이름을 어디서 들었어." vertex="1">
+          <mxGeometry height="120" width="190" x="68" y="200" as="geometry" />
+        </mxCell>
+        <mxCell id="f1tri" parent="1" style="triangle;direction=west;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="18" width="14" x="286" y="251" as="geometry" />
+        </mxCell>
+        <mxCell id="f1tt" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=none;shadow=1;" value="" vertex="1">
+          <mxGeometry height="160" width="320" x="300" y="200" as="geometry" />
+        </mxCell>
+        <mxCell id="f1n" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#C4553B;fontStyle=1;" value="1 / 4" vertex="1">
+          <mxGeometry height="16" width="100" x="322" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="f1h" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=15;fontStyle=1;fontColor=#1C1A17;" value="대본은 이 계정 안에 머문다" vertex="1">
+          <mxGeometry height="24" width="280" x="322" y="242" as="geometry" />
+        </mxCell>
+        <mxCell id="f1p" parent="1" style="text;whiteSpace=wrap;html=1;fillColor=none;strokeColor=none;align=left;verticalAlign=top;fontSize=12;fontColor=#4A443A;" value="여기 붙인 대본은 우리 계정 안에서만 읽힙니다.&#xa;그림 설명을 쓰는 모델도, 그림을 그리는 모델도&#xa;같은 계정 안에 있습니다." vertex="1">
+          <mxGeometry height="60" width="280" x="322" y="272" as="geometry" />
+        </mxCell>
+        <mxCell id="f1btn" parent="1" style="rounded=1;arcSize=30;whiteSpace=wrap;html=1;fillColor=#C4553B;strokeColor=none;fontColor=#FFFFFF;fontSize=11;fontStyle=1;align=center;verticalAlign=middle;" value="다음" vertex="1">
+          <mxGeometry height="28" width="72" x="530" y="320" as="geometry" />
+        </mxCell>
+        <mxCell id="f1skip" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#8A8377;" value="건너뛰기" vertex="1">
+          <mxGeometry height="28" width="80" x="322" y="320" as="geometry" />
+        </mxCell>
+        <mxCell id="l2" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=11;fontColor=#8A8377;fontStyle=1;" value="2 / 4      STEP 3 의 모델 로드와 진행을 밝힌다" vertex="1">
+          <mxGeometry height="18" width="900" x="980" y="96" as="geometry" />
+        </mxCell>
+        <mxCell id="f2" parent="1" style="rounded=1;arcSize=2;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CFC9BF;strokeWidth=1.5;" value="" vertex="1">
+          <mxGeometry height="500" width="900" x="980" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="f2b" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F0EDE6;strokeColor=none;align=left;verticalAlign=middle;fontSize=9;fontColor=#8A8377;spacingLeft=16;" value="스토리보드   ·   키 비주얼" vertex="1">
+          <mxGeometry height="28" width="896" x="982" y="122" as="geometry" />
+        </mxCell>
+        <mxCell id="f2c0" parent="1" style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#FBF9F4;strokeColor=#DCD6CB;fontSize=10;fontColor=#8A8377;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;" value="&lt;b&gt;STEP 1&lt;/b&gt;&lt;br&gt;&lt;br&gt;대본 붙여넣기&lt;br&gt;&lt;br&gt;씬 후보 8" vertex="1">
+          <mxGeometry height="434" width="206" x="1000" y="164" as="geometry" />
+        </mxCell>
+        <mxCell id="f2c1" parent="1" style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#FBF9F4;strokeColor=#DCD6CB;fontSize=10;fontColor=#8A8377;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;" value="&lt;b&gt;STEP 2&lt;/b&gt;&lt;br&gt;&lt;br&gt;씬마다 이미지 프롬프트&lt;br&gt;&lt;br&gt;공통 옵션" vertex="1">
+          <mxGeometry height="434" width="206" x="1218" y="164" as="geometry" />
+        </mxCell>
+        <mxCell id="f2c2" parent="1" style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#FBF9F4;strokeColor=#DCD6CB;fontSize=10;fontColor=#8A8377;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;" value="&lt;b&gt;STEP 3&lt;/b&gt;&lt;br&gt;&lt;br&gt;&lt;br&gt;&lt;br&gt;&lt;br&gt;&lt;br&gt;&lt;br&gt;&lt;br&gt;씬별 상태 8" vertex="1">
+          <mxGeometry height="434" width="206" x="1436" y="164" as="geometry" />
+        </mxCell>
+        <mxCell id="f2c3" parent="1" style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#FBF9F4;strokeColor=#DCD6CB;fontSize=10;fontColor=#8A8377;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;" value="&lt;b&gt;STEP 4&lt;/b&gt;&lt;br&gt;&lt;br&gt;대본 ↔ 키 비주얼&lt;br&gt;&lt;br&gt;권한" vertex="1">
+          <mxGeometry height="434" width="206" x="1654" y="164" as="geometry" />
+        </mxCell>
+        <mxCell id="f2dim" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1C1A17;strokeColor=none;opacity=62;" value="" vertex="1">
+          <mxGeometry height="496" width="896" x="982" y="122" as="geometry" />
+        </mxCell>
+        <mxCell id="f2halo" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=none;opacity=25;" value="" vertex="1">
+          <mxGeometry height="126" width="206" x="1436" y="196" as="geometry" />
+        </mxCell>
+        <mxCell id="f2sp1" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#EFF5EC;strokeColor=#C4553B;strokeWidth=2;fontSize=9;fontColor=#3D5C33;align=left;spacingLeft=10;verticalAlign=middle;" value="✓   /gen/load 완료 · 12s" vertex="1">
+          <mxGeometry height="32" width="190" x="1444" y="206" as="geometry" />
+        </mxCell>
+        <mxCell id="f2sp2" parent="1" style="rounded=1;arcSize=40;whiteSpace=wrap;html=1;fillColor=#F0EDE6;strokeColor=#DCD6CB;" value="" vertex="1">
+          <mxGeometry height="16" width="190" x="1444" y="248" as="geometry" />
+        </mxCell>
+        <mxCell id="f2sp3" parent="1" style="rounded=1;arcSize=40;whiteSpace=wrap;html=1;fillColor=#C4553B;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="16" width="80" x="1444" y="248" as="geometry" />
+        </mxCell>
+        <mxCell id="f2sp4" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=9;fontColor=#FFFFFF;" value="3 / 8 완료   ·   남은 시간 약 4분" vertex="1">
+          <mxGeometry height="14" width="190" x="1444" y="270" as="geometry" />
+        </mxCell>
+        <mxCell id="f2sp5" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9A937F;fontSize=9;align=left;spacingLeft=10;verticalAlign=middle;" value="●   S04   생성 중  38%" vertex="1">
+          <mxGeometry height="24" width="190" x="1444" y="290" as="geometry" />
+        </mxCell>
+        <mxCell id="f2tri" parent="1" style="triangle;direction=east;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="18" width="14" x="1412" y="251" as="geometry" />
+        </mxCell>
+        <mxCell id="f2tt" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=none;shadow=1;" value="" vertex="1">
+          <mxGeometry height="160" width="320" x="1092" y="200" as="geometry" />
+        </mxCell>
+        <mxCell id="f2n" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#C4553B;fontStyle=1;" value="2 / 4" vertex="1">
+          <mxGeometry height="16" width="100" x="1114" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="f2h" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=15;fontStyle=1;fontColor=#1C1A17;" value="만드는 동안만 장비가 켜진다" vertex="1">
+          <mxGeometry height="24" width="280" x="1114" y="242" as="geometry" />
+        </mxCell>
+        <mxCell id="f2p" parent="1" style="text;whiteSpace=wrap;html=1;fillColor=none;strokeColor=none;align=left;verticalAlign=top;fontSize=12;fontColor=#4A443A;" value="8장을 그리는 몇 분만 그래픽 장비가 돕니다.&#xa;첫 장이 조금 늦는 것은 그때까지 꺼져 있었다는&#xa;뜻입니다. 꺼져 있는 시간에는 비용이 붙지 않습니다." vertex="1">
+          <mxGeometry height="60" width="280" x="1114" y="272" as="geometry" />
+        </mxCell>
+        <mxCell id="f2btn" parent="1" style="rounded=1;arcSize=30;whiteSpace=wrap;html=1;fillColor=#C4553B;strokeColor=none;fontColor=#FFFFFF;fontSize=11;fontStyle=1;align=center;verticalAlign=middle;" value="다음" vertex="1">
+          <mxGeometry height="28" width="72" x="1322" y="320" as="geometry" />
+        </mxCell>
+        <mxCell id="f2skip" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#8A8377;" value="건너뛰기" vertex="1">
+          <mxGeometry height="28" width="80" x="1114" y="320" as="geometry" />
+        </mxCell>
+        <mxCell id="l3" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=11;fontColor=#8A8377;fontStyle=1;" value="3 / 4      STEP 4 의 권한 표시를 밝힌다" vertex="1">
+          <mxGeometry height="18" width="900" x="40" y="636" as="geometry" />
+        </mxCell>
+        <mxCell id="f3" parent="1" style="rounded=1;arcSize=2;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CFC9BF;strokeWidth=1.5;" value="" vertex="1">
+          <mxGeometry height="500" width="900" x="40" y="660" as="geometry" />
+        </mxCell>
+        <mxCell id="f3b" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F0EDE6;strokeColor=none;align=left;verticalAlign=middle;fontSize=9;fontColor=#8A8377;spacingLeft=16;" value="스토리보드   ·   키 비주얼            검수자로 로그인" vertex="1">
+          <mxGeometry height="28" width="896" x="42" y="662" as="geometry" />
+        </mxCell>
+        <mxCell id="f3c0" parent="1" style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#FBF9F4;strokeColor=#DCD6CB;fontSize=10;fontColor=#8A8377;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;" value="&lt;b&gt;STEP 1&lt;/b&gt;&lt;br&gt;&lt;br&gt;대본 붙여넣기&lt;br&gt;&lt;br&gt;씬 후보 8" vertex="1">
+          <mxGeometry height="434" width="206" x="60" y="704" as="geometry" />
+        </mxCell>
+        <mxCell id="f3c1" parent="1" style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#FBF9F4;strokeColor=#DCD6CB;fontSize=10;fontColor=#8A8377;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;" value="&lt;b&gt;STEP 2&lt;/b&gt;&lt;br&gt;&lt;br&gt;씬마다 이미지 프롬프트" vertex="1">
+          <mxGeometry height="434" width="206" x="278" y="704" as="geometry" />
+        </mxCell>
+        <mxCell id="f3c2" parent="1" style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#FBF9F4;strokeColor=#DCD6CB;fontSize=10;fontColor=#8A8377;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;" value="&lt;b&gt;STEP 3&lt;/b&gt;&lt;br&gt;&lt;br&gt;모델 미리 로드&lt;br&gt;&lt;br&gt;씬별 상태 8" vertex="1">
+          <mxGeometry height="434" width="206" x="496" y="704" as="geometry" />
+        </mxCell>
+        <mxCell id="f3c3" parent="1" style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#FBF9F4;strokeColor=#DCD6CB;fontSize=10;fontColor=#8A8377;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;" value="&lt;b&gt;STEP 4&lt;/b&gt;&lt;br&gt;&lt;br&gt;대본 ↔ 키 비주얼&lt;br&gt;&lt;br&gt;&lt;br&gt;&lt;br&gt;보드에 남기는 형태" vertex="1">
+          <mxGeometry height="434" width="206" x="714" y="704" as="geometry" />
+        </mxCell>
+        <mxCell id="f3dim" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1C1A17;strokeColor=none;opacity=62;" value="" vertex="1">
+          <mxGeometry height="496" width="896" x="42" y="662" as="geometry" />
+        </mxCell>
+        <mxCell id="f3halo" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=none;opacity=25;" value="" vertex="1">
+          <mxGeometry height="140" width="206" x="714" y="944" as="geometry" />
+        </mxCell>
+        <mxCell id="f3sp1" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#C4553B;strokeWidth=2;fontSize=9;align=left;spacingLeft=10;verticalAlign=top;spacingTop=8;fontColor=#4A443A;" value="권한&#xa;artist · planner    생성 가능&#xa;reviewer                  보기만" vertex="1">
+          <mxGeometry height="60" width="190" x="722" y="954" as="geometry" />
+        </mxCell>
+        <mxCell id="f3sp2" parent="1" style="rounded=1;arcSize=24;whiteSpace=wrap;html=1;fillColor=#E4DED2;strokeColor=none;fontColor=#9A937F;fontSize=10;fontStyle=1;align=center;verticalAlign=middle;" value="보드에 붙이기   ·   잠김" vertex="1">
+          <mxGeometry height="32" width="190" x="722" y="1022" as="geometry" />
+        </mxCell>
+        <mxCell id="f3tri" parent="1" style="triangle;direction=east;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="18" width="14" x="690" y="1005" as="geometry" />
+        </mxCell>
+        <mxCell id="f3tt" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=none;shadow=1;" value="" vertex="1">
+          <mxGeometry height="160" width="320" x="370" y="954" as="geometry" />
+        </mxCell>
+        <mxCell id="f3n" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#C4553B;fontStyle=1;" value="3 / 4" vertex="1">
+          <mxGeometry height="16" width="100" x="392" y="974" as="geometry" />
+        </mxCell>
+        <mxCell id="f3h" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=15;fontStyle=1;fontColor=#1C1A17;" value="생성 권한은 서버에서 확인한다" vertex="1">
+          <mxGeometry height="24" width="280" x="392" y="996" as="geometry" />
+        </mxCell>
+        <mxCell id="f3p" parent="1" style="text;whiteSpace=wrap;html=1;fillColor=none;strokeColor=none;align=left;verticalAlign=top;fontSize=12;fontColor=#4A443A;" value="검수자에게 버튼을 숨기지 않습니다.&#xa;요청이 도착하면 서버가 역할을 보고 거절합니다.&#xa;화면을 우회해도 결과는 같습니다." vertex="1">
+          <mxGeometry height="60" width="280" x="392" y="1026" as="geometry" />
+        </mxCell>
+        <mxCell id="f3btn" parent="1" style="rounded=1;arcSize=30;whiteSpace=wrap;html=1;fillColor=#C4553B;strokeColor=none;fontColor=#FFFFFF;fontSize=11;fontStyle=1;align=center;verticalAlign=middle;" value="다음" vertex="1">
+          <mxGeometry height="28" width="72" x="600" y="1074" as="geometry" />
+        </mxCell>
+        <mxCell id="f3skip" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#8A8377;" value="건너뛰기" vertex="1">
+          <mxGeometry height="28" width="80" x="392" y="1074" as="geometry" />
+        </mxCell>
+        <mxCell id="l4" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=11;fontColor=#8A8377;fontStyle=1;" value="4 / 4      STEP 2 와 STEP 3 을 함께 밝힌다" vertex="1">
+          <mxGeometry height="18" width="900" x="980" y="636" as="geometry" />
+        </mxCell>
+        <mxCell id="f4" parent="1" style="rounded=1;arcSize=2;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CFC9BF;strokeWidth=1.5;" value="" vertex="1">
+          <mxGeometry height="500" width="900" x="980" y="660" as="geometry" />
+        </mxCell>
+        <mxCell id="f4b" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F0EDE6;strokeColor=none;align=left;verticalAlign=middle;fontSize=9;fontColor=#8A8377;spacingLeft=16;" value="스토리보드   ·   키 비주얼" vertex="1">
+          <mxGeometry height="28" width="896" x="982" y="662" as="geometry" />
+        </mxCell>
+        <mxCell id="f4c0" parent="1" style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#FBF9F4;strokeColor=#DCD6CB;fontSize=10;fontColor=#8A8377;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;" value="&lt;b&gt;STEP 1&lt;/b&gt;&lt;br&gt;&lt;br&gt;대본 붙여넣기" vertex="1">
+          <mxGeometry height="434" width="206" x="1000" y="704" as="geometry" />
+        </mxCell>
+        <mxCell id="f4c1" parent="1" style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#FBF9F4;strokeColor=#DCD6CB;fontSize=10;fontColor=#8A8377;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;" value="&lt;b&gt;STEP 2&lt;/b&gt;" vertex="1">
+          <mxGeometry height="434" width="206" x="1218" y="704" as="geometry" />
+        </mxCell>
+        <mxCell id="f4c2" parent="1" style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#FBF9F4;strokeColor=#DCD6CB;fontSize=10;fontColor=#8A8377;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;" value="&lt;b&gt;STEP 3&lt;/b&gt;" vertex="1">
+          <mxGeometry height="434" width="206" x="1436" y="704" as="geometry" />
+        </mxCell>
+        <mxCell id="f4c3" parent="1" style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#FBF9F4;strokeColor=#DCD6CB;fontSize=10;fontColor=#8A8377;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;" value="&lt;b&gt;STEP 4&lt;/b&gt;&lt;br&gt;&lt;br&gt;대본 ↔ 키 비주얼" vertex="1">
+          <mxGeometry height="434" width="206" x="1654" y="704" as="geometry" />
+        </mxCell>
+        <mxCell id="f4dim" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1C1A17;strokeColor=none;opacity=62;" value="" vertex="1">
+          <mxGeometry height="496" width="896" x="982" y="662" as="geometry" />
+        </mxCell>
+        <mxCell id="f4haloA" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=none;opacity=25;" value="" vertex="1">
+          <mxGeometry height="150" width="206" x="1218" y="726" as="geometry" />
+        </mxCell>
+        <mxCell id="f4haloB" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=none;opacity=25;" value="" vertex="1">
+          <mxGeometry height="150" width="206" x="1436" y="726" as="geometry" />
+        </mxCell>
+        <mxCell id="f4spA" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#C4553B;strokeWidth=2;fontSize=9;fontColor=#4A443A;align=left;spacingLeft=10;verticalAlign=top;spacingTop=8;" value="S01   극장 분장실 · 밤&#xa;dim dressing room, one bulb&#xa;over a cracked mirror&#xa;&#xa;S02   극장 분장실 · 밤&#xa;hand frozen mid-air" vertex="1">
+          <mxGeometry height="106" width="190" x="1226" y="736" as="geometry" />
+        </mxCell>
+        <mxCell id="f4spB" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#F7F4EE;strokeColor=#C4553B;strokeWidth=2;fontSize=9;fontColor=#4A443A;align=left;spacingLeft=10;verticalAlign=top;spacingTop=8;" value="✓   S01   24s&#xa;✓   S02   22s&#xa;⚠   S03   503 실패&#xa;●   S04   생성 중  38%&#xa;○   S05   대기" vertex="1">
+          <mxGeometry height="106" width="190" x="1444" y="736" as="geometry" />
+        </mxCell>
+        <mxCell id="f4lblA" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=10;fontColor=#FFFFFF;fontStyle=1;" value="문장 모델   ·   맡긴다" vertex="1">
+          <mxGeometry height="18" width="190" x="1226" y="850" as="geometry" />
+        </mxCell>
+        <mxCell id="f4lblB" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=10;fontColor=#FFFFFF;fontStyle=1;" value="그림 모델   ·   우리가 띄운다" vertex="1">
+          <mxGeometry height="18" width="190" x="1444" y="850" as="geometry" />
+        </mxCell>
+        <mxCell id="f4tri" parent="1" style="triangle;direction=north;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=none;" value="" vertex="1">
+          <mxGeometry height="14" width="18" x="1180" y="906" as="geometry" />
+        </mxCell>
+        <mxCell id="f4tt" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=none;shadow=1;" value="" vertex="1">
+          <mxGeometry height="160" width="320" x="1029" y="920" as="geometry" />
+        </mxCell>
+        <mxCell id="f4n" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#C4553B;fontStyle=1;" value="4 / 4" vertex="1">
+          <mxGeometry height="16" width="100" x="1051" y="940" as="geometry" />
+        </mxCell>
+        <mxCell id="f4h" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=15;fontStyle=1;fontColor=#1C1A17;" value="직접 들 것만 직접 든다" vertex="1">
+          <mxGeometry height="24" width="280" x="1051" y="962" as="geometry" />
+        </mxCell>
+        <mxCell id="f4p" parent="1" style="text;whiteSpace=wrap;html=1;fillColor=none;strokeColor=none;align=left;verticalAlign=top;fontSize=12;fontColor=#4A443A;" value="문장을 다루는 모델은 맡기고,&#xa;그림 모델만 우리가 띄웁니다.&#xa;두 종류가 같이 도는데 관리하는 것은 하나입니다." vertex="1">
+          <mxGeometry height="60" width="280" x="1051" y="992" as="geometry" />
+        </mxCell>
+        <mxCell id="f4btn" parent="1" style="rounded=1;arcSize=30;whiteSpace=wrap;html=1;fillColor=#C4553B;strokeColor=none;fontColor=#FFFFFF;fontSize=11;fontStyle=1;align=center;verticalAlign=middle;" value="시작하기" vertex="1">
+          <mxGeometry height="28" width="88" x="1243" y="1040" as="geometry" />
+        </mxCell>
+        <mxCell id="f4skip" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#8A8377;" value="다시 보지 않기" vertex="1">
+          <mxGeometry height="28" width="100" x="1051" y="1040" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

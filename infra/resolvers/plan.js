@@ -55,5 +55,28 @@ export function request(ctx) {
 export function response(ctx) {
   // Event 호출이라 ctx.error 는 Lambda 안에서 난 오류가 아니라 띄우는 데 실패한 것이다
   if (ctx.error) util.error(ctx.error.message, ctx.error.type)
+<<<<<<< HEAD
   return { jobId: ctx.stash.jobId, status: 'pending' }
+=======
+  const { statusCode, body } = ctx.result
+  if (statusCode !== 200) util.error(`Bedrock ${statusCode}: ${body}`, 'BedrockError')
+
+  // body 는 Bedrock 이 준 HTTP 응답 본문, 즉 진짜 문자열이다. 이 parse 는 맞다.
+  const out = JSON.parse(body)
+  const content = (out.output && out.output.message && out.output.message.content) || []
+  let text = ''
+  for (const c of content) if (typeof c.text === 'string') text += c.text
+  /*
+   * 객체를 그대로 돌려준다. JSON.stringify 를 하면 안 된다.
+   *
+   * 이 필드는 AWSJSON 이고 그 스칼라는 값을 스스로 직렬화한다. 여기서 문자열로
+   * 만들어 주면 그 문자열을 한 번 더 감싸서 이중 인코딩된다. 그러면 net.js 의
+   * JSON.parse 한 번으로는 객체가 아니라 문자열이 나오고, .text 가 undefined 가
+   * 되어 화면에는 「프롬프트를 읽지 못했습니다」로 보인다 — 모델은 정상 응답했는데도.
+   *
+   * 요청 쪽의 함정과 뿌리가 같다: AWSJSON 은 경계에서 알아서 변환한다.
+   * 들어올 때 이미 파싱되어 있고, 나갈 때 알아서 직렬화한다. 양쪽 다 손대지 않는다.
+   */
+  return { text, usage: out.usage, stop: out.stopReason }
+>>>>>>> origin/main
 }

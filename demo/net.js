@@ -365,6 +365,15 @@ class Realtime {
     for (const s of this.subs) s.acked = false
     this.h.onStatus('down')
     const wait = Math.min(8000, 400 * 2 ** this.tries++)
+    /*
+     * 첫 connection_ack 전에도 계속 닫히는 경우가 있다 — 만료된 토큰, 네트워크.
+     * ready() 는 ack 에서만 resolve 하므로 그대로 두면 호출자가 영구히 매달린다.
+     * reject 가 아니라 미해결이라서 try/catch 도 잡지 못한다 — key-visual 화면이
+     * 그 상태로 끝까지 비어 있었다. 몇 번 실패하면 일단 진행시킨다. 연결이 늦게
+     * 열려도 구독은 그때 붙고, 그동안 onStatus('down') 이 화면에 상태를 알린다.
+     * tries 는 ack 에서 0 으로 돌아가므로 연결된 뒤의 재시도에는 영향이 없다.
+     */
+    if (this.tries > 3) this.resolveFirst()
     this.retryTimer = setTimeout(() => {
       this.closed = false
       this.open()
