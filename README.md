@@ -219,7 +219,9 @@ aws ec2 stop-instances  --instance-ids "$GPU"   # off
 aws ec2 start-instances --instance-ids "$GPU"   # on
 ```
 
-<<<<<<< HEAD
+A manual start does not disable the schedule: the next 20:00 rule still stops it. To keep it up
+overnight, disable the `GpuOff` schedule as well.
+
 **Stop the graph database too.** Neptune runs on a provisioned instance (`db.t4g.medium` by default),
 so it bills by the hour whether or not anyone queries it. Stopping keeps the data and the endpoint —
 `start.sh` brings back the same cluster, and neither the graph Lambda nor the AppSync resolvers need
@@ -230,7 +232,7 @@ bash scripts/stop.sh    # stop  — takes a few minutes
 bash scripts/start.sh   # start — the graph Lambda errors until the status is `available`
 ```
 
-Both default to cluster `storyboarddemo-graph` in `us-east-1`; override with `SB_NEPTUNE_CLUSTER`
+Both default to cluster `storyboarddemo-graph` in `ap-northeast-2`; override with `SB_NEPTUNE_CLUSTER`
 and `AWS_REGION` if you deployed the stack under another name or region.
 
 > **Neptune restarts a stopped cluster by itself after 7 days.** That is an AWS limit, not something
@@ -243,13 +245,7 @@ A bigger instance takes no code change:
 npx cdk deploy --context neptuneInstance=db.r6g.large
 ```
 
-Tear everything down: `npx cdk destroy`
-=======
-A manual start does not disable the schedule: the next 20:00 rule still stops it. To keep it up
-overnight, disable the `GpuOff` schedule as well.
-
 Tear everything down: `npx cdk destroy` — then delete the volume above.
->>>>>>> origin/main
 
 ## Using it
 

@@ -38,7 +38,6 @@ const GPU_TYPE = 'g6e.2xlarge'
 // "성공했을 것"이라고 답한다. 문법만 검사하며 가용성도 용량도 보지 않는다.
 const GPU_AZS = ['ap-northeast-2a', 'ap-northeast-2b']
 const MODEL = 'chroma'
-const CF_ORIGINS = 'pl-3b927c52'
 const NEPTUNE_VERSION = '1.3.4.0'
 const NEPTUNE_PORT = 8182
 // 데모용 기본 인스턴스 클래스. --context neptuneInstance=db.r6g.large 로 덮어쓴다
@@ -313,9 +312,26 @@ class StoryboardStack extends Stack {
       httpTokens: ec2.LaunchTemplateHttpTokens.REQUIRED,
     })
 
+    /*
+     * GPU 를 놓을 퍼블릭 서브넷. AZ 는 GPU_AZS 순서로 실제 있는 것을 고른다.
+     *
+     * availabilityZones 를 곧바로 [GPU_AZS[0]] 으로 박으면 안 된다. cdk 가 VPC 를 아직
+     * 조회하지 못한 첫 합성 패스에서는 더미 VPC(AZ 가 dummy1a/dummy1b)가 오고, AZ 로
+     * 걸러진 선택 결과가 비어 버린다. ec2.Instance 는 넘긴 subnetType 이 아니라 *선택
+     * 결과*로 검사하므로(hasPublic = subnets.some(…)) 빈 선택은 퍼블릭이 아닌 것으로
+     * 보고 "To set 'associatePublicIpAddress: true' you must select Public subnets" 로
+     * 죽는다 — 조회가 끝나기 전에 죽어서 두 번째 패스로 넘어가지 못한다.
+     * 리전을 옮기면 조회 캐시(cdk.context.json)가 리전별이라 반드시 이 경로를 지난다.
+     */
+    const publicAzs = net.selectSubnets({ subnetType: ec2.SubnetType.PUBLIC }).availabilityZones
+    const gpuAz = GPU_AZS.find((az) => publicAzs.includes(az))
+    const gpuSubnets = gpuAz
+      ? { subnetType: ec2.SubnetType.PUBLIC, availabilityZones: [gpuAz] }
+      : { subnetType: ec2.SubnetType.PUBLIC }
+
     const gpu = new ec2.Instance(this, 'Gpu', {
       vpc: net,
-      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC, availabilityZones: [GPU_AZS[0]] },
+      vpcSubnets: gpuSubnets,
       instanceType: new ec2.InstanceType(GPU_TYPE),
       machineImage: ec2.MachineImage.fromSsmParameter(
         '/aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-22.04/latest/ami-id',

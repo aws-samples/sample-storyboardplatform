@@ -6,11 +6,7 @@ const HERE = path.dirname(new URL(import.meta.url).pathname)
 const OUT = path.join(HERE, '..', '..', 'demo', 'seed-art.js')
 const PW = process.env.SB_PW
 if (!PW) { console.error('SB_PW 환경변수에 u2 계정 비밀번호를 넣어주세요.'); process.exit(1) }
-<<<<<<< HEAD
-const REGION = 'ap-northeast-2'
-=======
 const REGION = process.env.SB_REGION || 'ap-northeast-2'
->>>>>>> origin/main
 
 const out = JSON.parse(fs.readFileSync(process.argv[2] || '/tmp/sb-out.json', 'utf8')).StoryboardDemo
 const { Url: url, UserPoolId: pool, ClientId: client } = out
