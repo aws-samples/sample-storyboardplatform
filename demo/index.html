@@ -277,6 +277,10 @@ dialog#keys::backdrop { background: rgba(20,18,16,.62); }
   flex: 1 1 auto; min-height: 0;
   display: grid; grid-template-columns: 288px minmax(0,1fr) 344px;
 }
+/* 준비 중 안내를 띄울 때 보드 전체를 접는다 (display:grid 가 [hidden] 보다 세다) */
+.work[hidden] { display: none !important; }
+/* 탭 바 자리. 모양은 nav-tabs.js 가 두 화면에 같이 넣어 준다 */
+#navMount { flex: 0 0 auto; }
 .pane { min-height: 0; overflow: auto; }
 .pane--script {
   background: var(--table-deep); color: #D9D3C7;
@@ -901,7 +905,7 @@ dialog.plan { width: min(680px, 95vw); }
 @media print {
   @page { margin: 12mm; }
   body { display: block; overflow: visible; height: auto; background: #fff; }
-  .slate, .pane--script, .pane--detail, .cursors, .toasts, .gate, .vwrap,
+  .slate, .navbar, .soonpage, .pane--script, .pane--detail, .cursors, .toasts, .gate, .vwrap,
   .adder, .cut__zoom, .tl, .adm { display: none !important; }
   .work { display: block; }
   .pane { overflow: visible; height: auto; min-height: 0; }
@@ -960,6 +964,9 @@ dialog.plan { width: min(680px, 95vw); }
   </div>
 </header>
 
+<!-- 상단 기능 탭. 탭 바 자체는 nav-tabs.js 가 두 화면에 같은 모양으로 그려 준다 -->
+<div id="navMount"></div>
+
 <main class="work">
   <aside class="pane pane--script">
     <h2 class="mono h">인물 <span class="count" id="charCount"></span></h2>
@@ -970,6 +977,9 @@ dialog.plan { width: min(680px, 95vw); }
     <ul class="nav" id="boardNav"></ul>
     <button class="btn btn--line btn--wide" id="planBtn" aria-haspopup="dialog" aria-expanded="false" hidden
             title="프롬프트로 이야기·인물·컷을 기획합니다">+ 이야기 기획</button>
+    <a class="btn btn--ghost btn--wide" id="graphBtn" href="./story-graph.html" target="_blank" rel="noopener" hidden
+       style="display:block; margin-top:6px; text-align:center; text-decoration:none"
+       title="대본에서 관계 그래프를 뽑고, 씨앗과 분기를 봅니다">관계 그래프로 디벨롭 ↗</a>
 
     <div id="scriptBlock">
       <h2 class="mono h" style="margin-top:22px">시나리오</h2>
@@ -999,6 +1009,9 @@ dialog.plan { width: min(680px, 95vw); }
 
   <aside class="pane pane--detail" id="detail"></aside>
 </main>
+
+<!-- 아직 화면이 없는 탭(대본 번역 · 키비주얼)을 눌렀을 때 보드 대신 나오는 자리 -->
+<section class="soonpage" id="soon" hidden></section>
 
 <div class="vwrap" id="viewer" hidden></div>
 <div class="gate" id="gate" hidden></div>

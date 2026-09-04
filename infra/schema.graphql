@@ -24,14 +24,37 @@ type Presence {
   body: String!
 }
 
+# plan 을 띄웠다는 접수증. 결과는 여기 없다 — planResult 로 받아 간다.
+type PlanJob {
+  jobId: ID!
+  status: String!
+}
+
 type Query {
   listOps(boardId: ID!, since: String, nextToken: String): OpPage!
-  plan(spec: AWSJSON!): AWSJSON!
+
+  # plan 결과 한 건. 아직 끝나지 않았으면 {status:"pending"} 이 온다.
+  # 끝났으면 {status:"done", text, usage, stop}, 실패했으면 {status:"error", error}.
+  # 잡을 띄운 사람만 읽을 수 있다.
+  planResult(jobId: ID!): AWSJSON!
+
+  # 관계 그래프. Neptune 을 도는 Lambda 가 받는다.
+  # loadGraph 는 {nodes, edges}, queryGraph 는 spec.type 에 따라 모양이 달라진다.
+  loadGraph(projectId: String): AWSJSON!
+  queryGraph(spec: AWSJSON!): AWSJSON!
 }
 
 type Mutation {
   publishOp(boardId: ID!, id: ID!, ts: String!, actor: ID!, body: String!): Op!
   publishPresence(boardId: ID!, actor: ID!, body: String!): Presence!
+
+  # plan 은 Query 가 아니라 Mutation 이다. AppSync 요청 실행 시간 상한이 30초(변경 불가)라서
+  # 느린 모델을 동기로 기다릴 수 없다 — Lambda 를 Event 로 띄우고 jobId 만 즉시 돌려준다.
+  plan(spec: AWSJSON!): PlanJob!
+
+  # saveGraph 는 프로젝트를 통째로 덮어쓰고, updateGraph 는 역기입 한 묶음을 얹는다
+  saveGraph(spec: AWSJSON!): AWSJSON!
+  updateGraph(spec: AWSJSON!): AWSJSON!
 }
 
 type Subscription {

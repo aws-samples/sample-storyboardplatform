@@ -3,7 +3,9 @@ import { login, setNewPassword } from './auth.js'
 import { setHtml } from './dom.js'
 
 const DEMO_PW = window.SB_CONFIG?.demoPw || ''
-const DEMO = [
+
+/** 데모 계정. story-graph.html 의 로그인 문도 같은 목록을 쓴다 */
+export const DEMO_USERS = [
   { id: 'u1', name: '김하나', role: '기획', job: '시나리오를 컷으로 쪼갠다', color: '#E3A93C' },
   { id: 'u2', name: '이도현', role: '아티스트', job: '구도를 그리고 올린다', color: '#4FA97A' },
   { id: 'u3', name: '박서준', role: '감독', job: '피드백하고 승인한다', color: '#7FB3E8' },
@@ -13,7 +15,7 @@ const DEMO = [
 const DEMO_BLOCK = `
   <span class="lf__label">데모 계정 — 눌러서 바로 들어가기</span>
   <div class="gate__list">
-    ${DEMO.map((u) => `
+    ${DEMO_USERS.map((u) => `
       <button class="gate__who" type="button" data-demo="${u.id}">
         <span class="gate__dot" style="background:${u.color}"></span>
         <span>

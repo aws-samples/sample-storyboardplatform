@@ -1,0 +1,1634 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Story Graph · 대본에서 씨앗과 분기까지</title>
+<style>
+  /* 밝은 톤 한 벌. 색·그림자·둥근 정도를 여기 변수로 모아 둔다 */
+  :root {
+    --bg: #F5F3EF;
+    --bg-soft: #FAFAF8;
+    --panel: #FFFFFF;
+    --ink: #1F2430;
+    --ink2: #565E70;
+    --ink3: #8A92A6;
+    --line: #E9E5DE;
+    --line2: #EDEFF4;
+    --acc: #6366F1;
+    --acc-ink: #4338CA;
+    --acc-soft: #EEF0FF;
+    --ok: #0F9D6E;
+    --ok-ink: #0B7355;
+    --ok-soft: #E9F9F2;
+    --warn: #B45309;
+    --warn-soft: #FFF7E8;
+    --bad: #DC2626;
+    --bad-soft: #FEF1F1;
+    --sh1: 0 1px 2px rgba(26,34,60,.04), 0 4px 20px rgba(26,34,60,.08);
+    --sh2: 0 10px 34px rgba(26,34,60,.14);
+    --r: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  [hidden] { display: none !important; }
+  body {
+    font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+    background: var(--bg); color: var(--ink);
+    font-size: 15px; line-height: 1.7; letter-spacing: -.005em;
+    height: 100vh; overflow: hidden; -webkit-font-smoothing: antialiased;
+  }
+  /* 줄: 위 띠 · 기능 탭 바 · 내용 */
+  .app { display: grid; grid-template-columns: 1fr 468px; grid-template-rows: 66px auto 1fr; height: 100vh; }
+  /* 탭 바와 준비 중 안내는 두 칸을 다 쓴다. 탭 바 모양은 nav-tabs.js 가 들고 있다 */
+  #navMount, .soonpage { grid-column: 1 / -1; min-width: 0; }
+  #navMount { z-index: 19; }
+
+  /* ── 위 띠 ─────────────────────────────────────────────────────────────── */
+  .topbar {
+    grid-column: 1 / -1; background: rgba(255,255,255,.88); backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line); display: flex; align-items: center;
+    padding: 0 22px; gap: 10px; box-shadow: 0 1px 12px rgba(26,34,60,.05); z-index: 20;
+  }
+  .topbar h1 {
+    font-size: 19px; font-weight: 800; letter-spacing: -.02em; margin-right: 8px;
+    background: linear-gradient(120deg, #4F46E5, #14B8A6);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .badge {
+    font-size: 13px; font-weight: 600; background: var(--bg-soft); border: 1px solid var(--line);
+    border-radius: 999px; padding: 5px 12px; color: var(--ink3); white-space: nowrap;
+  }
+  .badge--live { background: var(--ok-soft); border-color: #B6E8D4; color: var(--ok-ink); }
+  .who { font-size: 14px; font-weight: 700; color: var(--ink2); white-space: nowrap; }
+  .grow { flex: 1; }
+  .graph-area { position: relative; overflow: hidden; background: var(--bg); }
+  .sidebar { background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; overflow: hidden; }
+  #network { width: 100%; height: 100%; }
+
+  /* ── 버튼 · 입력 ────────────────────────────────────────────────────────── */
+  button { font-family: inherit; }
+  .btn {
+    padding: 12px 17px; background: linear-gradient(180deg, #7174F5, #5457E5);
+    border: none; border-radius: 11px; color: #fff; font-size: 14.5px; font-weight: 700;
+    letter-spacing: -.01em; cursor: pointer; box-shadow: 0 2px 10px rgba(84,87,229,.26);
+    transition: transform .14s, box-shadow .14s, filter .14s;
+  }
+  .btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(84,87,229,.32); }
+  .btn:active:not(:disabled) { transform: translateY(0); filter: brightness(.97); }
+  .btn:disabled { opacity: .45; cursor: default; box-shadow: none; }
+  .btn--line {
+    background: #fff; border: 1.5px solid var(--line2); color: var(--ink2);
+    font-weight: 600; box-shadow: 0 1px 2px rgba(26,34,60,.04);
+  }
+  .btn--line:hover:not(:disabled) { border-color: #C7CBF6; color: var(--acc-ink); background: var(--acc-soft); }
+  .btn--wide { width: 100%; }
+  .btn--mini { padding: 8px 12px; font-size: 13px; border-radius: 9px; }
+
+  textarea, select, input[type="text"], input[type="password"] {
+    width: 100%; background: #fff; border: 1.5px solid var(--line2); border-radius: 12px;
+    color: var(--ink); font-family: inherit; font-size: 15px; line-height: 1.7; padding: 11px 13px;
+    transition: border-color .14s, box-shadow .14s;
+  }
+  textarea { resize: vertical; }
+  textarea:focus, select:focus, input:focus {
+    outline: none; border-color: var(--acc); box-shadow: 0 0 0 4px rgba(99,102,241,.12);
+  }
+  textarea::placeholder { color: #AEB4C4; }
+
+  /* ── 모델 고르기 ────────────────────────────────────────────────────────────
+     이 화면의 모든 Bedrock 호출(추출·요약·분기·대본)이 여기서 고른 모델로 간다.
+     이름은 infra/resolvers/plan.js 의 MODELS 키와 짝이 맞아야 한다. */
+  .model-pick { margin-bottom: 13px; }
+  .model-pick label {
+    display: block; font-size: 12px; font-weight: 800; color: var(--ink3);
+    text-transform: uppercase; letter-spacing: .07em; margin-bottom: 6px;
+  }
+  .model-pick select {
+    font-size: 13.5px; line-height: 1.5; padding: 9px 11px; border-radius: 11px;
+    cursor: pointer; font-weight: 600; color: var(--ink);
+  }
+  .model-pick select:disabled { background: var(--bg-soft); color: var(--ink3); cursor: default; }
+  .model-pick .hint { margin-top: 6px; font-size: 12.5px; }
+
+  /* ── 그래프 위에 얹는 카드 ─────────────────────────────────────────────── */
+  .card {
+    position: absolute; z-index: 5; background: rgba(255,255,255,.94); backdrop-filter: blur(10px);
+    border: 1px solid rgba(233,229,222,.9); border-radius: 18px; padding: 17px; box-shadow: var(--sh1);
+  }
+  .card h3 {
+    font-size: 12.5px; font-weight: 800; color: var(--ink3); text-transform: uppercase;
+    letter-spacing: .08em; margin-bottom: 11px; display: flex; align-items: center; gap: 8px;
+  }
+  .card--input { top: 18px; left: 18px; width: 392px; }
+  .card--input.drop { border-color: var(--acc); box-shadow: 0 0 0 5px var(--acc-soft), var(--sh2); }
+  .card--node { bottom: 18px; left: 18px; width: 392px; max-height: 48%; overflow-y: auto; }
+  .card__row { display: flex; gap: 9px; margin-top: 12px; }
+
+  .hint { font-size: 13.5px; color: var(--ink3); line-height: 1.7; margin-top: 9px; }
+  .warn { font-size: 14px; color: var(--warn); line-height: 1.7; margin-top: 9px; }
+  .err { font-size: 14.5px; color: var(--bad); line-height: 1.7; margin-top: 9px; font-weight: 500; }
+  .ok { font-size: 14.5px; color: var(--ok-ink); line-height: 1.7; margin-top: 9px; font-weight: 600; }
+
+  .legend {
+    position: absolute; z-index: 5; right: 18px; bottom: 18px; display: flex; flex-wrap: wrap;
+    gap: 8px 15px; max-width: 400px; justify-content: flex-end; align-items: center;
+    background: rgba(255,255,255,.92); backdrop-filter: blur(8px); border: 1px solid var(--line);
+    border-radius: 999px; padding: 11px 18px; box-shadow: var(--sh1);
+  }
+  .legend span { font-size: 13px; font-weight: 600; color: var(--ink2); display: flex; align-items: center; gap: 6px; }
+  .legend i {
+    width: 13px; height: 13px; border-radius: 50%; display: inline-block;
+    background: radial-gradient(circle at 33% 28%, rgba(255,255,255,.9), var(--c) 58%, rgba(0,0,0,.18));
+    box-shadow: 0 2px 4px rgba(26,34,60,.22);
+  }
+  .legend i.line { width: 18px; height: 0; border-radius: 0; background: none; box-shadow: none; border-top: 2px solid #79839E; }
+  .legend i.dash { width: 18px; height: 0; border-radius: 0; background: none; box-shadow: none; border-top: 2px dashed #A9B0C4; }
+  .canvas-msg {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    text-align: center; color: var(--ink3); font-size: 15.5px; line-height: 2; padding: 48px; pointer-events: none;
+  }
+  .canvas-msg b { color: var(--acc-ink); }
+
+  .kv { display: grid; grid-template-columns: 62px 1fr; gap: 5px 12px; font-size: 14.5px; }
+  .kv .k { color: var(--ink3); font-weight: 600; }
+  .kv .v { color: var(--ink); word-break: break-all; }
+  .edge-line { font-size: 14px; color: var(--ink2); line-height: 1.85; }
+  .edge-line b { color: var(--acc-ink); font-weight: 700; }
+  .edge-line.der { color: var(--ink3); }
+
+  /* ── 사이드바 ───────────────────────────────────────────────────────────── */
+  .stats-bar {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 16px 18px;
+    border-bottom: 1px solid var(--line2); background: var(--panel); flex-shrink: 0;
+  }
+  .stat { background: var(--bg-soft); border: 1px solid var(--line2); border-radius: 13px; padding: 11px 12px; }
+  .stat .n { font-size: 27px; font-weight: 800; line-height: 1.15; letter-spacing: -.03em; color: var(--ink); }
+  .stat .l { font-size: 12.5px; font-weight: 600; color: var(--ink3); margin-top: 3px; }
+
+  .tabs { display: flex; gap: 7px; padding: 12px 14px; border-bottom: 1px solid var(--line2); background: var(--panel); flex-shrink: 0; }
+  .tab {
+    padding: 10px 18px; font-size: 15px; font-weight: 700; cursor: pointer; color: var(--ink3);
+    border-radius: 11px; transition: all .15s; user-select: none;
+  }
+  .tab:hover { color: var(--ink); background: var(--bg-soft); }
+  .tab.active { color: var(--acc-ink); background: var(--acc-soft); }
+  .panel { display: none; flex-direction: column; overflow: hidden; flex: 1; }
+  .panel.active { display: flex; }
+  .panel-scroll { overflow-y: auto; flex: 1; padding: 18px; }
+  .panel-scroll::-webkit-scrollbar { width: 9px; }
+  .panel-scroll::-webkit-scrollbar-track { background: transparent; }
+  .panel-scroll::-webkit-scrollbar-thumb { background: #DDE1EA; border: 3px solid #fff; border-radius: 999px; }
+  .panel-scroll::-webkit-scrollbar-thumb:hover { background: #C6CCDA; }
+
+  /* ── 씨앗 카드 ──────────────────────────────────────────────────────────── */
+  .seed-card {
+    background: #fff; border: 1.5px solid var(--line2); border-radius: 17px; margin-bottom: 14px;
+    box-shadow: var(--sh1); overflow: hidden;
+    transition: transform .16s, box-shadow .16s, border-color .16s;
+  }
+  .seed-card:hover { transform: translateY(-2px); box-shadow: var(--sh2); }
+  .seed-card.on { border-color: var(--acc); box-shadow: 0 0 0 4px var(--acc-soft), var(--sh2); }
+  /* 탐지기별 파스텔 그라디언트 머리. --p1/--p2/--pi 는 JS 가 씨앗마다 꽂아 준다 */
+  .seed-head {
+    display: flex; align-items: center; gap: 10px; padding: 13px 15px;
+    background: linear-gradient(135deg, var(--p1, #E9EAFB), var(--p2, #F6F7FE));
+    border-bottom: 1px solid rgba(255,255,255,.7);
+  }
+  .probe-tag {
+    font-size: 13px; font-weight: 800; letter-spacing: -.01em; color: var(--pi, var(--acc-ink));
+    background: rgba(255,255,255,.75); border-radius: 999px; padding: 6px 13px; white-space: nowrap;
+  }
+  .seed-score { margin-left: auto; font-size: 14px; font-weight: 800; color: var(--pi, var(--acc-ink)); }
+  /* 역기입 뒤에 새로 나온 씨앗. 판의 새 노드·엣지와 같은 녹색을 쓴다 (graph-view.js) */
+  .seed-card.is-new { border-color: #4CAF50; box-shadow: 0 0 0 4px rgba(76,175,80,.15), var(--sh1); }
+  .seed-new-tag {
+    display: flex; align-items: center; gap: 6px; padding: 7px 15px;
+    background: #4CAF50; color: #fff; font-size: 12.5px; font-weight: 800; letter-spacing: -.01em;
+  }
+  .seed-new-tag::before { content: '✦'; font-size: 11px; }
+  .new-badge {
+    font-size: 10.5px; font-weight: 800; letter-spacing: .04em; color: #fff;
+    background: #4CAF50; border-radius: 999px; padding: 4px 9px; line-height: 1;
+  }
+  .seed-body { padding: 15px 16px 16px; }
+  .seed-title { font-size: 19px; font-weight: 800; line-height: 1.45; letter-spacing: -.02em; color: var(--ink); margin-bottom: 9px; cursor: pointer; }
+  .seed-title:hover { color: var(--acc-ink); }
+  .seed-rationale { font-size: 15.5px; color: var(--ink2); line-height: 1.75; margin-bottom: 11px; }
+  .seed-focus { font-size: 13.5px; color: var(--ink3); margin-bottom: 14px; }
+
+  /* ── 스토리 · 분기 ──────────────────────────────────────────────────────── */
+  .story-content { font-size: 15.5px; line-height: 1.75; padding-bottom: 26px; }
+  .story-content h1 { font-size: 25px; font-weight: 800; letter-spacing: -.03em; line-height: 1.35; margin-bottom: 12px; }
+  .seed-info {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 9px;
+    background: linear-gradient(135deg, var(--p1, #EEF0FF), var(--p2, #F7F8FF));
+    border: 1px solid rgba(255,255,255,.8); border-radius: 14px; padding: 13px 15px;
+    margin-bottom: 16px; font-size: 14px; color: var(--ink2); line-height: 1.6;
+  }
+  .logline { color: var(--ink2); font-size: 16.5px; line-height: 1.8; margin-bottom: 16px; }
+  .pivot-box {
+    background: var(--warn-soft); border: 1px solid #F5DFB4; border-radius: 14px;
+    padding: 14px 16px; margin-bottom: 16px; font-size: 15px; line-height: 1.75;
+  }
+  .pivot-box .ttl { color: #92400E; font-weight: 800; font-size: 15.5px; display: block; margin-bottom: 5px; }
+  .pivot-box .bd { color: var(--ink2); }
+
+  .branch-chips { display: grid; grid-template-columns: repeat(auto-fit, minmax(98px, 1fr)); gap: 10px; margin-bottom: 18px; }
+  .branch-chip {
+    background: #fff; border: 1.5px solid var(--line2); border-radius: 15px; padding: 13px 10px;
+    text-align: center; cursor: pointer; font-size: 13.5px; font-weight: 600; color: var(--ink2);
+    line-height: 1.45; box-shadow: var(--sh1); transition: all .15s;
+  }
+  .branch-chip:hover { transform: translateY(-2px); border-color: #C7CBF6; color: var(--ink); box-shadow: var(--sh2); }
+  .branch-chip.on {
+    border-color: var(--acc); background: var(--acc-soft); color: var(--acc-ink);
+    box-shadow: 0 0 0 4px rgba(99,102,241,.13), var(--sh2);
+  }
+  .branch-chip .bid { display: block; font-size: 23px; font-weight: 800; letter-spacing: -.02em; color: var(--ink); margin-bottom: 3px; }
+  .branch-chip.on .bid { color: var(--acc-ink); }
+
+  .branch-head { font-size: 22px; font-weight: 800; letter-spacing: -.025em; line-height: 1.4; margin-bottom: 7px; }
+  .branch-tone {
+    display: inline-block; font-size: 13px; font-weight: 700; background: var(--bg-soft);
+    border: 1px solid var(--line2); border-radius: 999px; padding: 4px 12px; color: var(--ink2); margin-bottom: 11px;
+  }
+  .branch-premise {
+    font-size: 15.5px; color: var(--ink2); line-height: 1.8; margin-bottom: 16px;
+    padding: 2px 0 2px 14px; border-left: 3px solid #D9DCFB;
+  }
+
+  .beats { margin-bottom: 16px; }
+  .beat { display: flex; gap: 12px; font-size: 15.5px; color: var(--ink); line-height: 1.75; margin-bottom: 12px; }
+  .beat .no {
+    flex-shrink: 0; width: 25px; height: 25px; margin-top: 2px; border-radius: 9px;
+    background: var(--acc-soft); color: var(--acc-ink); font-size: 13px; font-weight: 800;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  .sec-label {
+    font-size: 12.5px; font-weight: 800; color: var(--ink3); text-transform: uppercase;
+    letter-spacing: .09em; margin: 24px 0 11px;
+  }
+  .outcome { display: grid; grid-template-columns: 88px 1fr; gap: 4px 12px; font-size: 15px; margin-bottom: 8px; }
+  .outcome .k { color: var(--ink3); font-weight: 700; }
+  .outcome .v { color: var(--ink); }
+
+  .wb-box { background: var(--ok-soft); border: 1px solid #BFE9D8; border-radius: 14px; padding: 13px 15px; font-size: 14px; line-height: 1.75; }
+  .wb-box .item { color: var(--ink2); padding: 2px 0; }
+  .wb-box .item::before { content: "+ "; color: var(--ok); font-weight: 800; }
+  .wb-box .item.cut::before { content: "− "; color: var(--bad); }
+  .wb-box .item.cut { color: var(--ink3); text-decoration: line-through; }
+  .wb-box .item .p { color: var(--acc-ink); font-weight: 600; }
+  .wb-box .item .nt { color: var(--ink3); font-size: 12.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+  .wb-sum { font-size: 14.5px; color: var(--ink2); margin-bottom: 9px; }
+  .wb-sum b { color: var(--ok-ink); font-weight: 800; }
+  .wb-sum i { color: var(--bad); font-style: normal; font-weight: 800; }
+
+  .free-box { background: var(--bg-soft); border: 1.5px dashed #DCD8CF; border-radius: 16px; padding: 17px; margin-top: 20px; }
+  .free-box h4 { font-size: 15.5px; font-weight: 800; color: var(--ink); margin-bottom: 9px; }
+
+  .placeholder { text-align: center; color: var(--ink3); padding: 30px 18px; font-size: 15px; line-height: 1.95; }
+  .placeholder b { color: var(--acc-ink); }
+  .load-error { padding: 26px; color: var(--bad); font-size: 15px; line-height: 1.9; }
+  .spin {
+    display: inline-block; width: 15px; height: 15px; border: 2.5px solid var(--line2);
+    border-top-color: var(--acc); border-radius: 50%; animation: sp .7s linear infinite; vertical-align: -2px;
+  }
+  @keyframes sp { to { transform: rotate(360deg) } }
+  .busy { display: flex; align-items: center; gap: 10px; color: var(--ink2); font-size: 15px; font-weight: 600; padding: 20px 4px; }
+
+  .cmp { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; margin-top: 8px; border-radius: 12px; overflow: hidden; border: 1px solid var(--line2); }
+  .cmp th { background: var(--bg-soft); color: var(--ink2); padding: 9px 10px; border-bottom: 1px solid var(--line2); font-weight: 700; text-align: left; }
+  .cmp tr > th:first-child { white-space: nowrap; color: var(--ink3); }
+  .cmp td { padding: 9px 10px; border-bottom: 1px solid var(--line2); color: var(--ink2); vertical-align: top; line-height: 1.6; }
+  .cmp tr:last-child td, .cmp tr:last-child th { border-bottom: none; }
+  .cmp td.on { background: var(--acc-soft); color: var(--acc-ink); font-weight: 600; }
+  details.warns { margin-top: 14px; font-size: 14px; color: var(--warn); }
+  details.warns summary { cursor: pointer; font-weight: 700; }
+  details.warns ul { margin: 8px 0 0 18px; color: var(--ink2); line-height: 1.75; }
+
+  /* ── 분기 → 대본 · 대본화 ───────────────────────────────────────────────── */
+  .opt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px; }
+  .opt-grid label { font-size: 13px; font-weight: 700; color: var(--ink3); display: flex; flex-direction: column; gap: 6px; }
+  .opt-grid label.wide { grid-column: 1 / -1; }
+  .step-bar { display: flex; gap: 7px; margin-bottom: 16px; }
+  .step {
+    flex: 1; font-size: 12.5px; font-weight: 700; text-align: center; padding: 8px 4px;
+    border-radius: 10px; background: var(--bg-soft); border: 1.5px solid var(--line2); color: var(--ink3);
+  }
+  .step.done { border-color: #BFE9D8; background: var(--ok-soft); color: var(--ok-ink); }
+  .step.on { background: var(--acc-soft); border-color: var(--acc); color: var(--acc-ink); }
+  .cut-row {
+    background: #fff; border: 1px solid var(--line2); border-radius: 13px; padding: 12px 14px;
+    margin-bottom: 9px; font-size: 15px; line-height: 1.75; box-shadow: 0 1px 2px rgba(26,34,60,.04);
+  }
+  .cut-row .hd { display: flex; flex-wrap: wrap; gap: 9px; font-size: 12.5px; font-weight: 600; color: var(--ink3); margin-bottom: 5px; }
+  .cut-row .hd .no { color: var(--acc-ink); font-weight: 800; }
+  .cut-row .ac { color: var(--ink); }
+  .cut-row .dl { color: var(--acc-ink); font-weight: 500; }
+  pre.script {
+    background: #FFFEFB; border: 1px solid var(--line); border-radius: 14px; padding: 17px;
+    font-family: ui-monospace, Menlo, 'Malgun Gothic', monospace; font-size: 15px; line-height: 1.95;
+    color: var(--ink); white-space: pre-wrap; word-break: break-word; max-height: 46vh; overflow: auto;
+    box-shadow: inset 0 1px 3px rgba(26,34,60,.04);
+  }
+  .ep-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 15px; }
+  .ep-chips .branch-chip { flex: 0 0 auto; padding: 9px 15px; font-size: 14px; }
+
+  /* ── 로그인 문 ──────────────────────────────────────────────────────────── */
+  .gate {
+    position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
+    padding: 28px; overflow: auto;
+    background: linear-gradient(140deg, #F3F1FF 0%, var(--bg) 48%, #EBFBF7 100%);
+  }
+  .gate__card {
+    width: 100%; max-width: 470px; background: #fff; border-radius: 24px; padding: 34px;
+    box-shadow: 0 24px 70px rgba(30,40,80,.16); border: 1px solid rgba(255,255,255,.9);
+  }
+  .gate__eyebrow { font-size: 13px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--acc); margin-bottom: 8px; }
+  .gate__title { font-size: 27px; font-weight: 800; letter-spacing: -.03em; margin-bottom: 10px; }
+  .gate__sub { font-size: 15px; color: var(--ink2); line-height: 1.75; margin-bottom: 22px; }
+  .gate__list { display: grid; gap: 8px; margin-bottom: 6px; }
+  .gate__who {
+    display: flex; align-items: center; gap: 11px; width: 100%; text-align: left; cursor: pointer;
+    padding: 11px 14px; border: 1.5px solid var(--line2); border-radius: 13px; background: #fff;
+    font-family: inherit; font-size: 14.5px; transition: all .14s;
+  }
+  .gate__who:hover:not(:disabled) { border-color: #C7CBF6; background: var(--acc-soft); transform: translateY(-1px); }
+  .gate__who:disabled { opacity: .5; cursor: default; }
+  .gate__dot { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 1px 3px rgba(26,34,60,.25); }
+  .gate__name { font-size: 15px; font-weight: 700; color: var(--ink); }
+  .gate__role { font-size: 12.5px; color: var(--ink3); }
+  .gate__job { margin-left: auto; font-size: 12.5px; color: var(--ink3); text-align: right; }
+  .lf { display: block; margin-bottom: 14px; }
+  .lf__label { display: block; font-size: 13.5px; font-weight: 700; color: var(--ink2); margin-bottom: 7px; }
+  .lf--check { display: flex; align-items: center; gap: 9px; font-size: 14.5px; color: var(--ink2); }
+  .lf--check input { width: 17px; height: 17px; accent-color: var(--acc); }
+  .lf__or { text-align: center; font-size: 13px; font-weight: 700; color: var(--ink3); margin: 16px 0 14px; }
+  .lf__why { min-height: 22px; font-size: 14px; font-weight: 600; color: var(--bad); line-height: 1.6; margin-top: 10px; }
+  .lf__note { font-size: 13px; color: var(--ink3); line-height: 1.75; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <h1>Story Graph</h1>
+    <span class="badge" id="modeBadge">모드 확인 중</span>
+    <span class="badge" id="srcBadge">graph: mock/graph.json</span>
+    <div class="grow"></div>
+    <span class="who" id="whoAmI" hidden></span>
+    <button class="btn btn--line btn--mini" id="logoutBtn" hidden>로그아웃</button>
+    <button class="btn btn--line btn--mini" id="inputToggle">대본 입력 접기</button>
+  </div>
+
+  <!-- 상단 기능 탭. index.html 과 같은 탭 바를 nav-tabs.js 에서 받아 쓴다 -->
+  <div id="navMount"></div>
+
+  <div class="graph-area">
+    <div id="network"></div>
+    <div class="canvas-msg" id="canvasMsg" hidden></div>
+
+    <section class="card card--input" id="inputCard">
+      <h3>대본 · 시놉시스</h3>
+
+      <!-- 고른 모델은 이 화면의 모든 생성에 쓰인다. 값은 plan 리졸버의 MODELS 키다 -->
+      <div class="model-pick">
+        <label for="modelSel">모델</label>
+        <select id="modelSel">
+          <option value="haiku-4.5">Haiku 4.5 · 빠른 초안 — 구조와 뼈대를 빠르게 잡을 때</option>
+          <option value="sonnet-5" selected>Sonnet 5 · 균형잡힌 작업 — 대부분의 작업에 추천 (기본값)</option>
+          <option value="opus-4.8">Opus 4.8 · 깊이 있는 창작 — 캐릭터 심리와 대사에 강함, 느리고 비용 높음</option>
+        </select>
+        <div class="hint" id="modelHint">추출 · 요약 · 분기 · 대본 생성에 모두 이 모델을 씁니다.</div>
+      </div>
+
+      <textarea id="scriptIn" rows="7" spellcheck="false"
+        placeholder="시놉시스나 대본을 붙여 넣거나 .txt / .fdx 파일을 이 카드로 끌어다 놓습니다.
+예: 새벽에 문 여는 동네 빵집. 주인은 첫 손님이 오기까지..."></textarea>
+      <div class="card__row">
+        <button class="btn" id="extractBtn">그래프 추출</button>
+        <button class="btn btn--line" id="mockBtn">목데이터로 되돌리기</button>
+      </div>
+      <div class="hint" id="inputHint">최소 8자 이상. 추출은 Bedrock 연결이 필요합니다.</div>
+    </section>
+
+    <section class="card card--node" id="nodeCard" hidden>
+      <h3>노드 <button class="btn btn--line btn--mini" id="nodeClose" style="margin-left:auto">닫기</button></h3>
+      <div id="nodeBody"></div>
+    </section>
+
+    <!-- 종류별 구체 색은 graph-view.js 의 KIND_COLOR 한 곳에서 온다 -->
+    <div class="legend" id="legend"></div>
+  </div>
+
+  <div class="sidebar">
+    <div class="stats-bar">
+      <div class="stat"><div class="n" id="s-nodes">-</div><div class="l">노드</div></div>
+      <div class="stat"><div class="n" id="s-asserted">-</div><div class="l">명시 엣지</div></div>
+      <div class="stat"><div class="n" id="s-derived">-</div><div class="l">추론</div></div>
+      <div class="stat"><div class="n" id="s-seeds">-</div><div class="l">씨앗</div></div>
+    </div>
+    <div class="tabs">
+      <div class="tab active" data-tab="seeds">씨앗</div>
+      <div class="tab" data-tab="story">스토리</div>
+      <div class="tab" data-tab="script">대본화</div>
+    </div>
+    <div id="panel-seeds" class="panel active">
+      <div class="panel-scroll" id="seedsList"></div>
+    </div>
+    <div id="panel-story" class="panel">
+      <div class="panel-scroll" id="storyPanel"><div class="placeholder">씨앗을 골라 스토리를 생성합니다.</div></div>
+    </div>
+    <div id="panel-script" class="panel">
+      <div class="panel-scroll" id="scriptPanel"></div>
+    </div>
+  </div>
+
+  <!-- 아직 화면이 없는 탭(대본 번역 · 키비주얼)을 눌렀을 때 그래프 대신 나오는 자리 -->
+  <section class="soonpage" id="soon" hidden></section>
+</div>
+
+<!-- 이 화면을 새 탭에서 바로 열었을 때의 로그인 문. 토큰이 있으면 아예 안 나온다 -->
+<div class="gate" id="gate" hidden></div>
+
+<script src="./aws-config.js"></script>
+<script type="module">
+// 대본 → 그래프 → 씨앗 → 분기 → 대본 → 역기입 → 대본화까지를 한 화면에서 돌린다.
+//   그래프  mock/graph.json 을 읽거나, 대본에서 planGraph 로 뽑는다
+//   씨앗    graph-probes.js 의 탐지기 12종 (?seeds=mock 이면 mock/seeds.json)
+//   분기    planBranches / planFreeBranches. Bedrock 이 없으면 로컬 폴백
+//   대본    branchToSpec → planBranchOutline → planCuts. 기존 기획 파이프라인 그대로다
+//   역기입  applyWriteback. 그래프가 자라고 씨앗이 다시 뽑힌다 (루프의 고리)
+//   대본화  planScript. 컷을 드라마·영화·웹드라마 대본 텍스트로 옮긴다
+// 조회는 전부 graph-engine.js 의 GraphStore 를 거친다. 배포에서는 같은 저장소가
+// Neptune 을 사실로 두고 돈다 (hasGraph). 이 화면이 아는 차이는 save·flush 뿐이다.
+import { createGraphStore, loadGraphStore } from './graph-engine.js'
+import { findSeeds, PROBES } from './graph-probes.js'
+import {
+  planGraph, planBranches, planFreeBranches, scriptToText,
+  branchToSpec, planBranchOutline, planCuts,
+  applyWriteback, validateWritebackBeforeApply,
+  planScript, scriptBlob, scriptFileName, SCRIPT_FORMATS,
+  GENRES, TONES, LENGTHS, CUTCOUNTS,
+} from './story.js'
+import { planClient, graphClient } from './net.js'
+import { createGraphView, graphDelta, KIND_COLOR, KIND_LABEL } from './graph-view.js'
+import { configured, session, login, setNewPassword, logout } from './auth.js'
+import { DEMO_USERS } from './login.js'
+import { mountNav, soonMarkup, isSoonTab, navTabFromSearch } from './nav-tabs.js'
+
+const $ = (id) => document.getElementById(id)
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+
+const params = new URLSearchParams(location.search)
+const GRAPH_SRC = params.get('graph') || 'mock/graph.json'
+const SEED_SRC = params.get('seeds') === 'mock' ? 'mock' : 'probes'
+const SEEDS_SHOWN = 12
+
+const NET = planClient()
+// 그래프 저장소. 배포에서 hasGraph 가 켜져 있을 때만 나온다 — 없으면 인메모리로 돈다
+const GRAPH_NET = graphClient()
+
+/**
+ * 지금 고른 모델. 이 화면의 Bedrock 호출은 모두 이것을 실어 보낸다 (추출·요약·분기·대본).
+ * 값은 infra/resolvers/plan.js 의 MODELS 키다 — 모르는 값이 가면 리졸버가 기본 모델로 내린다.
+ * 로컬 모드(NET 없음)에서는 드롭다운을 잠가 두고, 이 값은 아무 데도 쓰이지 않는다.
+ *
+ * @returns {string} 'haiku-4.5' | 'sonnet-5' | 'opus-4.8'
+ */
+const MODEL = () => $('modelSel')?.value || 'sonnet-5'
+
+/** 고른 모델의 짧은 이름. 진행 안내에 적어 무엇으로 돌고 있는지 보이게 한다 */
+const modelLabel = () =>
+  ($('modelSel')?.selectedOptions?.[0]?.textContent || '').split('·')[0].trim() || '기본 모델'
+
+/**
+ * 탐지기별 색. 씨앗 카드 머리의 파스텔 그라디언트(--p1 → --p2)와 글자색(--pi)이다.
+ * 12종을 한눈에 갈라 보이게 하는 것이 목적이라 탐지기 목록과 같은 순서로 둔다.
+ */
+const PROBE_TINT = {
+  secret_leverage: ['#EDE3FF', '#F8F3FF', '#6D28D9'],
+  love_triangle: ['#FFE1EF', '#FFF2F7', '#BE185D'],
+  unresolved_tension: ['#FFE2DB', '#FFF3EF', '#C2410C'],
+  chekhov_object: ['#DCEDFF', '#F0F7FF', '#1D4ED8'],
+  strangers_shared_past: ['#D7F5F0', '#EEFCFA', '#0F766E'],
+  severed_bond: ['#E3E8F7', '#F3F5FC', '#3F4B75'],
+  dangling_consequence: ['#FFEFD1', '#FFF9EC', '#A16207'],
+  contested_goal: ['#E6F6D7', '#F5FBEC', '#4D7C0F'],
+  betrayal_potential: ['#FFDFDF', '#FFF1F1', '#B91C1C'],
+  identity_crisis: ['#E5E4FF', '#F3F2FF', '#4338CA'],
+  forbidden_bond: ['#FAE1FF', '#FDF2FF', '#A21CAF'],
+  power_vacuum: ['#ECE9E1', '#F8F6F1', '#78716C'],
+}
+
+/** 탐지기 색을 CSS 변수로. 씨앗 카드와 스토리 머리가 같은 색을 쓴다 */
+const tint = (probe) => {
+  const [p1, p2, pi] = PROBE_TINT[probe] || ['#EEF0FF', '#F7F8FF', '#4338CA']
+  return `--p1:${p1};--p2:${p2};--pi:${pi}`
+}
+
+let STORE = null
+let SEEDS = []
+let STORIES = new Map() // 분기 스토리 캐시. 키는 씨앗 인덱스, 자유 입력은 'free'
+let POOL = []           // 로컬 폴백용 목데이터 스토리 묶음
+let MOCK_SEEDS = []
+let CUR = { seed: -1, branch: 0 }
+let VIS = null
+let showAllSeeds = false
+let EXPAND = null       // 분기 → 대본 흐름의 상태. null 이면 분기 화면을 그린다
+let EPISODES = []       // 이 화면에서 만든 회차. 대본화 탭이 여기서 컷을 가져온다
+let SCRIPT = { ep: 0, format: 'drama', text: '', busy: false, err: '' }
+let NEW_SEEDS = new Set() // 역기입 뒤에 새로 나온 씨앗의 키. 카드에 NEW 뱃지를 붙인다
+let NAV = null           // 상단 기능 탭. mountNav 가 만든다
+let LAST_DEV_TAB = 'seeds' // 상단 [스토리 디벨롭] 으로 돌아왔을 때 열어 줄 안쪽 탭
+
+// ── 데이터 읽기 ───────────────────────────────────────────────────────────────
+async function loadJson(path) {
+  const res = await fetch(`${path}?t=${Date.now()}`, { cache: 'no-store' })
+  if (!res.ok) throw new Error(`${path} ${res.status}`)
+  return res.json()
+}
+
+// 목데이터 셋. graph 는 ?graph= 로 갈아끼울 수 있고, seeds/stories 는 로컬 폴백용이다.
+// 없어도 화면은 돌아간다 — 탐지기가 씨앗을 만들고, 분기는 임시 분기로 채운다.
+async function loadMock() {
+  const graph = await loadJson(GRAPH_SRC)
+  if (!Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) {
+    throw new Error(`${GRAPH_SRC}: nodes/edges 배열이 없다`)
+  }
+  let seeds = []
+  let stories = []
+  try {
+    ;[seeds, stories] = await Promise.all([loadJson('mock/seeds.json'), loadJson('mock/stories.json')])
+    if (!Array.isArray(seeds) || !Array.isArray(stories)) throw new Error('seeds.json / stories.json: 배열이 아니다')
+    if (seeds.length !== stories.length) throw new Error(`씨앗 ${seeds.length}개인데 스토리 ${stories.length}개다`)
+  } catch (err) {
+    console.warn('[story-graph] 목 씨앗·스토리를 읽지 못했다 — 탐지기와 임시 분기로 돈다', err.message)
+    seeds = []
+    stories = []
+  }
+  return { graph, seeds, stories }
+}
+
+/**
+ * 그래프 JSON 으로 저장소를 만든다. Neptune 모드면 판을 그대로 저장소에 밀어 넣는다
+ * — 새 대본을 뽑았거나 목데이터로 되돌렸다면 그것이 이제 사실이다.
+ */
+function newStore(graph) {
+  const store = createGraphStore(graph, { net: GRAPH_NET })
+  store.save?.() // 인메모리 판에는 없다. 저장이 끝났는지는 flush 로 본다
+  return store
+}
+
+/** 저장소 하나를 판에 올린다. 목데이터든 추출 결과든 Neptune 이든 여기 한 곳을 지난다 */
+function build(store, { keepSeeds = null } = {}) {
+  STORE = store
+  SEEDS = keepSeeds || findSeeds(STORE)
+  STORIES = new Map()
+  CUR = { seed: -1, branch: 0 }
+  showAllSeeds = false
+  NEW_SEEDS = new Set()
+  EXPAND = null
+  EPISODES = []
+  SCRIPT = { ep: 0, format: SCRIPT.format, text: '', busy: false, err: '' }
+  renderStats()
+  renderNetwork()
+  renderSeeds()
+  renderScriptPanel()
+  renderFreeOnly(SEEDS.length
+    ? '씨앗을 골라 스토리를 생성합니다. 방향이 이미 있다면 아래에 바로 적어도 됩니다.'
+    : '탐지된 씨앗이 없습니다. 방향을 직접 주면 그래프 전체를 컨텍스트로 분기를 만듭니다.')
+}
+
+// ── 그래프 그리기 ─────────────────────────────────────────────────────────────
+function renderStats() {
+  const s = STORE ? STORE.stats() : { nodes: 0, assertedEdges: 0, derivedEdges: 0 }
+  $('s-nodes').textContent = s.nodes
+  $('s-asserted').textContent = s.assertedEdges
+  $('s-derived').textContent = s.derivedEdges
+  $('s-seeds').textContent = SEEDS.length
+}
+
+/** 범례. 구체 색과 엣지 모양을 graph-view.js 의 표에서 그대로 가져온다 */
+function renderLegend() {
+  $('legend').innerHTML = Object.keys(KIND_COLOR).map((k) =>
+    `<span><i style="--c:${KIND_COLOR[k]}"></i>${esc(KIND_LABEL[k] || k)}</span>`).join('')
+    + '<span><i class="line"></i>명시</span><span><i class="dash"></i>추론</span>'
+}
+
+/** 대본 카드와 범례가 가리는 자리. 판은 이만큼 비켜 앉는다 */
+const insets = () => ({ l: $('inputCard').hidden ? 24 : 428, t: 24, r: 24, b: 78 })
+
+function renderNetwork() {
+  const g = STORE.toJSON()
+  const msg = $('canvasMsg')
+  if (!g.nodes.length) {
+    msg.hidden = false
+    msg.innerHTML = '그래프가 비어 있습니다.<br>왼쪽 카드에 대본을 넣고 <b>그래프 추출</b>을 누르거나,<br>목데이터로 되돌려 둘러보세요.'
+  } else {
+    msg.hidden = true
+  }
+  // 판은 한 번만 만들고 계속 쓴다. 노드를 옮겨 둔 자리도 그대로 이어진다
+  if (!VIS) {
+    $('network').innerHTML = '' // 로드 실패 안내가 남아 있을 수 있다
+    VIS = createGraphView($('network'), { onPick: (id) => (id ? showNode(id) : hideNode()) })
+  }
+  VIS.setInsets(insets())
+  VIS.render(g)
+}
+
+function highlight(ids) {
+  if (!VIS) return
+  const live = ids.filter((id) => STORE.getNode(id))
+  if (!live.length) return
+  VIS.focus(live)
+}
+
+function showNode(id) {
+  const n = STORE.getNode(id)
+  if (!n) return
+  const props = Object.entries(n.props || {})
+    .map(([k, v]) => `<span class="k">${esc(k)}</span><span class="v">${esc(v)}</span>`).join('')
+  const line = (e, dir) => {
+    const other = dir === 'out' ? e.o : e.s
+    const arrow = dir === 'out' ? '→' : '←'
+    const t = e.props?.tension === undefined ? '' : ` (긴장 ${e.props.tension})`
+    return `<div class="edge-line${e.asserted ? '' : ' der'}">${arrow} <b>${esc(e.p)}</b> `
+      + `${esc(STORE.getNode(other)?.name || other)}${t}${e.asserted ? '' : ' · 추론'}</div>`
+  }
+  const out = STORE.getEdgesFrom(id).map((e) => line(e, 'out')).join('')
+  const inc = STORE.getEdgesTo(id).map((e) => line(e, 'in')).join('')
+  $('nodeBody').innerHTML = `
+    <div class="kv">
+      <span class="k">이름</span><span class="v">${esc(n.name)}</span>
+      <span class="k">kind</span><span class="v">${esc(n.kind)}</span>
+      <span class="k">id</span><span class="v">${esc(n.id)}</span>
+      ${props}
+    </div>
+    ${out || inc ? '<div class="sec-label">엣지</div>' : '<div class="hint">붙어 있는 엣지가 없습니다.</div>'}
+    ${out}${inc}`
+  $('nodeCard').hidden = false
+}
+
+const hideNode = () => { $('nodeCard').hidden = true }
+
+// ── 씨앗 ─────────────────────────────────────────────────────────────────────
+const probeLabel = (id) => PROBES[id]?.label || id
+
+/**
+ * 씨앗 하나를 알아보는 키. 탐지기 + 초점 노드다 (graph-probes.js 의 trim 이 쓰는 것과 같다).
+ * 역기입 전후로 이 키를 견줘 새로 나온 씨앗을 가른다 — 씨앗에는 id 가 없다.
+ */
+const seedKey = (s) => `${s.probe}|${[...(s.focus || [])].sort().join(',')}`
+
+function renderSeeds() {
+  const list = $('seedsList')
+  if (!SEEDS.length) {
+    list.innerHTML = `<div class="placeholder">탐지된 씨앗이 없습니다.<br>
+      대본에 인물 간 갈등이나 비밀을 더 넣으면 더 풍부한 스토리 씨앗을 찾습니다.<br>
+      씨앗 없이 <b>스토리</b> 탭의 자유 입력으로 바로 분기를 만들 수도 있습니다.</div>`
+    return
+  }
+  const shown = showAllSeeds ? SEEDS : SEEDS.slice(0, SEEDS_SHOWN)
+  const cards = shown.map((s, i) => {
+    const fresh = NEW_SEEDS.has(seedKey(s))
+    return `
+    <div class="seed-card ${i === CUR.seed ? 'on' : ''}${fresh ? ' is-new' : ''}" style="${tint(s.probe)}">
+      ${fresh ? '<div class="seed-new-tag">역기입 후 새로 발견</div>' : ''}
+      <div class="seed-head">
+        <span class="probe-tag">${esc(probeLabel(s.probe))}</span>
+        ${fresh ? '<span class="new-badge">NEW</span>' : ''}
+        <span class="seed-score">▲${Number(s.score).toFixed(2)}</span>
+      </div>
+      <div class="seed-body">
+        <div class="seed-title" data-focus="${i}">${esc(s.title)}</div>
+        <div class="seed-rationale">${esc(s.desc)}</div>
+        <div class="seed-focus">초점: ${esc((s.focus || []).map((id) => STORE.getNode(id)?.name || id).join(', '))}</div>
+        <button class="btn btn--wide" data-seed="${i}">스토리 생성</button>
+      </div>
+    </div>`
+  }).join('')
+  // 새 씨앗이 잘린 자리 뒤에 있을 수 있다 — 몇 개가 숨어 있는지 버튼에 적어 준다
+  const hiddenNew = SEEDS.slice(shown.length).filter((s) => NEW_SEEDS.has(seedKey(s))).length
+  const more = SEEDS.length > shown.length
+    ? `<button class="btn btn--line btn--wide" id="moreSeeds">더 보기 (+${SEEDS.length - shown.length}${
+      hiddenNew ? `, NEW ${hiddenNew}개` : ''})</button>`
+    : ''
+  list.innerHTML = cards + more
+  list.querySelectorAll('[data-seed]').forEach((b) => {
+    b.onclick = () => pickSeed(Number(b.dataset.seed))
+  })
+  list.querySelectorAll('[data-focus]').forEach((el) => {
+    el.onclick = () => highlight(SEEDS[Number(el.dataset.focus)].focus || [])
+  })
+  if (more) $('moreSeeds').onclick = () => { showAllSeeds = true; renderSeeds() }
+}
+
+// ── 준비 중 안내 ─────────────────────────────────────────────────────────────
+// 화면이 아직 없는 탭은 판과 사이드바를 접고 안내만 보여준다. 판은 접혀 있어도
+// 살아 있고, 다시 펼치면 ResizeObserver 가 크기를 잡아 준다.
+function showSoon(id) {
+  $('soon').innerHTML = soonMarkup(id)
+  $('soon').hidden = false
+  document.querySelector('.graph-area').hidden = true
+  document.querySelector('.sidebar').hidden = true
+}
+
+function hideSoon() {
+  if ($('soon').hidden) return
+  $('soon').hidden = true
+  $('soon').innerHTML = ''
+  document.querySelector('.graph-area').hidden = false
+  document.querySelector('.sidebar').hidden = false
+  VIS?.setInsets(insets())
+}
+
+/**
+ * 사이드바 안쪽 탭. 상단 기능 탭과는 별개지만 서로를 비추게 해 둔다 —
+ * 안쪽 [대본화] 는 상단 [대본화], 씨앗·스토리는 상단 [스토리 디벨롭] 이다.
+ */
+const openTab = (name) => {
+  document.querySelectorAll('.tabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name))
+  document.querySelectorAll('.panel').forEach((p) => p.classList.toggle('active', p.id === `panel-${name}`))
+  if (name !== 'script') LAST_DEV_TAB = name
+  hideSoon()
+  NAV?.setActive(name === 'script' ? 'script' : 'develop')
+  if (name === 'script') renderScriptPanel()
+}
+
+/** 지금 보고 있는 스토리의 캐시 키. 씨앗을 안 골랐으면 자유 입력 자리다 */
+const curKey = () => (CUR.seed >= 0 ? String(CUR.seed) : 'free')
+
+async function pickSeed(i) {
+  CUR = { seed: i, branch: 0 }
+  EXPAND = null
+  renderSeeds()
+  openTab('story')
+  highlight(SEEDS[i].focus || [])
+  if (STORIES.has(String(i))) return renderStory()
+  await generate((onTry) => planBranches(NET, SEEDS[i], STORE, { pool: POOL, onTry, model: MODEL() }),
+    String(i), '분기를 만들고 있습니다')
+}
+
+/** 로딩 줄 하나. 같은 자리 글자만 바꿔서 진행을 보여준다 */
+const busyLine = (text) => {
+  $('storyPanel').innerHTML =
+    `<div class="busy"><span class="spin"></span>${esc(text)}...${NET ? '' : ' (로컬 모드)'}</div>`
+}
+
+/**
+ * 분기 생성 한 번. 성공하면 캐시에 넣고 그린다. 실패하면 재시도 버튼을 남긴다.
+ * run 은 (몇 번째, 전체) 를 받는 진행 콜백을 넘겨받는다 — 응답을 못 읽어 다시 물을 때
+ * 화면이 멈춘 것처럼 보이지 않게 같은 로딩 줄의 글자를 바꾼다.
+ */
+async function generate(run, key, msg) {
+  busyLine(msg)
+  const onTry = (i, total) => busyLine(i <= 1 ? msg : `다시 시도 중 (${i}/${total})`)
+  try {
+    STORIES.set(key, await run(onTry))
+    renderStory()
+  } catch (err) {
+    console.warn('[story-graph] 분기 생성 실패', err)
+    $('storyPanel').innerHTML = `<div class="story-content">
+      <div class="err">${esc(err.message || '서버 연결에 실패했습니다.')}</div>
+      <div class="hint">다시 시도하거나, 아래 자유 입력으로 방향을 주고 새로 만들 수 있습니다.</div>
+      <div class="card__row"><button class="btn" id="retryGen">다시 시도</button></div>
+      ${freeBox()}</div>`
+    $('retryGen').onclick = () => generate(run, key, msg)
+    bindFree()
+  }
+}
+
+// ── 스토리 · 분기 ────────────────────────────────────────────────────────────
+const beatText = (b) => {
+  if (typeof b === 'string') return b
+  const head = b.scene ? `${b.scene} — ` : ''
+  const tail = [b.secs ? `${b.secs}초` : null, (b.cast || []).join(', ') || null].filter(Boolean).join(' · ')
+  return `${head}${b.action || ''}${tail ? ` (${tail})` : ''}`
+}
+
+const wbCount = (b) => ({
+  n: b.writeback.nodes.length,
+  e: b.writeback.edges.length,
+  x: b.writeback.remove_edges.length,
+})
+
+function warnBlock(warnings) {
+  if (!warnings?.length) return ''
+  return `<details class="warns"><summary>검증 경고 ${warnings.length}건</summary>
+    <ul>${warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></details>`
+}
+
+function freeBox() {
+  return `<div class="free-box">
+      <h4>혹은 직접 입력</h4>
+      <textarea id="freeIn" rows="3" spellcheck="false"
+        placeholder="원하는 스토리 방향을 적습니다. 예: 미라가 먼저 비밀을 알아내고, 루미를 감싸는 쪽으로."></textarea>
+      <div class="card__row"><button class="btn btn--line btn--wide" id="freeBtn">이 방향으로 다시 생성</button></div>
+      <div class="hint">탐지기가 제안한 분기가 마음에 들지 않을 때 방향을 직접 줍니다.
+        씨앗을 고르지 않아도 동작합니다.</div>
+    </div>`
+}
+
+/** 아직 고른 씨앗이 없을 때의 스토리 패널. 자유 입력은 씨앗이 0개여도 쓸 수 있어야 한다 */
+function renderFreeOnly(msg) {
+  $('storyPanel').innerHTML = `<div class="story-content">
+    <div class="placeholder">${esc(msg)}</div>
+    ${freeBox()}</div>`
+  bindFree()
+}
+
+function bindFree() {
+  const btn = $('freeBtn')
+  if (!btn) return
+  btn.onclick = () => {
+    const text = $('freeIn').value.trim()
+    if (text.length < 4) { $('freeIn').focus(); return }
+    // 씨앗을 골랐으면 그 씨앗의 분기를 방향대로 다시 만들고, 안 골랐으면 자유 입력 자리에 넣는다
+    const seed = CUR.seed >= 0 ? SEEDS[CUR.seed] : null
+    CUR = { ...CUR, branch: 0 }
+    EXPAND = null
+    generate((onTry) => planFreeBranches(NET, text, seed, STORE, { pool: POOL, onTry, model: MODEL() }), curKey(),
+      '기획자의 방향으로 다시 만들고 있습니다')
+  }
+}
+
+function renderStory() {
+  if (EXPAND) return renderExpand()
+  const st = STORIES.get(curKey())
+  if (!st) {
+    renderFreeOnly('씨앗을 골라 스토리를 생성합니다. 방향이 이미 있다면 아래에 바로 적어도 됩니다.')
+    return
+  }
+  const seed = CUR.seed >= 0 ? SEEDS[CUR.seed] : null
+  if (!st.branches.length) {
+    $('storyPanel').innerHTML = `<div class="story-content">
+      <div class="err">쓸 수 있는 분기를 받지 못했습니다. 다시 생성해 주세요.</div>
+      ${warnBlock(st.warnings)}${freeBox()}</div>`
+    bindFree()
+    return
+  }
+  const bi = Math.min(CUR.branch, st.branches.length - 1)
+  const b = st.branches[bi]
+
+  const chips = st.branches.map((x, n) => `
+    <button class="branch-chip ${n === bi ? 'on' : ''}" data-branch="${n}">
+      <span class="bid">${esc(x.id)}</span>${esc(x.label)}
+    </button>`).join('')
+
+  const beats = b.beats.map((t, n) => `
+    <div class="beat"><span class="no">${n + 1}</span><span>${esc(beatText(t))}</span></div>`).join('')
+
+  const outcome = Object.entries(b.outcome).map(([k, v]) => `
+    <div class="outcome"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join('')
+    || '<div class="hint">이 분기의 결과가 비어 있습니다.</div>'
+
+  const wbNodes = b.writeback.nodes.map((n) => `
+    <div class="item"><span class="nt">${esc(n.kind)}</span> ${esc(n.name)}
+      ${n.t === undefined ? '' : `<span class="p">t=${esc(n.t)}</span>`}
+      ${n.desc ? `<div class="p">${esc(n.desc)}</div>` : ''}</div>`).join('')
+  const wbEdge = (e, cut) => `
+    <div class="item${cut ? ' cut' : ''}"><span class="nt">edge</span>
+      ${esc(e.s)} <b>${esc(e.p)}</b> ${esc(e.o)}${e.note ? ` <span class="p">(${esc(e.note)})</span>` : ''}</div>`
+  const wbEdges = b.writeback.edges.map((e) => wbEdge(e, false)).join('')
+  const wbCuts = b.writeback.remove_edges.map((e) => wbEdge(e, true)).join('')
+  const c = wbCount(b)
+
+  const keys = [...new Set(st.branches.flatMap((x) => Object.keys(x.outcome)))]
+  const cmp = `
+    <table class="cmp">
+      <tr><th></th>${st.branches.map((x) => `<th>${esc(x.id)}. ${esc(x.label)}</th>`).join('')}</tr>
+      ${keys.map((k) => `<tr><th>${esc(k)}</th>${st.branches.map((x, n) =>
+        `<td class="${n === bi ? 'on' : ''}">${esc(x.outcome[k] || '-')}</td>`).join('')}</tr>`).join('')}
+      <tr><th>역기입</th>${st.branches.map((x, n) => {
+        const q = wbCount(x)
+        return `<td class="${n === bi ? 'on' : ''}">+${q.n}노드 +${q.e}엣지 −${q.x}</td>`
+      }).join('')}</tr>
+    </table>`
+
+  $('storyPanel').innerHTML = `
+    <div class="story-content">
+      ${seed ? `<div class="seed-info" style="${tint(seed.probe)}">
+        <span class="probe-tag">${esc(probeLabel(seed.probe))}</span>
+        <span class="seed-score">▲${Number(seed.score).toFixed(2)}</span>
+        <span>초점: ${esc((seed.focus || []).map((id) => STORE.getNode(id)?.name || id).join(', '))}</span>
+      </div>` : '<div class="seed-info">씨앗 없이 기획자의 방향으로 만든 분기입니다.</div>'}
+      ${st.local ? '<div class="warn">로컬 모드 결과입니다. Bedrock 에 연결하면 같은 자리에 생성 결과가 들어옵니다.</div>' : ''}
+      <h1>${esc(st.title || '제목 없음')}</h1>
+      <div class="logline">${esc(st.logline)}</div>
+      ${st.pivot.title || st.pivot.body ? `<div class="pivot-box">
+        <div class="ttl">${esc(st.pivot.title)}</div>
+        <div class="bd">${esc(st.pivot.body)}</div></div>` : ''}
+
+      <div class="sec-label">분기 ${st.branches.length}개</div>
+      <div class="branch-chips">${chips}</div>
+
+      <div class="branch-head">${esc(b.id)}. ${esc(b.label)}</div>
+      ${b.tone ? `<div class="branch-tone">${esc(b.tone)}</div>` : ''}
+      <div class="branch-premise">${esc(b.premise)}</div>
+
+      <div class="sec-label">비트</div>
+      <div class="beats">${beats || '<div class="hint">비트가 없습니다.</div>'}</div>
+
+      <div class="sec-label">이 분기의 결과</div>
+      ${outcome}
+
+      <div class="sec-label">그래프 역기입</div>
+      <div class="wb-sum">+ 노드 <b>${c.n}</b> · + 엣지 <b>${c.e}</b> · − 엣지 <i>${c.x}</i></div>
+      <div class="wb-box">${wbNodes}${wbEdges}${wbCuts || ''}</div>
+      <div class="card__row"><button class="btn btn--wide" id="expandBtn">이 분기로 대본 생성</button></div>
+      <div class="hint" id="expandNote">이 분기를 개요 → 컷으로 펼치고, 판에 붙일 때 위 역기입을 그래프에 적용합니다.</div>
+
+      <div class="sec-label">분기 비교</div>
+      ${cmp}
+      ${warnBlock(st.warnings)}
+      ${freeBox()}
+    </div>`
+
+  document.querySelectorAll('[data-branch]').forEach((el) => {
+    el.onclick = () => { CUR.branch = Number(el.dataset.branch); renderStory() }
+  })
+  $('expandBtn').onclick = () => expandToScript(seed, st, b)
+  bindFree()
+}
+
+// ── 고른 분기 → 대본 ─────────────────────────────────────────────────────────
+// 새 생성 경로를 만들지 않는다. 기존 기획 파이프라인을 그대로 지난다:
+//   branchToSpec → planBranchOutline (개요) → planCuts (컷 확장) → 판에 붙이기
+// 판에 붙이는 자리에서 applyWriteback 으로 그래프가 자라고 씨앗이 다시 뽑힌다.
+
+const STEPS = [
+  { id: 'options', label: '옵션' },
+  { id: 'outline', label: '개요' },
+  { id: 'cuts', label: '컷' },
+  { id: 'done', label: '판에 붙이기' },
+]
+
+const OPT_DEFAULT = { mode: 'next', genre: GENRES[0], tone: TONES[0], secs: 60, cuts: CUTCOUNTS[1] }
+
+const sel = (id, list, now, label = (v) => v) => `<select id="${id}">${list.map((v) =>
+  `<option value="${esc(v)}" ${String(v) === String(now) ? 'selected' : ''}>${esc(label(v))}</option>`).join('')}</select>`
+
+const secsLabel = (v) => (v >= 60 ? `${v / 60}분` : `${v}초`)
+
+/** 컷 하나를 목록 한 줄로. 컷 확장 결과와 대본화 탭이 같은 모양을 쓴다 */
+const cutRow = (raw, n) => {
+  const c = raw || {}
+  const cast = (c.cast || []).filter(Boolean)
+  return `<div class="cut-row">
+    <div class="hd"><span class="no">${n + 1}</span><span>${esc(c.scene || `S${n + 1}`)}</span>
+      ${c.camera ? `<span>${esc(c.camera)}</span>` : ''}<span>${Number(c.secs) || 0}초</span>
+      ${cast.length ? `<span>${esc(cast.join(', '))}</span>` : ''}</div>
+    ${c.action ? `<div class="ac">${esc(c.action)}</div>` : ''}
+    ${c.dialogue ? `<div class="dl">“${esc(c.dialogue)}”</div>` : ''}
+  </div>`
+}
+
+/**
+ * 이 화면의 기획 컨텍스트. app.js 의 planCtx() 자리다.
+ * 보드가 없으니 스토리와 그래프의 인물에서 만든다.
+ */
+function expandCtx(x) {
+  const chars = (STORE ? STORE.getNodes({ kind: 'Character' }) : []).map((n) => ({
+    name: n.name,
+    brief: [n.props?.role, n.props?.desc].filter(Boolean).join(' · ') || '설명 없음',
+  }))
+  const focus = (x.seed?.focus || []).map((id) => STORE?.getNode(id)).find((n) => n?.kind === 'Character')
+  return {
+    title: x.story?.title || '',
+    scenario: [x.story?.logline, x.story?.pivot?.body].filter(Boolean).join('\n'),
+    chars,
+    centerName: focus?.name || chars[0]?.name || '',
+    model: MODEL(),
+  }
+}
+
+/** "이 분기로 대본 생성" 을 누른 자리. 역기입을 미리 점검해 두고 옵션부터 묻는다 */
+function expandToScript(seed, story, branch) {
+  EXPAND = {
+    seed, story, branch,
+    step: 'options', busy: '', err: '',
+    opts: { ...OPT_DEFAULT },
+    check: validateWritebackBeforeApply(STORE, branch.writeback),
+    spec: null, outline: null, cuts: null, applied: null, epIndex: null,
+  }
+  renderExpand()
+}
+
+/** 역기입 미리보기. 옵션 단계와 컷 단계에서 같은 것을 보여 준다 */
+function wbPreview(x) {
+  const p = x.check.preview
+  const bad = x.check.warnings
+  return `<div class="wb-sum">역기입 미리보기 — + 노드 <b>${p.nodesAdded}</b> · + 엣지 <b>${p.edgesAdded}</b>
+      · − 엣지 <i>${p.edgesRemoved}</i></div>
+    ${x.check.safe ? '' : '<div class="warn">넣을 수 없는 항목이 있습니다. 그 항목만 빼고 적용합니다.</div>'}
+    ${bad.length ? `<details class="warns"><summary>역기입 점검 ${bad.length}건</summary>
+      <ul>${bad.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></details>` : ''}`
+}
+
+function renderExpand() {
+  const x = EXPAND
+  if (!x) return renderStory()
+  const at = STEPS.findIndex((s) => s.id === x.step)
+  const head = `
+    <div class="seed-info">
+      <span class="probe-tag">${esc(x.branch.id)}. ${esc(x.branch.label)}</span>
+      <span>${esc(x.story.title || '분기에서 대본 만들기')}</span>
+    </div>
+    <div class="step-bar">${STEPS.map((s, i) =>
+      `<div class="step ${i === at ? 'on' : i < at ? 'done' : ''}">${esc(s.label)}</div>`).join('')}</div>`
+
+  if (x.busy) {
+    $('storyPanel').innerHTML = `<div class="story-content">${head}
+      <div class="busy"><span class="spin"></span>${x.busy === 'outline'
+        ? '분기를 개요로 짜고 있습니다… 10초쯤 걸립니다.'
+        : `비트를 컷 ${x.spec.cuts}개로 펼치고 있습니다… 10초쯤 걸립니다.`}${NET ? '' : ' (로컬 모드)'}</div></div>`
+    return
+  }
+
+  const err = x.err ? `<div class="err">${esc(x.err)}</div>` : ''
+  const body = { options: expandOptions, outline: expandOutline, cuts: expandCuts, done: expandDone }[x.step](x)
+  $('storyPanel').innerHTML = `<div class="story-content">${head}${err}${body}</div>`
+  bindExpand()
+}
+
+const expandOptions = (x) => `
+  <div class="sec-label">이 분기로 대본 만들기</div>
+  ${wbPreview(x)}
+  <div class="opt-grid">
+    <label class="wide">형식${sel('exMode', ['next', 'spin'], x.opts.mode,
+      (v) => (v === 'next' ? '새 회차 — 인물과 앞 사건을 이어서' : '스핀오프 — 한 인물을 주인공으로 갈라'))}</label>
+    <label>장르${sel('exGenre', GENRES, x.opts.genre)}</label>
+    <label>톤${sel('exTone', TONES, x.opts.tone)}</label>
+    <label>러닝타임${sel('exSecs', LENGTHS, x.opts.secs, secsLabel)}</label>
+    <label>씬 수${sel('exCuts', CUTCOUNTS, x.opts.cuts, (v) => `${v}컷`)}</label>
+  </div>
+  <div class="card__row">
+    <button class="btn btn--wide" id="exGo">생성</button>
+    <button class="btn btn--line" id="exBack">분기로</button>
+  </div>
+  <div class="hint">개요를 먼저 보여드립니다. 판에 붙이는 것과 역기입은 그다음입니다.</div>`
+
+const expandOutline = (x) => {
+  const o = x.outline
+  const secs = o.beats.reduce((s, b) => s + (Number(b.secs) || 0), 0)
+  return `
+    ${o.local ? '<div class="warn">로컬 모드 개요입니다 — 분기의 비트를 그대로 세운 뼈대입니다.</div>' : ''}
+    <h1>${esc(o.title || '제목 없음')}</h1>
+    <div class="logline">${esc(o.logline)}</div>
+    ${o.synopsis ? `<div class="branch-premise">${esc(o.synopsis)}</div>` : ''}
+    ${o.chars.length ? `<div class="sec-label">새로 만들 인물 ${o.chars.length}명</div>
+      ${o.chars.map((c) => `<div class="beat"><span class="no">＋</span><span><b>${esc(c.name)}</b> ${esc(c.brief)}</span></div>`).join('')}` : ''}
+    <div class="sec-label">비트 ${o.beats.length}개 · ${Math.round(secs)}초</div>
+    ${o.beats.map((b, n) => `<div class="beat"><span class="no">${n + 1}</span>
+      <span>${esc(b.scene || `S${n + 1}`)} — ${esc(b.action)}${b.cast.length ? ` (${esc(b.cast.join(', '))})` : ''}</span></div>`).join('')}
+    <div class="card__row">
+      <button class="btn btn--wide" id="exCuts">이 개요로 컷 ${x.spec.cuts}개 만들기</button>
+    </div>
+    <div class="card__row">
+      <button class="btn btn--line" id="exAgain">개요 다시</button>
+      <button class="btn btn--line" id="exOpts">옵션 고치기</button>
+      <button class="btn btn--line" id="exBack">분기로</button>
+    </div>`
+}
+
+const expandCuts = (x) => {
+  const secs = x.cuts.reduce((s, c) => s + (Number(c.secs) || 0), 0)
+  return `
+    <h1>${esc(x.outline.title || '제목 없음')}</h1>
+    <div class="logline">${x.opts.mode === 'spin' ? '스핀오프' : '새 회차'} · 컷 ${x.cuts.length}개 · ${Math.round(secs)}초</div>
+    ${wbPreview(x)}
+    <div class="card__row">
+      <button class="btn btn--wide" id="exApply">판에 붙이고 역기입 적용</button>
+    </div>
+    <div class="card__row">
+      <button class="btn btn--line" id="exExport">대본으로 내보내기</button>
+      <button class="btn btn--line" id="exRecut">컷 다시</button>
+      <button class="btn btn--line" id="exBack">분기로</button>
+    </div>
+    <div class="hint">판에 붙이면 위 역기입이 그래프에 적용되고 씨앗을 다시 뽑습니다.
+      대본으로 내보내기만 하면 그래프는 그대로 둡니다.</div>
+    <div class="sec-label">컷 ${x.cuts.length}개</div>
+    ${x.cuts.map(cutRow).join('')}`
+}
+
+const expandDone = (x) => {
+  const a = x.applied.applied
+  const n = x.applied.newSeeds.length
+  return `
+    <div class="ok">${esc(x.outline.title || '새 회차')} 를 판에 붙였습니다 — 컷 ${x.cuts.length}개.</div>
+    <div class="sec-label">그래프에 적용한 역기입</div>
+    <div class="wb-sum">+ 노드 <b>${a.nodesAdded}</b> · + 엣지 <b>${a.edgesAdded}</b> · − 엣지 <i>${a.edgesRemoved}</i>
+      ${a.derivedLost ? ` · 함께 사라진 추론 <i>${a.derivedLost}</i>` : ''}</div>
+    <div class="ok">${n ? `새 회차 씨앗 ${n}개를 발견했습니다.` : '이번에는 새 씨앗이 나오지 않았습니다.'}</div>
+    ${x.applied.warnings.length ? `<details class="warns"><summary>적용 기록 ${x.applied.warnings.length}건</summary>
+      <ul>${x.applied.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></details>` : ''}
+    <div class="card__row">
+      <button class="btn btn--wide" id="exSeeds">씨앗 ${n}개 보기</button>
+      <button class="btn btn--line" id="exScript">대본화</button>
+    </div>
+    <div class="card__row"><button class="btn btn--line btn--wide" id="exClose">닫기</button></div>
+    <div class="hint">새로 생긴 노드·엣지는 판에서 녹색으로 표시했습니다. 끊긴 엣지 자리는 붉은 점선으로 잠깐 남습니다.<br>
+      씨앗을 다시 고르면 자란 그래프에서 다음 회차가 갈라집니다.</div>`
+}
+
+function bindExpand() {
+  const x = EXPAND
+  const on = (id, fn) => { const el = $(id); if (el) el.onclick = fn }
+  const num = (id, dflt) => Number($(id)?.value) || dflt
+
+  on('exGo', () => {
+    x.opts = {
+      mode: $('exMode').value === 'spin' ? 'spin' : 'next',
+      genre: $('exGenre').value,
+      tone: $('exTone').value,
+      secs: num('exSecs', OPT_DEFAULT.secs),
+      cuts: num('exCuts', OPT_DEFAULT.cuts),
+    }
+    runOutline()
+  })
+  on('exAgain', runOutline)
+  on('exCuts', runCuts)
+  on('exRecut', runCuts)
+  on('exOpts', () => { x.step = 'options'; x.err = ''; renderExpand() })
+  on('exApply', applyToBoard)
+  on('exExport', () => { stashEpisode(); openTab('script') })
+  on('exSeeds', () => openTab('seeds'))
+  on('exScript', () => openTab('script'))
+  on('exBack', () => { EXPAND = null; renderStory() })
+  on('exClose', () => {
+    EXPAND = null
+    renderFreeOnly('역기입을 적용했습니다. 씨앗 탭에서 자란 그래프의 다음 씨앗을 고르세요.')
+  })
+}
+
+async function runOutline() {
+  const x = EXPAND
+  x.spec = branchToSpec(x.branch, x.opts)
+  x.busy = 'outline'
+  x.err = ''
+  renderExpand()
+  try {
+    x.outline = await planBranchOutline(NET, x.branch, x.spec, expandCtx(x))
+    x.step = 'outline'
+  } catch (err) {
+    console.warn('[story-graph] 개요 생성 실패', err)
+    x.err = `${err.message || '서버 연결에 실패했습니다.'} 다시 시도해 주세요.`
+    x.step = 'options'
+  } finally {
+    x.busy = ''
+    renderExpand()
+  }
+}
+
+async function runCuts() {
+  const x = EXPAND
+  x.busy = 'cuts'
+  x.err = ''
+  renderExpand()
+  try {
+    const cuts = await planCuts(NET, x.spec, x.outline, { model: MODEL() })
+    if (!cuts.length) throw new Error('컷을 받지 못했습니다.')
+    x.cuts = cuts
+    x.step = 'cuts'
+  } catch (err) {
+    console.warn('[story-graph] 컷 확장 실패', err)
+    x.err = `${err.message || '서버 연결에 실패했습니다.'} 다시 시도해 주세요.`
+    x.step = 'outline'
+  } finally {
+    x.busy = ''
+    renderExpand()
+  }
+}
+
+/** 만든 회차를 대본화 탭이 읽을 자리에 넣는다. 컷을 다시 만들면 같은 자리를 덮는다 */
+function stashEpisode() {
+  const x = EXPAND
+  const ep = {
+    title: x.outline.title || x.story.title || `${x.branch.id}. ${x.branch.label}`,
+    logline: x.outline.logline,
+    branch: `${x.branch.id}. ${x.branch.label}`,
+    mode: x.opts.mode,
+    chars: x.outline.chars,
+    cuts: x.cuts,
+  }
+  if (x.epIndex === null) { EPISODES.push(ep); x.epIndex = EPISODES.length - 1 }
+  else EPISODES[x.epIndex] = ep
+  SCRIPT = { ...SCRIPT, ep: x.epIndex, text: '', err: '' }
+  return x.epIndex
+}
+
+/**
+ * 판에 붙이기. 여기서 역기입이 확정되고 그래프가 자란다.
+ * 씨앗 인덱스가 바뀌므로 분기 캐시는 버린다.
+ */
+async function applyToBoard() {
+  const x = EXPAND
+  stashEpisode()
+  // 무엇이 새로 생겼는지는 개수(applied)만으로는 알 수 없다 — 전후 판을 견줘 id 를 뽑는다
+  const before = STORE.toJSON()
+  const seedsBefore = new Set(SEEDS.map(seedKey))
+  x.applied = applyWriteback(STORE, x.branch.writeback)
+  x.delta = graphDelta(before, STORE.toJSON())
+  x.step = 'done'
+  SEEDS = x.applied.newSeeds
+  NEW_SEEDS = new Set(SEEDS.map(seedKey).filter((k) => !seedsBefore.has(k)))
+  STORIES = new Map()
+  CUR = { seed: -1, branch: 0 }
+  showAllSeeds = false
+  renderStats()
+  renderNetwork()
+  // 판을 다시 그린 다음이어야 표시가 남는다 (render 가 표시를 지운다)
+  VIS?.markNew(x.delta)
+  renderSeeds()
+  renderExpand()
+
+  // Neptune 모드에서는 여기서야 저장이 끝난다. 판은 이미 자랐으니 화면은 건드리지
+  // 않고, 저장이 어긋난 것만 적용 기록에 덧붙여 다시 그린다
+  const { failures } = (await STORE.flush?.()) || { failures: [] }
+  if (failures.length) {
+    x.applied.warnings.push(...failures)
+    renderExpand()
+  }
+}
+
+// ── 대본화 ───────────────────────────────────────────────────────────────────
+// 보드의 컷을 정식 대본 텍스트로 옮긴다. 스토리 디벨롭과는 따로 도는 기능이다.
+
+function renderScriptPanel() {
+  const box = $('scriptPanel')
+  if (!box) return
+  if (!EPISODES.length) {
+    box.innerHTML = `<div class="placeholder">컷이 없습니다. 먼저 스토리를 생성해 주세요.<br>
+      씨앗 → 분기 → <b>이 분기로 대본 생성</b> 을 지나면 여기에 컷이 들어옵니다.</div>`
+    return
+  }
+  const i = Math.min(Math.max(0, SCRIPT.ep), EPISODES.length - 1)
+  const ep = EPISODES[i]
+  const secs = ep.cuts.reduce((s, c) => s + (Number(c.secs) || 0), 0)
+  const chips = EPISODES.length > 1
+    ? `<div class="ep-chips">${EPISODES.map((e, n) => `<button class="branch-chip ${n === i ? 'on' : ''}"
+        data-ep="${n}">${esc(e.title || `회차 ${n + 1}`)}</button>`).join('')}</div>`
+    : ''
+
+  box.innerHTML = `<div class="story-content">
+    ${chips}
+    <h1>${esc(ep.title || '제목 없음')}</h1>
+    <div class="logline">${esc(ep.branch)} · 컷 ${ep.cuts.length}개 · ${Math.round(secs)}초</div>
+    <div class="opt-grid"><label class="wide">대본 형식${sel('scFormat', Object.keys(SCRIPT_FORMATS),
+      SCRIPT.format, (v) => SCRIPT_FORMATS[v].label)}</label></div>
+    <div class="card__row"><button class="btn btn--wide" id="scGo" ${SCRIPT.busy ? 'disabled' : ''}>대본 생성</button></div>
+    ${SCRIPT.busy ? `<div class="busy"><span class="spin"></span>대본으로 옮기고 있습니다${NET ? '' : ' (로컬 모드)'}</div>` : ''}
+    ${SCRIPT.err ? `<div class="err">${esc(SCRIPT.err)}</div>` : ''}
+    ${SCRIPT.text ? `
+      <div class="sec-label">대본</div>
+      <pre class="script">${esc(SCRIPT.text)}</pre>
+      <div class="card__row">
+        <button class="btn btn--line" id="scCopy">복사</button>
+        <button class="btn btn--line" id="scDown">다운로드</button>
+      </div>
+      <div class="hint" id="scNote">${esc(scriptFileName(ep.title))} 으로 내려받습니다 (UTF-8 BOM).</div>` : ''}
+    <div class="sec-label">컷 ${ep.cuts.length}개</div>
+    ${ep.cuts.map(cutRow).join('')}
+  </div>`
+
+  box.querySelectorAll('[data-ep]').forEach((el) => {
+    el.onclick = () => { SCRIPT = { ...SCRIPT, ep: Number(el.dataset.ep), text: '', err: '' }; renderScriptPanel() }
+  })
+  const fmt = $('scFormat')
+  if (fmt) fmt.onchange = () => { SCRIPT.format = fmt.value }
+  $('scGo').onclick = runScript
+  if ($('scCopy')) $('scCopy').onclick = () => copyScript(SCRIPT.text)
+  if ($('scDown')) $('scDown').onclick = () => downloadScript(SCRIPT.text, scriptFileName(ep.title))
+}
+
+async function runScript() {
+  const ep = EPISODES[Math.min(Math.max(0, SCRIPT.ep), EPISODES.length - 1)]
+  if (!ep?.cuts?.length) {
+    SCRIPT = { ...SCRIPT, err: '컷이 없습니다. 먼저 스토리를 생성해 주세요.' }
+    renderScriptPanel()
+    return
+  }
+  SCRIPT = { ...SCRIPT, busy: true, err: '', text: '' }
+  renderScriptPanel()
+  try {
+    SCRIPT.text = await planScript(NET, ep.cuts, {
+      format: SCRIPT.format, title: ep.title, chars: ep.chars, model: MODEL(),
+    })
+  } catch (err) {
+    console.warn('[story-graph] 대본화 실패', err)
+    SCRIPT.err = `${err.message || '서버 연결에 실패했습니다.'} 다시 시도해 주세요.`
+  } finally {
+    SCRIPT.busy = false
+    renderScriptPanel()
+  }
+}
+
+async function copyScript(text) {
+  const note = $('scNote')
+  try {
+    await navigator.clipboard.writeText(text)
+    if (note) { note.className = 'ok'; note.textContent = '대본을 클립보드에 복사했습니다.' }
+  } catch (err) {
+    console.warn('[story-graph] 복사 실패', err)
+    if (note) { note.className = 'warn'; note.textContent = '복사가 막혔습니다. 대본을 직접 선택해 복사해 주세요.' }
+  }
+}
+
+/** 대본 텍스트를 .txt 로 내려받는다. BOM 을 붙여 한글이 깨지지 않게 한다 */
+function downloadScript(text, filename) {
+  const url = URL.createObjectURL(scriptBlob(text))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename || '대본.txt'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+// ── 대본에서 그래프 뽑기 ──────────────────────────────────────────────────────
+async function extract() {
+  const raw = $('scriptIn').value
+  const text = scriptToText(raw, $('scriptIn').dataset.name || '')
+  const hint = $('inputHint')
+  if (text.trim().length < 8) {
+    hint.className = 'err'
+    hint.textContent = '대본이 너무 짧습니다. 8자 이상 넣어주세요.'
+    return
+  }
+  if (!NET) {
+    hint.className = 'err'
+    hint.textContent = '그래프 추출에는 Bedrock 연결이 필요합니다. 목데이터로는 아래 흐름을 그대로 볼 수 있습니다.'
+    return
+  }
+  $('extractBtn').disabled = true
+  hint.className = 'hint'
+  hint.innerHTML = `<span class="spin"></span> ${esc(modelLabel())} 로 그래프를 뽑고 있습니다.`
+    + ' 대본이 길면 먼저 요약한 뒤 읽습니다.'
+  try {
+    // 새 대본은 빈 판에서 뽑는다. 지금 그래프를 canon 으로 주면 남의 작품 id 를 물려받는다
+    const g = await planGraph(NET, text, { model: MODEL() })
+    build(newStore(g))
+    $('srcBadge').textContent = `graph: 대본 추출 (노드 ${g.nodes.length})`
+    const bad = [...(g.warnings || []), ...(g.conflicts || []).map((c) => `${c.level}: ${c.msg}`)]
+    hint.className = bad.length ? 'warn' : 'hint'
+    hint.innerHTML = bad.length
+      ? `추출했습니다. 걸린 것 ${bad.length}건:<br>${bad.slice(0, 6).map(esc).join('<br>')}`
+      : `추출했습니다. 노드 ${g.nodes.length} · 씨앗 ${SEEDS.length}개.`
+  } catch (err) {
+    console.warn('[story-graph] 추출 실패', err)
+    hint.className = 'err'
+    hint.innerHTML = `${esc(err.message || '서버 연결에 실패했습니다.')}<br>잠시 뒤 그래프 추출을 다시 눌러 주세요.`
+  } finally {
+    $('extractBtn').disabled = false
+  }
+}
+
+// ── 시동 ─────────────────────────────────────────────────────────────────────
+document.querySelectorAll('.tabs .tab').forEach((t) => { t.onclick = () => openTab(t.dataset.tab) })
+
+// 상단 기능 탭. 스토리보드만 index.html 로 나가고(링크), 나머지는 이 화면에서 받는다.
+// ?tab=script 로 들어오면 안쪽 [대본화] 가 처음부터 열려 있다.
+{
+  const asked = navTabFromSearch(location.search, 'develop')
+  const first = asked === 'board' ? 'develop' : asked
+  NAV = mountNav({
+    mount: $('navMount'),
+    active: first,
+    handled: ['develop', 'script', 'translate', 'keyvisual'],
+    onSelect: (id) => {
+      if (isSoonTab(id)) return showSoon(id)
+      openTab(id === 'script' ? 'script' : LAST_DEV_TAB)
+    },
+  })
+  if (isSoonTab(first)) showSoon(first)
+  else if (first === 'script') openTab('script')
+}
+$('nodeClose').onclick = hideNode
+$('extractBtn').onclick = extract
+$('inputToggle').onclick = () => {
+  const card = $('inputCard')
+  card.hidden = !card.hidden
+  $('inputToggle').textContent = card.hidden ? '대본 입력 펼치기' : '대본 입력 접기'
+  VIS?.setInsets(insets()) // 카드가 접히면 판이 그 자리까지 쓴다
+}
+
+const drop = $('inputCard')
+drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('drop') })
+drop.addEventListener('dragleave', () => drop.classList.remove('drop'))
+drop.addEventListener('drop', async (e) => {
+  e.preventDefault()
+  drop.classList.remove('drop')
+  const file = e.dataTransfer?.files?.[0]
+  if (!file) return
+  if (!/\.(txt|fdx|md|fountain)$/i.test(file.name)) {
+    $('inputHint').className = 'err'
+    $('inputHint').textContent = '.txt 또는 .fdx 파일만 읽습니다.'
+    return
+  }
+  $('scriptIn').value = await file.text()
+  $('scriptIn').dataset.name = file.name
+  $('inputHint').className = 'hint'
+  $('inputHint').textContent = `${file.name} 을 읽었습니다. 그래프 추출을 눌러주세요.`
+})
+
+$('modeBadge').textContent = NET
+  ? (GRAPH_NET ? 'Bedrock · Neptune 연결' : 'Bedrock 연결')
+  : '로컬 모드 (mock)'
+$('modeBadge').className = NET ? 'badge badge--live' : 'badge'
+$('srcBadge').textContent = `graph: ${GRAPH_SRC}${SEED_SRC === 'mock' ? ' · seeds: mock' : ''}`
+
+// 로컬 모드에서는 고를 것이 없다 — 생성이 전부 로컬 폴백으로 돌아 모델을 쓰지 않는다
+if (!NET) {
+  $('modelSel').disabled = true
+  $('modelHint').textContent = '로컬 모드에서는 모델을 쓰지 않습니다. Bedrock 에 연결하면 여기서 고릅니다.'
+}
+
+function fail(err) {
+  // 안내를 넣으려면 판 자리를 비워야 한다 — 캔버스를 걷어내고 VIS 를 다시 만들게 한다
+  if (VIS) { VIS.destroy(); VIS = null }
+  $('network').innerHTML = `<div class="load-error">목데이터를 불러오지 못했습니다: ${esc(err.message)}<br>
+    파일 경로가 아니라 HTTP 로 열어야 합니다. 예: python3 -m http.server 8000 --directory demo<br>
+    <button class="btn" id="retryLoad" style="margin-top:10px">다시 시도</button></div>`
+  $('seedsList').innerHTML = '<div class="placeholder">데이터 로드 실패</div>'
+  $('retryLoad').onclick = boot
+}
+
+/**
+ * 목데이터로 판을 채운다. Neptune 모드면 이것이 그대로 저장돼 사실이 된다.
+ * 목데이터를 되돌리는 버튼도 이 길을 지난다.
+ */
+async function boot() {
+  try {
+    const d = await loadMock()
+    MOCK_SEEDS = d.seeds
+    POOL = d.seeds.map((s, i) => ({ ...d.stories[i], probe: s.probe, focus: s.focus }))
+    build(newStore(d.graph), { keepSeeds: SEED_SRC === 'mock' ? d.seeds : null })
+  } catch (err) {
+    fail(err)
+  }
+}
+
+/**
+ * 첫 로드. Neptune 에 남아 있는 그래프가 있으면 그것으로 시작한다 — 새로고침해도
+ * 지난번에 자란 판이 그대로 나온다. 저장된 것이 없으면 목데이터로 채운다.
+ */
+async function start() {
+  let stored = null
+  try {
+    stored = await loadGraphStore({ net: GRAPH_NET })
+  } catch (err) {
+    console.warn('[story-graph] Neptune 에서 그래프를 읽지 못했다 — 목데이터로 시작한다', err)
+  }
+  if (!stored || !stored.stats().nodes) return boot()
+
+  // 목 씨앗·스토리는 로컬 폴백용이라 저장된 판으로 시작할 때도 미리 읽어 둔다
+  try {
+    const d = await loadMock()
+    MOCK_SEEDS = d.seeds
+    POOL = d.seeds.map((s, i) => ({ ...d.stories[i], probe: s.probe, focus: s.focus }))
+  } catch (err) {
+    console.warn('[story-graph] 목 씨앗·스토리를 읽지 못했다 — 임시 분기로 돈다', err.message)
+  }
+  build(stored)
+  $('srcBadge').textContent = `graph: Neptune (노드 ${stored.stats().nodes})`
+}
+
+// ── 로그인 문 ────────────────────────────────────────────────────────────────
+// 이 화면을 새 탭에서 바로 열면 sessionStorage 에 sb.auth 가 없어서 plan·graph 호출이
+// 401 로 떨어진다. 그래서 Cognito 가 설정돼 있고 토큰이 없을 때는 판을 시동하지 않고
+// 문을 먼저 세운다. 로그인 로직은 auth.js 를, 데모 계정 목록은 login.js 를 그대로 쓴다.
+// 성공하면 sb.auth 가 저장된 상태에서 새로고침해 처음부터 다시 돈다.
+
+const DEMO_PW = window.SB_CONFIG?.demoPw || ''
+const gate = $('gate')
+const gateSay = (msg) => { const el = $('lgWhy'); if (el) el.textContent = msg || '' }
+
+function gateBusy(on) {
+  const b = $('lgGo')
+  if (!b) return
+  b.disabled = on
+  gate.querySelectorAll('[data-demo]').forEach((x) => { x.disabled = on })
+  b.textContent = on ? '확인 중…' : '로그인'
+  if (on) gateSay('')
+}
+
+/** 로그인 폼. 데모 계정을 누르면 아이디를 채우고, demoPw 가 있으면 바로 들어간다 */
+function showGate() {
+  gate.hidden = false
+  gate.innerHTML = `
+    <form class="gate__card" id="lgForm" autocomplete="on">
+      <div class="gate__eyebrow">Story Graph</div>
+      <h2 class="gate__title">로그인</h2>
+      <p class="gate__sub">이 화면은 Bedrock·Neptune 을 직접 부릅니다. 등록된 팀원만 들어올 수 있습니다.</p>
+      <span class="lf__label">데모 계정 — 눌러서 바로 들어가기</span>
+      <div class="gate__list">
+        ${DEMO_USERS.map((u) => `
+          <button class="gate__who" type="button" data-demo="${esc(u.id)}">
+            <span class="gate__dot" style="background:${esc(u.color)}"></span>
+            <span><span class="gate__name">${esc(u.name)}</span><br>
+              <span class="gate__role">${esc(u.role)} · ${esc(u.id)}</span></span>
+            <span class="gate__job">${esc(u.job)}</span>
+          </button>`).join('')}
+      </div>
+      <div class="lf__or">직접 입력</div>
+      <label class="lf">
+        <span class="lf__label">이메일 또는 아이디</span>
+        <input type="text" id="lgId" name="username" autocomplete="username"
+          autocapitalize="off" spellcheck="false" required>
+      </label>
+      <label class="lf">
+        <span class="lf__label">비밀번호</span>
+        <input type="password" id="lgPw" name="password" autocomplete="current-password" required>
+      </label>
+      <label class="lf lf--check"><input type="checkbox" id="lgKeep">
+        <span>이 브라우저에 로그인 유지</span></label>
+      <button class="btn btn--wide" id="lgGo" type="submit">로그인</button>
+      <p class="lf__why" id="lgWhy" role="alert" aria-live="polite"></p>
+      <p class="lf__note">${DEMO_PW
+        ? '데모 계정을 누르면 바로 들어갑니다.'
+        : '데모 계정을 누르면 아이디가 채워집니다. 비밀번호는 관리자에게 받은 값을 넣어주세요.'}</p>
+    </form>`
+  $('lgId').focus()
+
+  $('lgForm').addEventListener('click', (e) => {
+    const id = e.target.closest('[data-demo]')?.dataset.demo
+    if (!id) return
+    $('lgId').value = id
+    if (!DEMO_PW) return $('lgPw').focus()
+    $('lgPw').value = DEMO_PW
+    $('lgForm').requestSubmit()
+  })
+
+  $('lgForm').addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const id = $('lgId').value.trim()
+    const pw = $('lgPw').value
+    if (!id || !pw) return gateSay('아이디와 비밀번호를 입력해주세요.')
+    gateBusy(true)
+    try {
+      const r = await login(id, pw, $('lgKeep').checked)
+      if (r.challenge) return askNewPassword(r.need)
+      location.reload()
+    } catch (err) {
+      gateSay(err.message)
+      $('lgPw').select()
+    } finally {
+      gateBusy(false)
+    }
+  })
+}
+
+/** 임시 비밀번호로 들어온 첫 로그인. auth.js 의 setNewPassword 를 그대로 쓴다 */
+function askNewPassword(need) {
+  gate.innerHTML = `
+    <form class="gate__card" id="pwForm">
+      <div class="gate__eyebrow">첫 로그인</div>
+      <h2 class="gate__title">새 비밀번호를 정해주세요</h2>
+      <p class="gate__sub">임시 비밀번호는 이번 한 번만 쓰입니다. 8자 이상, 영문과 숫자를 섞어주세요.</p>
+      ${need?.includes('name') ? `<label class="lf"><span class="lf__label">이름</span>
+        <input type="text" id="pwName" required></label>` : ''}
+      <label class="lf"><span class="lf__label">새 비밀번호</span>
+        <input type="password" id="pwNew" autocomplete="new-password" required></label>
+      <label class="lf"><span class="lf__label">한 번 더</span>
+        <input type="password" id="pwAgain" autocomplete="new-password" required></label>
+      <button class="btn btn--wide" type="submit">설정하고 들어가기</button>
+      <p class="lf__why" id="lgWhy" role="alert" aria-live="polite"></p>
+    </form>`
+  $('pwNew').focus()
+  $('pwForm').addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const pw = $('pwNew').value
+    if (pw.length < 8) return gateSay('8자 이상으로 정해주세요.')
+    if (pw !== $('pwAgain').value) return gateSay('두 비밀번호가 다릅니다.')
+    try {
+      await setNewPassword(pw, $('pwName') ? { name: $('pwName').value.trim() } : {})
+      location.reload()
+    } catch (err) {
+      gateSay(err.message)
+    }
+  })
+}
+
+/** 들어와 있으면 누구로 들어와 있는지 띠에 남긴다. 로그아웃은 토큰만 버리고 새로고침 */
+function showWho() {
+  const me = session()
+  if (!me) return
+  $('whoAmI').hidden = false
+  $('whoAmI').textContent = `${me.name} · ${me.role}`
+  $('logoutBtn').hidden = false
+  $('logoutBtn').onclick = () => { logout(); location.reload() }
+}
+
+$('mockBtn').onclick = boot
+renderLegend()
+if (configured && !session()) {
+  // 토큰이 없다 — 판을 시동하지 않고 문만 세운다 (호출이 401 로 떨어지지 않게)
+  showGate()
+} else {
+  showWho()
+  start()
+}
+</script>
+</body>
+</html>

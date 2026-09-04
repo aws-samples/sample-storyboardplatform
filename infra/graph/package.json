@@ -1,0 +1,12 @@
+{
+  "name": "storyboard-graph",
+  "private": true,
+  "description": "Neptune Gremlin + Bedrock 호출 Lambda. 배포 전에 이 디렉터리에서 npm install 을 한 번 돌려야 한다 — CDK 가 디렉터리를 그대로 올린다.",
+  "main": "index.js",
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1125.0",
+    "@aws-sdk/client-dynamodb": "^3.1125.0",
+    "@aws-sdk/lib-dynamodb": "^3.1125.0",
+    "gremlin": "3.7.3"
+  }
+}
