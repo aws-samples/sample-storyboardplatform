@@ -20,12 +20,24 @@ const {
 
 const HERE = __dirname
 const DEMO = path.join(HERE, '..', '..', 'demo')
+const KEYVISUAL = path.join(HERE, '..', '..', 'key-visual')
 const read = (...p) => fs.readFileSync(path.join(HERE, '..', ...p), 'utf8')
 
 const GPU_TYPE = 'g6e.2xlarge'
-const GPU_AZS = ['us-east-1a', 'us-east-1b', 'us-east-1c', 'us-east-1d']
+// GPU_AZS[0] 이 실제로 쓰이는 AZ 다. g6e 는 AZ 마다 용량이 따로 있고 자주 마른다 —
+// us-east-1 도 us-west-2 도 네 AZ 전부 InsufficientInstanceCapacity 로 막혔다.
+// 또 마르면 앞의 항목을 뒤로 돌리면 된다.
+//
+// 리전을 옮길 때 g6e 가 그 리전에 *판매되는지*부터 확인해야 한다:
+//   aws ec2 describe-instance-types --region <r> --instance-types g6e.2xlarge
+// ap-southeast-1(싱가폴)에는 아예 없다(T4/T4g/A100 만 있다).
+// run-instances --dry-run 으로는 확인할 수 없다 — 리전에 없는 타입에도
+// "성공했을 것"이라고 답한다. 문법만 검사하며 가용성도 용량도 보지 않는다.
+const GPU_AZS = ['ap-northeast-2a', 'ap-northeast-2b']
 const MODEL = 'chroma'
-const CF_ORIGINS = 'pl-3b927c52'
+// CloudFront origin-facing 프리픽스 리스트. 리전마다 ID 가 다르다 —
+// ap-northeast-2 는 pl-22a6434b, us-west-2 는 pl-82a045eb, us-east-1 은 pl-3b927c52 였다.
+const CF_ORIGINS = 'pl-22a6434b'
 
 /*
  * 업무 시간에만 GPU 를 켠다. 시간은 UTC 다 — 여기서 틀리면 새벽에 켜지고 낮에 꺼진다.
@@ -305,15 +317,57 @@ class StoryboardStack extends Stack {
       '',
     ].join('\n')
 
-    new s3deploy.BucketDeployment(this, 'Web', {
+    /*
+     * 버킷 배치가 세 제약을 동시에 만족해야 한다.
+     *   - 기존 앱은 루트에서 열린다               → demo/* 를 루트에 둔다
+     *   - key-visual/index.html 은 <script src="/aws-config.js">  → config 는 루트
+     *   - key-visual/keyvisual.js 는 '../demo/core.js' 를 import  → /demo/* 도 필요
+     * 마지막 것 때문에 demo 를 루트에만 두면 /demo/core.js 가 403 이 되어
+     * 브라우저에서 모듈 로드가 실패한다. 그래서 demo 를 루트와 /demo/ 양쪽에 올린다.
+     * 최종 구조:
+     *   /aws-config.js  /index.html  /core.js …  /demo/core.js …  /key-visual/index.html
+     */
+    const webDeploy = new s3deploy.BucketDeployment(this, 'Web', {
       destinationBucket: site,
       sources: [
         s3deploy.Source.asset(DEMO, { exclude: ['aws-config.js', '.DS_Store', 'test.html'] }),
         s3deploy.Source.data('aws-config.js', config),
       ],
+      // 이 배포는 접두사가 없어서 버킷 전체를 소스와 맞춘다 — 즉 기본 prune 이
+      // 다른 배포가 만든 폴더를 통째로 지운다. 두 배포의 실행 순서는 보장되지
+      // 않으므로 이 예외가 없으면 배포마다 폴더가 있다 없다 한다.
+      exclude: ['key-visual/*', 'demo/*'],
       distribution: cdn,
       distributionPaths: ['/*'],
     })
+
+    // key-visual 의 '../demo/*' import 를 받아주는 사본. 루트의 것과 같은 파일이지만
+    // destinationKeyPrefix 는 배포 단위로만 지정할 수 있어서 한 배포에 루트와
+    // 하위 폴더를 함께 담을 수 없다 — 그래서 배포를 나눈다.
+    const webDemo = new s3deploy.BucketDeployment(this, 'WebDemo', {
+      destinationBucket: site,
+      destinationKeyPrefix: 'demo',
+      sources: [
+        s3deploy.Source.asset(DEMO, { exclude: ['aws-config.js', '.DS_Store', 'test.html'] }),
+      ],
+      distribution: cdn,
+      distributionPaths: ['/demo/*'],
+    })
+    webDemo.node.addDependency(webDeploy)
+
+    // key-visual 은 별도 BucketDeployment 다. destinationKeyPrefix 는 배포 단위로만
+    // 지정할 수 있어서 한 배포에 루트와 하위 폴더를 섞을 수 없다.
+    const webKv = new s3deploy.BucketDeployment(this, 'WebKeyVisual', {
+      destinationBucket: site,
+      destinationKeyPrefix: 'key-visual',
+      // .drawio 원본과 목업 PNG 는 배포에 넣지 않는다 — 문서용 파일이다.
+      sources: [s3deploy.Source.asset(KEYVISUAL, { exclude: ['.DS_Store', '*.drawio', '*.drawio.png'] })],
+      distribution: cdn,
+      distributionPaths: ['/key-visual/*'],
+    })
+    // 같은 버킷에 쓰는 두 배포를 동시에 돌리지 않는다. 순서를 고정해 두면
+    // 위의 exclude 와 합쳐 어느 쪽도 상대의 파일을 지우지 않는다.
+    webKv.node.addDependency(webDemo)
 
     new CfnOutput(this, 'Url', { value: `https://${cdn.distributionDomainName}` })
     new CfnOutput(this, 'GraphqlUrl', { value: api.graphqlUrl })

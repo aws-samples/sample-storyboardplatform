@@ -12,8 +12,9 @@
  */
 
 import { ART_ROLES, orderKeyBetween } from '../demo/core.js'
-import { idToken, session } from '../demo/auth.js'
+import { configured, idToken, session } from '../demo/auth.js'
 import { connect } from '../demo/net.js'
+import { showLogin } from '../demo/login.js'
 import * as coach from './coach.js'
 
 const cfg = window.SB_CONFIG || {}
@@ -217,7 +218,7 @@ async function writePrompts() {
     }
     const u = r.usage || {}
     wire('g', `200  ${got}/${S.scenes.length}개 · 토큰 ${u.inputTokens || '?'}→${u.outputTokens || '?'}`)
-    note(`씬 ${got}개의 이미지 프롬프트를 받았습니다`)
+    note(`씬 ${got}개의 이미지 프롬프트를 생성했습니다`)
     if (got < S.scenes.length) {
       S.warn = `${S.scenes.length - got}개는 형식이 어긋나 버렸습니다. 그 씬은 직접 써주세요.`
     }
@@ -310,8 +311,26 @@ async function genOne(s) {
   }
 }
 
+/*
+ * 한 번에 열어 두는 요청 수.
+ *
+ * 서버는 어차피 한 번에 한 장만 그린다 — infra/gpu/server.py 의 `gpu = threading.Lock()`
+ * 이 파이프라인 전체를 감싸고 있다. 실제로 4장을 동시에 던져 재보면 벽시계가
+ * 12s / 24s / 36s / 47s 로 정확히 쌓인다. 즉 동시에 보내도 총 시간은 줄지 않는다.
+ * 줄어드는 것은 장 사이의 빈 시간이다 — 한 장씩 기다렸다 보내면 락이 풀린 뒤
+ * 다음 요청이 도착할 때까지 GPU 가 놀고, 그 왕복이 장 수만큼 붙는다. 미리 넣어
+ * 두면 앞 장이 끝나는 순간 다음 장이 이미 대기 중이다.
+ *
+ * 그래서 전부 한꺼번에 던지지 않는다. 뒤에 선 요청은 앞의 것들이 끝날 때까지
+ * 응답 없이 열린 채로 기다리는데, CloudFront 의 /gen* readTimeout 이 60초다
+ * (infra/lib/storyboard-stack.js). 장당 약 12초이므로 5번째부터는 시간 안에
+ * 못 들어온다. 3으로 묶으면 최악이 약 36초 — 여유가 있다. 씬이 20개여도
+ * 열려 있는 요청은 항상 3개뿐이다.
+ */
+const LANES = 3
+
 /**
- * 배치. 서버가 한 번에 한 장을 그리므로 순서대로 보낸다.
+ * 배치. 씬 여러 개를 동시에 띄우고, 한 장이 끝나는 대로 다음 씬을 그 자리에 넣는다.
  * 한 씬의 실패가 배치를 끝내지 않는다.
  */
 async function runBatch(ids) {
@@ -325,10 +344,21 @@ async function runBatch(ids) {
 
   if (canGen() && S.gpu.state !== 'ready' && S.gpu.state !== 'busy') await preload()
 
-  for (const s of targets) {
-    if (S.stop) { S.stop = false; break }
-    await genOne(s)
+  /*
+   * 대기열을 여러 갈래가 나눠 집는다. 갈래마다 자기 장이 끝나면 바로 다음 번호를
+   * 가져가므로, 느린 씬 하나가 뒤를 다 막지 않는다. 씬을 미리 3등분하면 그렇게 된다.
+   */
+  let next = 0
+  const lane = async () => {
+    while (!S.stop) {
+      const i = next++
+      if (i >= targets.length) return
+      await genOne(targets[i])
+    }
   }
+  await Promise.all(Array.from({ length: Math.min(LANES, targets.length) }, lane))
+  S.stop = false
+
   S.busy = null
   paint()
   const d = doneJobs().length, f = failedJobs().length
@@ -499,6 +529,14 @@ function paintQueue() {
 
 function paintBoard() {
   const g = $('#kvgrid'); if (!g) return
+  // STEP 3 에서는 세는 줄이 같이 있다. 장이 끝날 때마다 여기서 고친다 —
+  // 카드를 다시 만들지 않으므로 이미 뜬 그림이 다시 불려 깜빡이지 않는다.
+  const cnt = $('#kvcount')
+  if (cnt) {
+    const f = failedJobs().length
+    cnt.textContent = `${doneJobs().length}/${S.scenes.length}${f ? ` · ${f}장 실패` : ''}` +
+      (S.busy === 'batch' ? ' · 끝나는 대로 채워집니다' : '')
+  }
   g.textContent = ''
   g.style.setProperty('--ar', S.size === 'pose' ? '896/1152' : '1216/688')
   for (const s of S.scenes) {
@@ -621,8 +659,11 @@ function step2() {
 
   const a = card(`이미지 프롬프트 · 씬 ${S.scenes.length}개`,
     canPlan()
-      ? '한 번에 받아옵니다. 각 줄은 손으로 고칠 수 있습니다.'
-      : 'aws-config.js 가 비어 있어 문장 모델이 없습니다. 프롬프트를 직접 써주세요.',
+      ? '한 번에 생성합니다. 각 줄은 손으로 고칠 수 있습니다.'
+      // 두 경우를 구분해서 말한다. 설정이 없는 것과 연결이 안 된 것은 할 일이 다르다.
+      : cfg.graphqlUrl
+        ? '보드에 연결되지 않아 문장 모델을 쓸 수 없습니다. 프롬프트를 직접 써주세요.'
+        : 'aws-config.js 가 비어 있어 문장 모델이 없습니다. 프롬프트를 직접 써주세요.',
     'prompts')
   for (const s of S.scenes) {
     const r = el('div', 'pr')
@@ -634,7 +675,7 @@ function step2() {
     if (s.beat) r.append(el('p', 'pr__beat', s.beat))
     const ta = el('textarea', 'pr__in')
     ta.value = s.prompt
-    ta.placeholder = S.busy === 'prompt' ? '받는 중…' : '영어로 씁니다. 공간·빛·인물·프레이밍.'
+    ta.placeholder = S.busy === 'prompt' ? '생성중…' : '영어로 씁니다. 공간·빛·인물·프레이밍.'
     ta.spellcheck = false
     ta.rows = 2
     ta.oninput = () => { s.prompt = ta.value }
@@ -643,7 +684,7 @@ function step2() {
   }
   const row = el('div', 'row')
   if (canPlan()) {
-    const re = el('button', 'btn btn--line', S.busy === 'prompt' ? '받는 중…' : '다시 받기')
+    const re = el('button', 'btn btn--line', S.busy === 'prompt' ? '생성중…' : '다시 생성')
     re.type = 'button'; re.disabled = !!S.busy
     re.onclick = () => writePrompts()
     row.append(re)
@@ -702,8 +743,22 @@ function step3() {
   r.append(rig)
   a.append(r)
 
+  /*
+   * 나온 그림을 이 단계에서 바로 보여준다.
+   *
+   * 예전에는 이 자리에 글자만 있었고, 그림은 STEP 4 에 가야 보였다. 데이터는
+   * 이미 있었다 — genOne 이 장마다 paintBoard() 를 부르는데, #kvgrid 가 STEP 4
+   * 에만 있어서 그 호출이 조용히 아무 일도 안 했다. id 를 여기에도 두면 같은
+   * 렌더러가 이 단계에서 그대로 동작한다. 두 단계가 같이 보이는 일은 없다.
+   */
+  const g = card('나온 것', '끝나는 대로 채워집니다', 'kvgrid')
+  g.querySelector('.card__s').id = 'kvcount'      // 장이 끝날 때마다 paintBoard 가 고친다
+  const grid = el('div', 'kvgrid'); grid.id = 'kvgrid'
+  g.append(grid)
+  a.append(g)
+
   const q = card(`씬별 · ${S.scenes.length}개`,
-    '서버가 한 번에 한 장을 그립니다. 한 씬의 실패는 배치를 끝내지 않습니다.', 'queue')
+    `한 번에 ${LANES}개씩 보냅니다. 서버는 한 장씩 그리므로 나머지는 줄을 섭니다. 한 씬의 실패는 배치를 끝내지 않습니다.`, 'queue')
   const qb = el('div', 'queue'); qb.id = 'queue'
   q.append(qb)
 
@@ -758,8 +813,9 @@ function step3() {
 }
 
 /**
- * 지금은 장비 한 대라 씬이 순서대로 그려진다. 그걸 감추지 않고, 대수를 늘리면
- * 어디가 어떻게 달라지는지 같은 화면에서 보여준다.
+ * 브라우저는 여러 장을 동시에 보내지만 그리는 것은 한 대다. 그래서 총 시간은
+ * 장 수에 비례해서 늘어난다. 그걸 감추지 않고, 대수를 늘리면 어디가 어떻게
+ * 달라지는지 같은 화면에서 보여준다.
  */
 function scaleCard() {
   const c = card('대수', '지금 몇 대로 돌고 있는지, 늘리면 무엇이 달라지는지.', 'scale')
@@ -769,8 +825,8 @@ function scaleCard() {
     : null
 
   const rows = [
-    { k: '1대 · 지금', v: `씬 ${n}개를 순서대로 그립니다`, t: one ? `장당 약 ${one}초` : '측정 전', on: true },
-    { k: '여러 대', v: '같은 대기열을 여러 대가 나눠 집습니다', t: one ? `장당 시간은 그대로` : '—' },
+    { k: '1대 · 지금', v: `씬 ${n}개가 한 대 앞에 줄을 섭니다`, t: one ? `장당 약 ${one}초` : '측정 전', on: true },
+    { k: '여러 대', v: '같은 대기열을 여러 대가 나눠 집습니다', t: one ? '장당 시간은 그대로' : '—' },
   ]
   const box = el('div', 'scale')
   for (const r of rows) {
@@ -787,7 +843,7 @@ function scaleCard() {
   const ol = el('ol')
   for (const t of [
     '지금은 장비가 한 대로 고정되어 있습니다. 대수를 늘리려면 여기부터 바꿉니다.',
-    '대기열을 서버 밖으로 뺍니다. 지금은 브라우저가 순서대로 보내고 있습니다.',
+    '대기열을 서버 밖으로 뺍니다. 지금은 브라우저가 열어 둔 요청이 대기열 역할을 합니다.',
     '한 대가 한 모델만 들고 있게 하면 모델을 갈아끼우는 시간이 사라집니다.',
     '늘어나는 것은 동시에 그리는 장수입니다. 한 장이 나오는 시간은 그대로입니다.',
   ]) ol.append(el('li', null, t))
@@ -877,7 +933,7 @@ function paint() {
   }
   m.append([step1, step2, step3, step4][S.step - 1]())
   if (S.step === 3) { paintRig(); paintQueue(); paintLog() }
-  if (S.step === 4) paintBoard()
+  if (S.step === 3 || S.step === 4) paintBoard()   // 두 단계 다 #kvgrid 를 가진다
   $('#modeTag').textContent = canGen() ? '배포됨' : '로컬'
   $('#modeTag').className = 'tag ' + (canGen() ? 'tag--live' : 'tag--local')
   const w = $('#whoami')
@@ -918,8 +974,28 @@ EXT. 극장 앞 거리 - 낮
 반쯤 찢긴 포스터. 지나가는 사람들.`
 
 async function boot() {
-  S.me = session() || { id: 'local', name: '로컬', role: 'planner' }
+  /*
+   * 배포 모드에서는 먼저 로그인을 받는다.
+   *
+   * 예전에는 이 화면에 로그인 창이 없어서, 토큰 없이 열면 AppSync 가 WebSocket 을
+   * 바로 닫았다. net.js 의 ready() 는 connection_ack 에서만 resolve 하므로 그 상태로는
+   * resolve 도 reject 도 되지 않고 — 아래 await 에서 영구히 멈췄다. 예외가 아니라
+   * 미해결이라 try/catch 도 잡지 못해서 paint() 까지 못 가고 화면이 끝까지 비었다.
+   * net.js 쪽에도 몇 번 실패하면 진행시키는 안전장치를 넣었지만, 근본은 로그인이다.
+   *
+   * 로컬 모드(aws-config.js 가 없음)에는 Cognito 가 없다. 그때는 묻지 않고 들어간다.
+   */
+  if (configured) {
+    let s = session()
+    if (s && !(await idToken())) s = null   // 만료된 토큰은 없는 것으로 본다
+    S.me = s || await showLogin($('#gate'))
+  }
+  S.me = S.me || session() || { id: 'local', name: '로컬', role: 'planner' }
   S.script = SAMPLE
+
+  // 보드에 붙기 전에 한 번 그린다. 연결이 오래 걸리거나 실패해도 화면은 이미 있고,
+  // 실시간 기능만 나중에 붙는다. 아래 connect() 가 유일한 렌더 관문이면 안 된다.
+  paint()
 
   try {
     S.net = await connect({

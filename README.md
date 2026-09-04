@@ -127,14 +127,22 @@ committed empty: any account gets the same board on the first boot.
 Two commands: `cdk deploy` builds everything, `scripts/users.sh` creates the accounts. Four things
 have to be true before the first one — none of them are things CDK can do for you.
 
-1. **Region `us-east-1`.** Not a preference. The stack is pinned there in three places: the
-   CloudFront origin-facing prefix list ID (`pl-3b927c52` — different in every region), the `g6e` AZ
-   list, and the `us.anthropic.claude-sonnet-4-6` inference profile (US regions only). Elsewhere means
-   editing `infra/lib/storyboard-stack.js`.
+1. **Region `ap-northeast-2`.** Not a preference. The stack is pinned there in four places: the
+   CloudFront origin-facing prefix list ID (`pl-22a6434b` — different in every region), the `g6e` AZ
+   list (only `2a` and `2b` sell it here), the `global.anthropic.claude-sonnet-4-6` inference profile
+   in `infra/resolvers/plan.js`, and `infra/scripts/seed-art.mjs`. Elsewhere means editing all four.
+   Two cautions learned the hard way. **Model prefix:** `us.*` profiles exist only in US regions —
+   outside them use `global.*`, or the plan resolver returns a Bedrock error. **Capacity vs.
+   availability:** `run-instances --dry-run` does *not* verify either. It reports "would have
+   succeeded" for a type the region does not even sell, so use
+   `aws ec2 describe-instance-types --region <r> --instance-types g6e.2xlarge` to check that a region
+   offers the card at all, and expect capacity itself to be provable only by launching.
+   This was `us-east-1`, then `us-west-2`; `g6e.2xlarge` ran dry in every AZ of both.
+   `ap-southeast-1` is not a fallback — it has no `g6e` at all (T4/T4g/A100 only).
 2. **A default VPC** in that region. The stack looks one up rather than creating one.
 3. **Bedrock model access for Anthropic Claude**, enabled once per account on the Bedrock console's
    Model access page. Story planning returns `AccessDeniedException` until it is. Check with
-   `aws bedrock get-foundation-model-availability --region us-east-1 --model-id anthropic.claude-sonnet-4-6`
+   `aws bedrock get-foundation-model-availability --region ap-northeast-2 --model-id anthropic.claude-sonnet-4-6`
    — you want `"authorizationStatus": "AUTHORIZED"`.
 4. **At least 8 G-instance vCPUs.** `g6e.2xlarge` needs 8 under *Running On-Demand G and VT
    instances* (`L-DB2E81BA`); a new account can start at 0. Without it the instance fails to launch

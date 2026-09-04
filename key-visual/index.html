@@ -304,6 +304,55 @@ aside{
   border-radius:var(--r);font-weight:600;font-size:13px;
 }
 .coach__next:hover{background:#1543ad}
+
+/* ── 로그인 ───────────────────────────────
+   demo/login.js 를 그대로 재사용하지만 스타일은 여기서 새로 쓴다.
+   demo/index.html 의 .gate 규칙은 어두운 테마 변수(--paper, --edge, --pencil)에
+   묶여 있고 이 화면에는 그 변수가 없다 — 그대로 가져오면 글자가 안 보인다. */
+.gate{
+  position:fixed;inset:0;z-index:100;background:rgba(15,20,30,.55);
+  display:grid;place-items:center;padding:24px;
+}
+.gate[hidden]{display:none}
+.gate__card{
+  background:#fff;border-radius:10px;padding:24px;width:min(430px,100%);
+  max-height:100%;overflow:auto;box-shadow:0 18px 50px rgba(15,20,30,.32);
+}
+.gate__eyebrow{font:500 10.5px/1 var(--m);letter-spacing:.14em;color:var(--blue);text-transform:uppercase}
+.gate__title{margin:9px 0 4px;font-size:19px;font-weight:700;letter-spacing:-.02em}
+.gate__sub{margin:0 0 16px;font-size:12.5px;line-height:1.6;color:var(--ink-2)}
+.gate__list{display:grid;gap:6px}
+.gate__who{
+  display:flex;align-items:center;gap:11px;width:100%;text-align:left;
+  background:#fff;border:1px solid var(--line);border-radius:var(--r);
+  padding:10px 12px;cursor:pointer;font:inherit;color:var(--ink);
+}
+.gate__who:hover:not(:disabled),.gate__who:focus-visible{background:var(--fill);border-color:var(--ink-3)}
+.gate__who:disabled{opacity:.5;cursor:default}
+.gate__dot{width:22px;height:22px;border-radius:50%;flex:none}
+.gate__name{font-weight:600;font-size:13px}
+.gate__role{font:400 10.5px/1.4 var(--m);color:var(--ink-3)}
+.gate__job{margin-left:auto;font-size:11.5px;color:var(--ink-3)}
+.lf{display:block;margin-bottom:11px}
+.lf__label{display:block;font:500 10.5px/1 var(--m);letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-3);margin-bottom:5px}
+.lf input[type=text],.lf input[type=password]{
+  width:100%;background:#fff;border:1px solid var(--line);border-radius:var(--r);
+  padding:9px 11px;font:inherit;font-size:13.5px;color:var(--ink);
+}
+.lf input:focus{border-color:var(--blue);outline:none}
+.lf--check{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink-2);
+  margin:-2px 0 13px;cursor:pointer}
+.lf--check input{accent-color:var(--blue)}
+.lf__why{min-height:17px;margin:9px 0 0;font-size:12px;color:var(--no)}
+.lf__or{display:flex;align-items:center;gap:10px;margin:14px 0 12px;
+  font:500 10.5px/1 var(--m);letter-spacing:.1em;color:var(--ink-3)}
+.lf__or::before,.lf__or::after{content:'';flex:1;height:1px;background:var(--line)}
+.lf__note{margin:4px 0 0;padding-top:11px;border-top:1px solid var(--line-2);
+  font-size:11.5px;line-height:1.6;color:var(--ink-3)}
+/* login.js 는 demo 의 .btn--solid 를 쓴다. 이 화면의 주 버튼은 .btn--go 다. */
+.btn--solid{background:var(--blue);color:#fff}
+.btn--solid:hover:not(:disabled){background:#1543ad}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -336,6 +385,9 @@ aside{
 </div>
 
 <p class="sr" id="live" role="status" aria-live="polite"></p>
+
+<!-- 로그인 창. 배포 모드에서만 열린다 — keyvisual.js 의 boot() 이 채운다. -->
+<div class="gate" id="gate" hidden></div>
 
 <script src="/aws-config.js" onerror="window.SB_CONFIG=null"></script>
 <script type="module" src="./keyvisual.js"></script>
