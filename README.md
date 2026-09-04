@@ -140,14 +140,19 @@ committed empty: any account gets the same board on the first boot.
 Two commands: `cdk deploy` builds everything, `scripts/users.sh` creates the accounts. Four things
 have to be true before the first one — none of them are things CDK can do for you.
 
-1. **Region `us-east-1`.** Not a preference. The stack is pinned there in three places: the
-   CloudFront origin-facing prefix list ID (`pl-3b927c52` — different in every region), the `g6e` AZ
-   list, and the `us.anthropic.claude-sonnet-5` inference profile (US regions only). Elsewhere means
-   editing `infra/lib/storyboard-stack.js`.
+1. **Region `ap-northeast-2` (Seoul).** Not a preference. The stack is pinned there in three places:
+   the CloudFront origin-facing prefix list ID (`pl-22a6434b` — different in every region), the `g6e`
+   AZ list, and the `global.anthropic.*` inference profiles in `infra/graph/index.js`. Elsewhere
+   means editing `infra/lib/storyboard-stack.js`.
+
+   Seoul supports neither In-Region nor Geo inference for these Claude models, so the *global*
+   cross-region profiles are the only ones that resolve — and they route worldwide, so this buys no
+   data residency. If requests must stay in-geo, deploy to `ap-northeast-1` (Tokyo) and switch the
+   IDs to the `jp.anthropic.*` profiles instead.
 2. **A default VPC** in that region. The stack looks one up rather than creating one.
 3. **Bedrock model access for Anthropic Claude**, enabled once per account on the Bedrock console's
    Model access page. Story planning returns `AccessDeniedException` until it is. Check with
-   `aws bedrock get-foundation-model-availability --region us-east-1 --model-id anthropic.claude-sonnet-5`
+   `aws bedrock get-foundation-model-availability --region ap-northeast-2 --model-id anthropic.claude-sonnet-5`
    — you want `"authorizationStatus": "AUTHORIZED"`.
 4. **At least 8 G-instance vCPUs.** `g6e.2xlarge` needs 8 under *Running On-Demand G and VT
    instances* (`L-DB2E81BA`); a new account can start at 0. The stack still deploys — the ASG just
@@ -192,7 +197,7 @@ bash scripts/stop.sh    # stop  — takes a few minutes
 bash scripts/start.sh   # start — the graph Lambda errors until the status is `available`
 ```
 
-Both default to cluster `storyboarddemo-graph` in `us-east-1`; override with `SB_NEPTUNE_CLUSTER`
+Both default to cluster `storyboarddemo-graph` in `ap-northeast-2`; override with `SB_NEPTUNE_CLUSTER`
 and `AWS_REGION` if you deployed the stack under another name or region.
 
 > **Neptune restarts a stopped cluster by itself after 7 days.** That is an AWS limit, not something
@@ -238,7 +243,7 @@ While you do this, watch the other window: everything lands there within a secon
 
 | Item | Roughly |
 | --- | --- |
-| EC2 `g6e.2xlarge` (L40S 48GB) | **$2.24/hour** · ~$54 for a full day (us-east-1 on-demand) |
+| EC2 `g6e.2xlarge` (L40S 48GB) | **$2.24/hour** · ~$54 for a full day (us-east-1 on-demand; ap-northeast-2 runs higher — check the pricing page) |
 | EBS 200GB gp3 @ 500 MB/s | ~$27/month (the extra throughput is what makes a model swap ~1 min instead of ~4) |
 | ALB | ~$0.025/hour + traffic |
 | Neptune `db.t4g.medium` | ~$0.09/hour while running · $0 stopped, storage aside (`scripts/stop.sh`) |

@@ -289,16 +289,22 @@ async function updateGraph(g, payload) {
 
 // 프론트엔드가 spec.model 로 고르는 이름 → Bedrock 모델 id.
 // 이름은 화면(demo/story-graph.html 의 #modelSel)과 짝이 맞아야 한다.
-// id 는 지금 쓰는 교차 리전 추론 프로필 형식(us.anthropic.…)을 그대로 따른다 —
-// 리전에 있는 것과 다르면 Bedrock 이 ValidationException 을 낸다.
-// 확인: aws bedrock list-inference-profiles --region <리전>
+//
+// 배포 리전이 ap-northeast-2(서울)라서 전역(global.anthropic.…) 추론 프로필을 쓴다.
+// 서울은 이 모델들의 In-Region 도 Geo 도 지원하지 않는다 — 전역 프로필만 붙는다.
+// APAC 지역 프로필(apac.…)은 존재하지 않는다. 지역 프로필은 us./eu./au./jp. 뿐이고
+// 그중 서울을 소스 리전으로 받는 것이 없다. 잘못 넣으면 ValidationException 이 난다.
+// 전역 프로필은 데이터 residency 를 보장하지 않는다 — 전 세계 상용 리전으로 라우팅된다.
+// 확인: 모델별 상세 페이지의 Regional availability 표
+//   https://docs.aws.amazon.com/bedrock/latest/userguide/model-cards.html
 const MODELS = {
-  'haiku-4.5': 'us.anthropic.claude-haiku-4-5',
-  'sonnet-5': 'us.anthropic.claude-sonnet-5',
-  'opus-4.8': 'us.anthropic.claude-opus-4-8',
+  'haiku-4.5': 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
+  'sonnet-5': 'global.anthropic.claude-sonnet-5',
+  'opus-4.8': 'global.anthropic.claude-opus-4-8',
+  'opus-5': 'global.anthropic.claude-opus-5',
 }
 /** 허용 목록. MODELS 를 이름으로 바로 찾으면 'constructor' 같은 이름이 프로토타입을 짚는다 */
-const MODEL_NAMES = ['haiku-4.5', 'sonnet-5', 'opus-4.8']
+const MODEL_NAMES = ['haiku-4.5', 'sonnet-5', 'opus-4.8', 'opus-5']
 const DEFAULT_MODEL = 'sonnet-5'
 
 const SYSTEM = '당신은 광고·단편 영상의 콘티 기획자다. 요청받은 JSON 하나만 출력한다. 설명·머리말·코드펜스를 붙이지 않는다.'

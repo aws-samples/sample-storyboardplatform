@@ -7,7 +7,7 @@
 set -euo pipefail
 
 CLUSTER="${SB_NEPTUNE_CLUSTER:-storyboarddemo-graph}"
-REGION="${AWS_REGION:-us-east-1}"
+REGION="${AWS_REGION:-ap-northeast-2}"
 
 aws neptune stop-db-cluster --db-cluster-identifier "$CLUSTER" --region "$REGION" \
   --query 'DBCluster.[DBClusterIdentifier,Status]' --output text

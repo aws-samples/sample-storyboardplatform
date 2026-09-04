@@ -15,7 +15,7 @@ from fastapi import FastAPI, Header, HTTPException
 from PIL import Image, ImageChops
 from pydantic import BaseModel
 
-REGION = os.environ.get("SB_REGION", "us-east-1")
+REGION = os.environ.get("SB_REGION", "ap-northeast-2")
 BUCKET = os.environ["SB_BUCKET"]
 POOL = os.environ["SB_POOL"]
 CLIENT = os.environ["SB_CLIENT"]

@@ -24,9 +24,12 @@ const GRAPH_FN = path.join(HERE, '..', 'graph')
 const read = (...p) => fs.readFileSync(path.join(HERE, '..', ...p), 'utf8')
 
 const GPU_TYPE = 'g6e.2xlarge'
-const GPU_AZS = ['us-east-1a', 'us-east-1b', 'us-east-1c', 'us-east-1d']
+const GPU_AZS = ['ap-northeast-2a', 'ap-northeast-2b']
 const MODEL = 'chroma'
-const CF_ORIGINS = 'pl-3b927c52'
+// CloudFront 오리진 대역 프리픽스 리스트. 리전마다 ID 가 다르다 —
+// aws ec2 describe-managed-prefix-lists --region ap-northeast-2 \
+//   --filters Name=prefix-list-name,Values=com.amazonaws.global.cloudfront.origin-facing
+const CF_ORIGINS = 'pl-22a6434b'
 const NEPTUNE_VERSION = '1.3.4.0'
 const NEPTUNE_PORT = 8182
 // 데모용 기본 인스턴스 클래스. --context neptuneInstance=db.r6g.large 로 덮어쓴다
@@ -209,6 +212,9 @@ class StoryboardStack extends Stack {
 
     // 교차 리전 추론 프로필을 부르면 Bedrock 이 뒤에서 다른 리전의 파운데이션 모델을
     // 부른다. 그래서 프로필 ARN 과 모델 ARN 을 둘 다 열어 둔다.
+    // 모델 ARN 의 리전은 와일드카드로 둔다 — graph/index.js 가 전역 프로필을 쓰므로
+    // 목적지 리전이 전 세계다. 여기를 ap-northeast-2 로 좁히면 호출이 막힌다.
+    // 프로필 ARN 은 소스 리전, 즉 이 스택의 리전이다.
     graphFn.addToRolePolicy(new iam.PolicyStatement({
       actions: ['bedrock:InvokeModel'],
       resources: [

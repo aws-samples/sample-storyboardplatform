@@ -14,7 +14,7 @@ import { promisify } from 'node:util'
 const run = promisify(execFile)
 const HERE = path.dirname(new URL(import.meta.url).pathname.replace(/^\/(\w:)/, '$1'))
 const DIR = path.join(HERE, '..', 'resolvers')
-const REGION = process.env.AWS_REGION || 'us-east-1'
+const REGION = process.env.AWS_REGION || 'ap-northeast-2'
 
 // evaluate-code 는 컨텍스트를 요구한다. 코드가 실제로 무엇을 하든 상관없다 —
 // 문법·미지원 구문 오류는 컨텍스트와 무관하게 그대로 나온다.
