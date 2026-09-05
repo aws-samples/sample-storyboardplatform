@@ -4,29 +4,42 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Story Graph · 대본에서 씨앗과 분기까지</title>
+<!-- 세 화면이 나눠 쓰는 색 한 벌. 아래 :root 가 이 값을 가리킨다 -->
+<link rel="stylesheet" href="./theme.css">
 <style>
-  /* 밝은 톤 한 벌. 색·그림자·둥근 정도를 여기 변수로 모아 둔다 */
+  /*
+   * 이 화면의 이름들은 그대로 두고 값만 공통 토큰(theme.css)을 가리킨다.
+   *
+   * 예전에는 따뜻한 회색 배경에 보라 강조였다. 세 화면을 탭으로 오가게 되면서
+   * 여기만 강조색이 달라 다른 제품처럼 보였다 — 그래서 파랑 한 가지로 모았다.
+   * 이름을 바꾸지 않은 이유는 이 파일과 graph-view.js 규칙이 짧은 이름을 쓰기
+   * 때문이다. 값만 갈아 끼우면 규칙은 그대로 따라온다.
+   *
+   * 둥근 정도만 예외로 남긴다(--r: 14px). 이 화면은 카드가 크고 그래프 위에 얹혀서
+   * 6px 로 줄이면 판이 각지고 답답해진다. 대신 버튼·입력칸은 아래에서 --sb-r 로
+   * 내려 잡아 다른 화면과 손끝 느낌을 맞춘다.
+   */
   :root {
-    --bg: #F5F3EF;
-    --bg-soft: #FAFAF8;
-    --panel: #FFFFFF;
-    --ink: #1F2430;
-    --ink2: #565E70;
-    --ink3: #8A92A6;
-    --line: #E9E5DE;
-    --line2: #EDEFF4;
-    --acc: #6366F1;
-    --acc-ink: #4338CA;
-    --acc-soft: #EEF0FF;
-    --ok: #0F9D6E;
-    --ok-ink: #0B7355;
-    --ok-soft: #E9F9F2;
-    --warn: #B45309;
-    --warn-soft: #FFF7E8;
-    --bad: #DC2626;
-    --bad-soft: #FEF1F1;
-    --sh1: 0 1px 2px rgba(26,34,60,.04), 0 4px 20px rgba(26,34,60,.08);
-    --sh2: 0 10px 34px rgba(26,34,60,.14);
+    --bg: var(--sb-fill);
+    --bg-soft: var(--sb-fill);
+    --panel: var(--sb-panel);
+    --ink: var(--sb-ink);
+    --ink2: var(--sb-ink-2);
+    --ink3: var(--sb-ink-3);
+    --line: var(--sb-line);
+    --line2: var(--sb-line-2);
+    --acc: var(--sb-accent);
+    --acc-ink: var(--sb-accent-ink);
+    --acc-soft: var(--sb-accent-soft);
+    --ok: var(--sb-ok);
+    --ok-ink: var(--sb-ok);
+    --ok-soft: var(--sb-ok-soft);
+    --warn: var(--sb-work);
+    --warn-soft: var(--sb-work-soft);
+    --bad: var(--sb-no);
+    --bad-soft: var(--sb-no-soft);
+    --sh1: var(--sb-sh);
+    --sh2: var(--sb-sh-lg);
     --r: 14px;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -51,14 +64,13 @@
   }
   .topbar h1 {
     font-size: 19px; font-weight: 800; letter-spacing: -.02em; margin-right: 8px;
-    background: linear-gradient(120deg, #4F46E5, #14B8A6);
-    -webkit-background-clip: text; background-clip: text; color: transparent;
+    color: var(--acc);
   }
   .badge {
     font-size: 13px; font-weight: 600; background: var(--bg-soft); border: 1px solid var(--line);
     border-radius: 999px; padding: 5px 12px; color: var(--ink3); white-space: nowrap;
   }
-  .badge--live { background: var(--ok-soft); border-color: #B6E8D4; color: var(--ok-ink); }
+  .badge--live { background: var(--ok-soft); border-color: var(--sb-ok-line); color: var(--ok-ink); }
   .who { font-size: 14px; font-weight: 700; color: var(--ink2); white-space: nowrap; }
   .grow { flex: 1; }
   .graph-area { position: relative; overflow: hidden; background: var(--bg); }
@@ -68,32 +80,32 @@
   /* ── 버튼 · 입력 ────────────────────────────────────────────────────────── */
   button { font-family: inherit; }
   .btn {
-    padding: 12px 17px; background: linear-gradient(180deg, #7174F5, #5457E5);
-    border: none; border-radius: 11px; color: #fff; font-size: 14.5px; font-weight: 700;
-    letter-spacing: -.01em; cursor: pointer; box-shadow: 0 2px 10px rgba(84,87,229,.26);
+    padding: 12px 17px; background: var(--acc);
+    border: none; border-radius: var(--sb-r); color: #fff; font-size: 14.5px; font-weight: 700;
+    letter-spacing: -.01em; cursor: pointer; box-shadow: var(--sh1);
     transition: transform .14s, box-shadow .14s, filter .14s;
   }
-  .btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(84,87,229,.32); }
+  .btn:hover:not(:disabled) { transform: translateY(-1px); background: var(--acc-ink); box-shadow: var(--sh2); }
   .btn:active:not(:disabled) { transform: translateY(0); filter: brightness(.97); }
   .btn:disabled { opacity: .45; cursor: default; box-shadow: none; }
   .btn--line {
-    background: #fff; border: 1.5px solid var(--line2); color: var(--ink2);
-    font-weight: 600; box-shadow: 0 1px 2px rgba(26,34,60,.04);
+    background: #fff; border: 1px solid var(--line); color: var(--ink2);
+    font-weight: 600; box-shadow: none;
   }
-  .btn--line:hover:not(:disabled) { border-color: #C7CBF6; color: var(--acc-ink); background: var(--acc-soft); }
+  .btn--line:hover:not(:disabled) { border-color: var(--sb-accent-line); color: var(--acc-ink); background: var(--acc-soft); }
   .btn--wide { width: 100%; }
-  .btn--mini { padding: 8px 12px; font-size: 13px; border-radius: 9px; }
+  .btn--mini { padding: 8px 12px; font-size: 13px; border-radius: var(--sb-r); }
 
   textarea, select, input[type="text"], input[type="password"] {
-    width: 100%; background: #fff; border: 1.5px solid var(--line2); border-radius: 12px;
+    width: 100%; background: #fff; border: 1px solid var(--line); border-radius: var(--sb-r);
     color: var(--ink); font-family: inherit; font-size: 15px; line-height: 1.7; padding: 11px 13px;
     transition: border-color .14s, box-shadow .14s;
   }
   textarea { resize: vertical; }
   textarea:focus, select:focus, input:focus {
-    outline: none; border-color: var(--acc); box-shadow: 0 0 0 4px rgba(99,102,241,.12);
+    outline: none; border-color: var(--acc); box-shadow: 0 0 0 3px var(--acc-soft);
   }
-  textarea::placeholder { color: #AEB4C4; }
+  textarea::placeholder { color: var(--ink3); }
 
   /* ── 모델 고르기 ────────────────────────────────────────────────────────────
      이 화면의 모든 Bedrock 호출(추출·요약·분기·대본)이 여기서 고른 모델로 간다.
@@ -104,7 +116,7 @@
     text-transform: uppercase; letter-spacing: .07em; margin-bottom: 6px;
   }
   .model-pick select {
-    font-size: 13.5px; line-height: 1.5; padding: 9px 11px; border-radius: 11px;
+    font-size: 13.5px; line-height: 1.5; padding: 9px 11px; border-radius: var(--sb-r);
     cursor: pointer; font-weight: 600; color: var(--ink);
   }
   .model-pick select:disabled { background: var(--bg-soft); color: var(--ink3); cursor: default; }
@@ -113,7 +125,7 @@
   /* ── 그래프 위에 얹는 카드 ─────────────────────────────────────────────── */
   .card {
     position: absolute; z-index: 5; background: rgba(255,255,255,.94); backdrop-filter: blur(10px);
-    border: 1px solid rgba(233,229,222,.9); border-radius: 18px; padding: 17px; box-shadow: var(--sh1);
+    border: 1px solid var(--line); border-radius: 18px; padding: 17px; box-shadow: var(--sh1);
   }
   .card h3 {
     font-size: 12.5px; font-weight: 800; color: var(--ink3); text-transform: uppercase;
@@ -141,8 +153,8 @@
     background: radial-gradient(circle at 33% 28%, rgba(255,255,255,.9), var(--c) 58%, rgba(0,0,0,.18));
     box-shadow: 0 2px 4px rgba(26,34,60,.22);
   }
-  .legend i.line { width: 18px; height: 0; border-radius: 0; background: none; box-shadow: none; border-top: 2px solid #79839E; }
-  .legend i.dash { width: 18px; height: 0; border-radius: 0; background: none; box-shadow: none; border-top: 2px dashed #A9B0C4; }
+  .legend i.line { width: 18px; height: 0; border-radius: 0; background: none; box-shadow: none; border-top: 2px solid var(--ink2); }
+  .legend i.dash { width: 18px; height: 0; border-radius: 0; background: none; box-shadow: none; border-top: 2px dashed var(--ink3); }
   .canvas-msg {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     text-align: center; color: var(--ink3); font-size: 15.5px; line-height: 2; padding: 48px; pointer-events: none;
@@ -177,12 +189,12 @@
   .panel-scroll { overflow-y: auto; flex: 1; padding: 18px; }
   .panel-scroll::-webkit-scrollbar { width: 9px; }
   .panel-scroll::-webkit-scrollbar-track { background: transparent; }
-  .panel-scroll::-webkit-scrollbar-thumb { background: #DDE1EA; border: 3px solid #fff; border-radius: 999px; }
-  .panel-scroll::-webkit-scrollbar-thumb:hover { background: #C6CCDA; }
+  .panel-scroll::-webkit-scrollbar-thumb { background: var(--line); border: 3px solid var(--panel); border-radius: 999px; }
+  .panel-scroll::-webkit-scrollbar-thumb:hover { background: var(--ink3); }
 
   /* ── 씨앗 카드 ──────────────────────────────────────────────────────────── */
   .seed-card {
-    background: #fff; border: 1.5px solid var(--line2); border-radius: 17px; margin-bottom: 14px;
+    background: #fff; border: 1px solid var(--line); border-radius: 17px; margin-bottom: 14px;
     box-shadow: var(--sh1); overflow: hidden;
     transition: transform .16s, box-shadow .16s, border-color .16s;
   }
@@ -191,7 +203,7 @@
   /* 탐지기별 파스텔 그라디언트 머리. --p1/--p2/--pi 는 JS 가 씨앗마다 꽂아 준다 */
   .seed-head {
     display: flex; align-items: center; gap: 10px; padding: 13px 15px;
-    background: linear-gradient(135deg, var(--p1, #E9EAFB), var(--p2, #F6F7FE));
+    background: linear-gradient(135deg, var(--p1, var(--acc-soft)), var(--p2, var(--bg-soft)));
     border-bottom: 1px solid rgba(255,255,255,.7);
   }
   .probe-tag {
@@ -200,15 +212,15 @@
   }
   .seed-score { margin-left: auto; font-size: 14px; font-weight: 800; color: var(--pi, var(--acc-ink)); }
   /* 역기입 뒤에 새로 나온 씨앗. 판의 새 노드·엣지와 같은 녹색을 쓴다 (graph-view.js) */
-  .seed-card.is-new { border-color: #4CAF50; box-shadow: 0 0 0 4px rgba(76,175,80,.15), var(--sh1); }
+  .seed-card.is-new { border-color: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft), var(--sh1); }
   .seed-new-tag {
     display: flex; align-items: center; gap: 6px; padding: 7px 15px;
-    background: #4CAF50; color: #fff; font-size: 12.5px; font-weight: 800; letter-spacing: -.01em;
+    background: var(--ok); color: #fff; font-size: 12.5px; font-weight: 800; letter-spacing: -.01em;
   }
   .seed-new-tag::before { content: '✦'; font-size: 11px; }
   .new-badge {
     font-size: 10.5px; font-weight: 800; letter-spacing: .04em; color: #fff;
-    background: #4CAF50; border-radius: 999px; padding: 4px 9px; line-height: 1;
+    background: var(--ok); border-radius: 999px; padding: 4px 9px; line-height: 1;
   }
   .seed-body { padding: 15px 16px 16px; }
   .seed-title { font-size: 19px; font-weight: 800; line-height: 1.45; letter-spacing: -.02em; color: var(--ink); margin-bottom: 9px; cursor: pointer; }
@@ -221,28 +233,28 @@
   .story-content h1 { font-size: 25px; font-weight: 800; letter-spacing: -.03em; line-height: 1.35; margin-bottom: 12px; }
   .seed-info {
     display: flex; flex-wrap: wrap; align-items: center; gap: 9px;
-    background: linear-gradient(135deg, var(--p1, #EEF0FF), var(--p2, #F7F8FF));
+    background: linear-gradient(135deg, var(--p1, var(--acc-soft)), var(--p2, var(--bg-soft)));
     border: 1px solid rgba(255,255,255,.8); border-radius: 14px; padding: 13px 15px;
     margin-bottom: 16px; font-size: 14px; color: var(--ink2); line-height: 1.6;
   }
   .logline { color: var(--ink2); font-size: 16.5px; line-height: 1.8; margin-bottom: 16px; }
   .pivot-box {
-    background: var(--warn-soft); border: 1px solid #F5DFB4; border-radius: 14px;
+    background: var(--warn-soft); border: 1px solid var(--sb-work-line); border-radius: 14px;
     padding: 14px 16px; margin-bottom: 16px; font-size: 15px; line-height: 1.75;
   }
-  .pivot-box .ttl { color: #92400E; font-weight: 800; font-size: 15.5px; display: block; margin-bottom: 5px; }
+  .pivot-box .ttl { color: var(--warn); font-weight: 800; font-size: 15.5px; display: block; margin-bottom: 5px; }
   .pivot-box .bd { color: var(--ink2); }
 
   .branch-chips { display: grid; grid-template-columns: repeat(auto-fit, minmax(98px, 1fr)); gap: 10px; margin-bottom: 18px; }
   .branch-chip {
-    background: #fff; border: 1.5px solid var(--line2); border-radius: 15px; padding: 13px 10px;
+    background: #fff; border: 1px solid var(--line); border-radius: 15px; padding: 13px 10px;
     text-align: center; cursor: pointer; font-size: 13.5px; font-weight: 600; color: var(--ink2);
     line-height: 1.45; box-shadow: var(--sh1); transition: all .15s;
   }
-  .branch-chip:hover { transform: translateY(-2px); border-color: #C7CBF6; color: var(--ink); box-shadow: var(--sh2); }
+  .branch-chip:hover { transform: translateY(-2px); border-color: var(--sb-accent-line); color: var(--ink); box-shadow: var(--sh2); }
   .branch-chip.on {
     border-color: var(--acc); background: var(--acc-soft); color: var(--acc-ink);
-    box-shadow: 0 0 0 4px rgba(99,102,241,.13), var(--sh2);
+    box-shadow: 0 0 0 3px var(--acc-soft), var(--sh2);
   }
   .branch-chip .bid { display: block; font-size: 23px; font-weight: 800; letter-spacing: -.02em; color: var(--ink); margin-bottom: 3px; }
   .branch-chip.on .bid { color: var(--acc-ink); }
@@ -254,7 +266,7 @@
   }
   .branch-premise {
     font-size: 15.5px; color: var(--ink2); line-height: 1.8; margin-bottom: 16px;
-    padding: 2px 0 2px 14px; border-left: 3px solid #D9DCFB;
+    padding: 2px 0 2px 14px; border-left: 3px solid var(--sb-accent-line);
   }
 
   .beats { margin-bottom: 16px; }
@@ -273,7 +285,7 @@
   .outcome .k { color: var(--ink3); font-weight: 700; }
   .outcome .v { color: var(--ink); }
 
-  .wb-box { background: var(--ok-soft); border: 1px solid #BFE9D8; border-radius: 14px; padding: 13px 15px; font-size: 14px; line-height: 1.75; }
+  .wb-box { background: var(--ok-soft); border: 1px solid var(--sb-ok-line); border-radius: 14px; padding: 13px 15px; font-size: 14px; line-height: 1.75; }
   .wb-box .item { color: var(--ink2); padding: 2px 0; }
   .wb-box .item::before { content: "+ "; color: var(--ok); font-weight: 800; }
   .wb-box .item.cut::before { content: "− "; color: var(--bad); }
@@ -284,7 +296,7 @@
   .wb-sum b { color: var(--ok-ink); font-weight: 800; }
   .wb-sum i { color: var(--bad); font-style: normal; font-weight: 800; }
 
-  .free-box { background: var(--bg-soft); border: 1.5px dashed #DCD8CF; border-radius: 16px; padding: 17px; margin-top: 20px; }
+  .free-box { background: var(--bg-soft); border: 1.5px dashed var(--line); border-radius: 16px; padding: 17px; margin-top: 20px; }
   .free-box h4 { font-size: 15.5px; font-weight: 800; color: var(--ink); margin-bottom: 9px; }
 
   .placeholder { text-align: center; color: var(--ink3); padding: 30px 18px; font-size: 15px; line-height: 1.95; }
@@ -316,10 +328,10 @@
     flex: 1; font-size: 12.5px; font-weight: 700; text-align: center; padding: 8px 4px;
     border-radius: 10px; background: var(--bg-soft); border: 1.5px solid var(--line2); color: var(--ink3);
   }
-  .step.done { border-color: #BFE9D8; background: var(--ok-soft); color: var(--ok-ink); }
+  .step.done { border-color: var(--sb-ok-line); background: var(--ok-soft); color: var(--ok-ink); }
   .step.on { background: var(--acc-soft); border-color: var(--acc); color: var(--acc-ink); }
   .cut-row {
-    background: #fff; border: 1px solid var(--line2); border-radius: 13px; padding: 12px 14px;
+    background: #fff; border: 1px solid var(--line); border-radius: 13px; padding: 12px 14px;
     margin-bottom: 9px; font-size: 15px; line-height: 1.75; box-shadow: 0 1px 2px rgba(26,34,60,.04);
   }
   .cut-row .hd { display: flex; flex-wrap: wrap; gap: 9px; font-size: 12.5px; font-weight: 600; color: var(--ink3); margin-bottom: 5px; }
@@ -327,7 +339,7 @@
   .cut-row .ac { color: var(--ink); }
   .cut-row .dl { color: var(--acc-ink); font-weight: 500; }
   pre.script {
-    background: #FFFEFB; border: 1px solid var(--line); border-radius: 14px; padding: 17px;
+    background: var(--bg-soft); border: 1px solid var(--line); border-radius: 14px; padding: 17px;
     font-family: ui-monospace, Menlo, 'Malgun Gothic', monospace; font-size: 15px; line-height: 1.95;
     color: var(--ink); white-space: pre-wrap; word-break: break-word; max-height: 46vh; overflow: auto;
     box-shadow: inset 0 1px 3px rgba(26,34,60,.04);
@@ -339,11 +351,11 @@
   .gate {
     position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
     padding: 28px; overflow: auto;
-    background: linear-gradient(140deg, #F3F1FF 0%, var(--bg) 48%, #EBFBF7 100%);
+    background: linear-gradient(140deg, var(--acc-soft) 0%, var(--bg) 55%, var(--bg) 100%);
   }
   .gate__card {
     width: 100%; max-width: 470px; background: #fff; border-radius: 24px; padding: 34px;
-    box-shadow: 0 24px 70px rgba(30,40,80,.16); border: 1px solid rgba(255,255,255,.9);
+    box-shadow: var(--sh2); border: 1px solid var(--line);
   }
   .gate__eyebrow { font-size: 13px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--acc); margin-bottom: 8px; }
   .gate__title { font-size: 27px; font-weight: 800; letter-spacing: -.03em; margin-bottom: 10px; }
@@ -351,10 +363,10 @@
   .gate__list { display: grid; gap: 8px; margin-bottom: 6px; }
   .gate__who {
     display: flex; align-items: center; gap: 11px; width: 100%; text-align: left; cursor: pointer;
-    padding: 11px 14px; border: 1.5px solid var(--line2); border-radius: 13px; background: #fff;
+    padding: 11px 14px; border: 1px solid var(--line); border-radius: 13px; background: #fff;
     font-family: inherit; font-size: 14.5px; transition: all .14s;
   }
-  .gate__who:hover:not(:disabled) { border-color: #C7CBF6; background: var(--acc-soft); transform: translateY(-1px); }
+  .gate__who:hover:not(:disabled) { border-color: var(--sb-accent-line); background: var(--acc-soft); transform: translateY(-1px); }
   .gate__who:disabled { opacity: .5; cursor: default; }
   .gate__dot { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 1px 3px rgba(26,34,60,.25); }
   .gate__name { font-size: 15px; font-weight: 700; color: var(--ink); }
@@ -1387,15 +1399,22 @@ async function extract() {
 // ── 시동 ─────────────────────────────────────────────────────────────────────
 document.querySelectorAll('.tabs .tab').forEach((t) => { t.onclick = () => openTab(t.dataset.tab) })
 
-// 상단 기능 탭. 스토리보드만 index.html 로 나가고(링크), 나머지는 이 화면에서 받는다.
+// 상단 기능 탭. 스토리보드와 키비주얼은 링크로 나가고(/board.html · /key-visual/index.html),
+// 디벨롭·대본화·대본번역은 이 화면에서 받는다. keyvisual 을 handled 에 넣으면 버튼이
+// 되어 눌러도 이동하지 않으므로 넣지 않는다.
 // ?tab=script 로 들어오면 안쪽 [대본화] 가 처음부터 열려 있다.
 {
+  /*
+   * 이 화면이 받지 못하는 탭 이름으로 들어오면 기본 탭으로 떨어뜨린다.
+   * ?tab=board 나 ?tab=keyvisual 은 각자 자기 화면이 따로 있으므로 여기서 열 수 없다 —
+   * 그대로 두면 어느 판도 켜지지 않아 빈 화면이 된다.
+   */
   const asked = navTabFromSearch(location.search, 'develop')
-  const first = asked === 'board' ? 'develop' : asked
+  const first = asked === 'board' || asked === 'keyvisual' ? 'develop' : asked
   NAV = mountNav({
     mount: $('navMount'),
     active: first,
-    handled: ['develop', 'script', 'translate', 'keyvisual'],
+    handled: ['develop', 'script', 'translate'],
     onSelect: (id) => {
       if (isSoonTab(id)) return showSoon(id)
       openTab(id === 'script' ? 'script' : LAST_DEV_TAB)

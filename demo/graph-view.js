@@ -38,15 +38,21 @@ const KIND_R = {
   Character: 25, Faction: 21, Location: 20, Event: 20, Secret: 19, Object: 17,
 }
 
-const INK = '#2A2F3A'
+/*
+ * 캔버스 색. 여기는 CSS 가 아니라 2D 컨텍스트라서 var(--sb-*) 를 쓸 수 없다 —
+ * theme.css 의 값을 그대로 적어 둔다. 그쪽을 고치면 여기도 같이 고쳐야 한다.
+ * 노드 구체 색(KIND_COLOR)만 예외로 남긴다. 여섯 종류를 서로 구별하는 색이라
+ * 강조 한 가지로 모으면 그래프를 읽을 수 없다.
+ */
+const INK = '#111318'          /* --sb-ink */
 const DOT = 'rgba(120,130,160,0.20)'
 const EDGE_ON = 'rgba(96,108,136,0.62)'
 const EDGE_DER = 'rgba(140,150,175,0.50)'
 
-/** 새로 생긴 것을 알리는 녹색. 노드 테두리·NEW 뱃지·새 엣지가 한 색을 쓴다 */
-const NEW_GREEN = '#4CAF50'
-/** 끊긴 엣지 자리에 잠깐 남는 붉은색 */
-const GONE_RED = '#E05252'
+/** 새로 생긴 것을 알리는 녹색(--sb-ok). 노드 테두리·NEW 뱃지·새 엣지가 한 색을 쓴다 */
+const NEW_GREEN = '#0f7b5f'
+/** 끊긴 엣지 자리에 잠깐 남는 붉은색(--sb-no) */
+const GONE_RED = '#b42318'
 /** 새 노드가 반짝이는 시간. 이 뒤에는 정지한 녹색 테두리와 NEW 뱃지만 남는다 */
 const PULSE_MS = 9000
 /** 반짝임 한 주기 */
@@ -336,8 +342,9 @@ export function createGraphView(host, opts = {}) {
   // ── 그리기 ─────────────────────────────────────────────────────────────────
   function paintBackground(w, h) {
     const g = ctx.createLinearGradient(0, 0, 0, h)
-    g.addColorStop(0, '#FDFDFB')
-    g.addColorStop(1, '#F4F2EE')
+    // theme.css 의 --sb-bg → --sb-fill 과 같은 값이다. 캔버스라 var() 를 못 써서 적어 둔다
+    g.addColorStop(0, '#ffffff')
+    g.addColorStop(1, '#f1f3f6')
     ctx.fillStyle = g
     ctx.fillRect(0, 0, w, h)
 
@@ -363,7 +370,7 @@ export function createGraphView(host, opts = {}) {
     const c = ctrl(e)
     const { p1, p2 } = endpoints(e, c)
     // 새로 생긴 엣지는 굵은 녹색이다. 얹은 것보다 이 표시가 앞선다
-    const tone = fresh ? NEW_GREEN : (on ? '#6B7BE0' : (e.asserted ? EDGE_ON : EDGE_DER))
+    const tone = fresh ? NEW_GREEN : (on ? '#1a56db' : (e.asserted ? EDGE_ON : EDGE_DER))
     ctx.save()
     ctx.beginPath()
     ctx.moveTo(p1.x, p1.y)
@@ -522,7 +529,7 @@ export function createGraphView(host, opts = {}) {
       : (on ? 'rgba(107,123,224,0.55)' : (e.asserted ? 'rgba(150,158,180,0.42)' : 'rgba(160,168,190,0.34)'))
     ctx.stroke()
     ctx.font = s.font
-    ctx.fillStyle = fresh ? '#2E7D32' : (on ? '#4453B8' : (e.asserted ? '#3B4457' : '#7A8296'))
+    ctx.fillStyle = fresh ? '#0b5c46' : (on ? '#1543ad' : (e.asserted ? '#3B4457' : '#7A8296'))
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     ctx.fillText(s.text, s.x, s.y + 0.5)
@@ -636,7 +643,7 @@ export function createGraphView(host, opts = {}) {
     ctx.lineWidth = 4
     ctx.strokeStyle = 'rgba(255,255,255,0.92)'
     ctx.strokeText(nd.name, x, y)
-    ctx.fillStyle = big ? '#111827' : INK
+    ctx.fillStyle = big ? '#111318' : INK
     ctx.fillText(nd.name, x, y)
     ctx.restore()
   }

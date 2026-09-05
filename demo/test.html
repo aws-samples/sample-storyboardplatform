@@ -35,7 +35,7 @@
   } = await import(`./story.js?t=${Date.now()}`)
   const { edgeLabel, graphDelta, EDGE_LABELS_KR } = await import(`./graph-view.js?t=${Date.now()}`)
   const { parseField, runPlanJob, PLAN_TIMEOUT_MS } = await import(`./net.js?t=${Date.now()}`)
-  const { NAV_TABS, navTab, isSoonTab, navTabFromSearch, soonMarkup, mountNav,
+  const { NAV_TABS, navTab, navHref, isSoonTab, navTabFromSearch, soonMarkup, mountNav,
   } = await import(`./nav-tabs.js?t=${Date.now()}`)
 
   const out = document.getElementById('out')
@@ -1220,20 +1220,55 @@
   })())
 
   // ── nav-tabs.js: 상단 기능 탭 ──────────────────────────────────────────────
-  // 두 화면(index.html · story-graph.html)이 이 한 벌을 나눠 쓴다. 탭이 늘거나
-  // 이동 주소가 어긋나면 여기서 걸린다.
-  ok('탭은 다섯이고 순서가 정해져 있다',
-    NAV_TABS.map((t) => t.id).join(',') === 'board,develop,script,translate,keyvisual')
+  // 세 화면(board.html · story-graph.html · key-visual/)이 이 한 벌을 나눠 쓴다.
+  // 탭이 늘거나 이동 주소가 어긋나면 여기서 걸린다.
+  /*
+   * 순서는 이야기가 만들어지는 순서다 — 시놉시스에서 시작해 보드에서 끝난다.
+   * 보드가 가장 오래된 화면이라 처음에는 맨 앞이었는데, 만들어진 순서와 쓰는 순서가
+   * 달라 사용자가 거꾸로 읽었다. 홈(demo/home.js)이 이 배열을 그대로 번호로 매기므로
+   * 여기 순서가 곧 화면에 보이는 순서다.
+   */
+  ok('탭은 다섯이고 이야기 순서대로다 — 디벨롭이 처음, 보드가 마지막',
+    NAV_TABS.map((t) => t.id).join(',') === 'develop,script,translate,keyvisual,board')
   ok('탭마다 이름과 한 줄 설명이 있다', NAV_TABS.every((t) => t.label && t.desc))
-  ok('스토리보드·디벨롭·대본화는 갈 곳이 있고, 나머지는 준비 중이다', (() => {
+  ok('보드까지 네 탭은 갈 곳이 있고, 대본 번역만 준비 중이다', (() => {
     const go = NAV_TABS.filter((t) => t.href).map((t) => t.id).join(',')
     const later = NAV_TABS.filter((t) => t.soon).map((t) => t.id).join(',')
-    return go === 'board,develop,script' && later === 'translate,keyvisual'
+    return go === 'develop,script,keyvisual,board' && later === 'translate'
   })())
   ok('대본화는 story-graph 의 안쪽 대본화 탭으로 데려간다',
-    navTab('script').href === './story-graph.html?tab=script')
-  ok('디벨롭은 파라미터 없이 story-graph 로 간다', navTab('develop').href === './story-graph.html')
-  ok('준비 중 탭 판별', isSoonTab('translate') && isSoonTab('keyvisual') && !isSoonTab('board'))
+    navTab('script').href === '/story-graph.html?tab=script')
+  ok('디벨롭은 파라미터 없이 story-graph 로 간다', navTab('develop').href === '/story-graph.html')
+  /*
+   * 주소는 전부 루트 기준 절대경로다. 이 바가 세 깊이에서 그려지기 때문이다 —
+   * 버킷 루트, /demo/, /key-visual/. 상대경로로 두면 키비주얼에서 누를 때
+   * /key-visual/story-graph.html 을 찾아 403 이 난다. 실제로 그랬다.
+   */
+  ok('모든 주소가 루트 기준이다 — 어느 깊이에서 그려도 같은 곳으로 간다',
+    NAV_TABS.filter((t) => t.href).every((t) => t.href.startsWith('/')))
+  /*
+   * 그리고 디렉터리가 아니라 파일 이름까지 적는다. CloudFront 의 defaultRootObject 는
+   * 루트 '/' 에만 적용되고 하위 디렉터리에는 적용되지 않아서 '/key-visual/' 은 403 이다.
+   * 로컬 서버는 예전에 디렉터리 index 를 찾아줘서 이 버그를 가렸다 — 지금은 배포처럼
+   * 403 을 돌려준다(infra/scripts/serve-local.mjs).
+   */
+  ok('키비주얼 주소는 디렉터리가 아니라 파일까지 적는다 — 배포에서 디렉터리는 403 이다',
+    navTab('keyvisual').href === '/key-visual/index.html')
+  ok('보드는 홈이 아니라 자기 파일로 간다 — 루트는 홈이다',
+    navTab('board').href === '/board.html')
+  ok('준비 중은 대본 번역뿐이다',
+    isSoonTab('translate') && !isSoonTab('keyvisual') && !isSoonTab('board'))
+  /*
+   * 화면이 없는 탭도 링크로 그려질 수 있다 — 키 비주얼처럼 그 탭을 handled 에 넣지
+   * 않는 화면에서다. href 가 없으니 그대로 <a> 로 만들면 주소가 undefined 가 되어
+   * /key-visual/undefined 같은 곳으로 간다. navHref 가 보드로 돌려보내고, 보드가
+   * ?tab= 을 읽어 준비 중 안내를 띄운다.
+   */
+  ok('갈 곳이 있는 탭은 자기 주소를 쓴다', navHref('keyvisual') === '/key-visual/index.html'
+    && navHref('script') === '/story-graph.html?tab=script')
+  ok('준비 중 탭은 보드로 보내고 보드가 안내를 띄운다',
+    navHref('translate') === '/board.html?tab=translate')
+  ok('보드는 그 주소로 안내 탭을 켠다', navTabFromSearch('?tab=translate', 'board') === 'translate')
   ok('?tab=script 는 대본화로 읽는다', navTabFromSearch('?tab=script', 'develop') === 'script')
   ok('모르는 tab 값은 기본 탭으로 떨어진다', navTabFromSearch('?tab=없는것', 'develop') === 'develop')
   ok('파라미터가 없으면 기본 탭', navTabFromSearch('', 'board') === 'board'
@@ -1255,7 +1290,7 @@
       onSelect: (id) => picked.push(id),
     })
     const at = (id) => mount.querySelector(`[data-nav="${id}"]`)
-    const shape = at('board').tagName === 'A' && at('board').getAttribute('href').endsWith('index.html')
+    const shape = at('board').tagName === 'A' && at('board').getAttribute('href') === '/board.html'
       && at('script').tagName === 'BUTTON'
     const on = at('develop').getAttribute('aria-current') === 'page'
       && at('script').getAttribute('aria-current') === null
@@ -1267,6 +1302,45 @@
     const synced = nav.active() === 'script' && at('script').getAttribute('aria-current') === 'page'
     mount.remove()
     return shape && on && moved && synced
+  })())
+
+  /*
+   * 탭 바가 그려지는 순서도 배열 순서와 같아야 한다. 홈이 같은 배열로 번호를 매기므로
+   * 둘이 어긋나면 홈에서는 1번인 것이 바에서는 5번째에 있게 된다.
+   */
+  ok('탭 바에 그려지는 순서가 배열 순서와 같다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    mountNav({ mount, active: 'develop', handled: ['develop'] })
+    const drawn = Array.from(mount.querySelectorAll('[data-nav]')).map((e) => e.dataset.nav).join(',')
+    mount.remove()
+    return drawn === 'develop,script,translate,keyvisual,board'
+  })())
+
+  /*
+   * 홈이 생긴 뒤로 이 바는 얇은 모양이 기본이고 홈으로 가는 길을 함께 둔다.
+   * 얇은 모양에서는 설명 줄이 감춰지므로 title 에 남는지도 본다 — 다섯 탭의 이름만으로는
+   * '대본화'와 '대본 번역'이 잘 구별되지 않는다.
+   */
+  ok('기본이 얇은 모양이고 홈으로 가는 길이 있다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    mountNav({ mount, active: 'board', handled: ['board'] })
+    const bar = mount.querySelector('.navbar')
+    const home = mount.querySelector('[data-nav-home]')
+    const titled = mount.querySelector('[data-nav="script"]').title.includes('기존 이야기')
+    const r = bar.classList.contains('navbar--slim') && home?.getAttribute('href') === '/' && titled
+    mount.remove()
+    return r
+  })())
+  ok('넓은 모양과 홈 없는 모양도 고를 수 있다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    mountNav({ mount, active: 'board', handled: ['board'], slim: false, home: false })
+    const bar = mount.querySelector('.navbar')
+    const r = !bar.classList.contains('navbar--slim') && !mount.querySelector('[data-nav-home]')
+    mount.remove()
+    return r
   })())
 
   // ── net.js: AWSJSON 필드 풀기 ─────────────────────────────────────────────
