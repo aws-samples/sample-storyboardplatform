@@ -15,6 +15,7 @@ import { ART_ROLES, orderKeyBetween } from '../demo/core.js'
 import { configured, idToken, session } from '../demo/auth.js'
 import { connect } from '../demo/net.js'
 import { showLogin } from '../demo/login.js'
+import { mountNav } from '../demo/nav-tabs.js'
 import * as coach from './coach.js'
 
 const cfg = window.SB_CONFIG || {}
@@ -1000,6 +1001,19 @@ EXT. 극장 앞 거리 - 낮
 반쯤 찢긴 포스터. 지나가는 사람들.`
 
 async function boot() {
+  /*
+   * 세 화면 공통 기능 탭. 로그인을 기다리기 전에 먼저 붙인다 — 로그인 창이 떠 있는
+   * 동안에도 머리 띠가 완성된 모양으로 보이고, 여기서 다른 기능으로 나갈 수도 있다.
+   *
+   * keyvisual 만 이 화면 몫(handled)이다. handled 에 든 탭은 <a> 가 아니라 <button>
+   * 이 되어 이동하지 않으므로, 화면이 없는 탭을 넣으면 눌러도 아무 일 없는 버튼이
+   * 된다. onSelect 를 주지 않은 것도 그래서다 — 이미 이 화면이라 할 일이 없다.
+   *
+   * 아래의 #nav(paintNav)와는 층이 다르다. 이건 "어느 기능", 그건 "그 기능의 몇 번째
+   * 단계"다.
+   */
+  mountNav({ mount: $('#navMount'), active: 'keyvisual', handled: ['keyvisual'] })
+
   /*
    * 배포 모드에서는 먼저 로그인을 받는다.
    *

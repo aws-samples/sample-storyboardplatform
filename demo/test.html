@@ -35,7 +35,7 @@
   } = await import(`./story.js?t=${Date.now()}`)
   const { edgeLabel, graphDelta, EDGE_LABELS_KR } = await import(`./graph-view.js?t=${Date.now()}`)
   const { parseField, runPlanJob, PLAN_TIMEOUT_MS } = await import(`./net.js?t=${Date.now()}`)
-  const { NAV_TABS, navTab, isSoonTab, navTabFromSearch, soonMarkup, mountNav,
+  const { NAV_TABS, navTab, navHref, isSoonTab, navTabFromSearch, soonMarkup, mountNav,
   } = await import(`./nav-tabs.js?t=${Date.now()}`)
 
   const out = document.getElementById('out')
@@ -1225,15 +1225,33 @@
   ok('탭은 다섯이고 순서가 정해져 있다',
     NAV_TABS.map((t) => t.id).join(',') === 'board,develop,script,translate,keyvisual')
   ok('탭마다 이름과 한 줄 설명이 있다', NAV_TABS.every((t) => t.label && t.desc))
-  ok('스토리보드·디벨롭·대본화는 갈 곳이 있고, 나머지는 준비 중이다', (() => {
+  ok('키비주얼까지 네 탭은 갈 곳이 있고, 대본 번역만 준비 중이다', (() => {
     const go = NAV_TABS.filter((t) => t.href).map((t) => t.id).join(',')
     const later = NAV_TABS.filter((t) => t.soon).map((t) => t.id).join(',')
-    return go === 'board,develop,script' && later === 'translate,keyvisual'
+    return go === 'board,develop,script,keyvisual' && later === 'translate'
   })())
   ok('대본화는 story-graph 의 안쪽 대본화 탭으로 데려간다',
     navTab('script').href === './story-graph.html?tab=script')
   ok('디벨롭은 파라미터 없이 story-graph 로 간다', navTab('develop').href === './story-graph.html')
-  ok('준비 중 탭 판별', isSoonTab('translate') && isSoonTab('keyvisual') && !isSoonTab('board'))
+  /*
+   * 키 비주얼만 루트 기준 절대경로다. 배포에서 이 탭 바는 /index.html 과
+   * /demo/index.html 두 곳에서 그려지는데, './key-visual/' 로 두면 후자에서
+   * /demo/key-visual/ 을 찾아 404 가 된다.
+   */
+  ok('키비주얼은 어느 폴더에서 그려도 같은 곳으로 간다', navTab('keyvisual').href === '/key-visual/')
+  ok('준비 중은 대본 번역뿐이다',
+    isSoonTab('translate') && !isSoonTab('keyvisual') && !isSoonTab('board'))
+  /*
+   * 화면이 없는 탭도 링크로 그려질 수 있다 — 키 비주얼처럼 그 탭을 handled 에 넣지
+   * 않는 화면에서다. href 가 없으니 그대로 <a> 로 만들면 주소가 undefined 가 되어
+   * /key-visual/undefined 같은 곳으로 간다. navHref 가 보드로 돌려보내고, 보드가
+   * ?tab= 을 읽어 준비 중 안내를 띄운다.
+   */
+  ok('갈 곳이 있는 탭은 자기 주소를 쓴다', navHref('keyvisual') === '/key-visual/'
+    && navHref('script') === './story-graph.html?tab=script')
+  ok('준비 중 탭은 보드로 보내고 보드가 안내를 띄운다',
+    navHref('translate') === '/index.html?tab=translate')
+  ok('보드는 그 주소로 안내 탭을 켠다', navTabFromSearch('?tab=translate', 'board') === 'translate')
   ok('?tab=script 는 대본화로 읽는다', navTabFromSearch('?tab=script', 'develop') === 'script')
   ok('모르는 tab 값은 기본 탭으로 떨어진다', navTabFromSearch('?tab=없는것', 'develop') === 'develop')
   ok('파라미터가 없으면 기본 탭', navTabFromSearch('', 'board') === 'board'

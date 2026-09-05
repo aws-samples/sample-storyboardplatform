@@ -1565,7 +1565,7 @@ function renderBoard() {
       </div>
       <div class="cut__body">
         ${p.action ? `<p class="cut__action">${esc(p.action)}</p>`
-          : p.charId || p.dialogue ? '' : '<p class="cut__action" style="color:#B3ABA0">설명 없음</p>'}
+          : p.charId || p.dialogue ? '' : '<p class="cut__action" style="color:var(--pencil-2)">설명 없음</p>'}
         ${p.dialogue ? `<p class="cut__dialogue">${esc(p.dialogue)}</p>` : ''}
       </div>
       <footer class="cut__foot">
@@ -1610,7 +1610,7 @@ function renderCursors() {
     .filter((p) => p.cursor && (p.view ?? null) === (viewChar ?? null))
     .map((p) => `
       <div class="cursor" style="left:${p.cursor.x}px; top:${p.cursor.y}px">
-        <svg width="14" height="18" viewBox="0 0 14 18"><path d="M1 1l11 8-5 1 2.5 6-2 1-2.6-6L1 14z" fill="${p.color}" stroke="#1C1A17" stroke-width="1"/></svg>
+        <svg width="14" height="18" viewBox="0 0 14 18"><path d="M1 1l11 8-5 1 2.5 6-2 1-2.6-6L1 14z" fill="${p.color}" stroke="var(--ink)" stroke-width="1"/></svg>
         <span style="background:${p.color}">${esc(p.name)}</span>
       </div>`).join(''))
 }
@@ -1902,7 +1902,7 @@ function toast(n) {
       <span class="notif__kind" data-kind="${n.kind}">${KIND[n.kind] || '알림'}</span>
       <button class="toast__act" data-goto="${n.panelId}">보기</button>
     </div>
-    ${p ? `<div class="mono" style="font-size:9.5px;color:#9A9288;margin-bottom:3px">${esc(`${whereOf(p)} · ${labelOf(p)}`)}</div>` : ''}
+    ${p ? `<div class="mono" style="font-size:9.5px;color:var(--pencil-2);margin-bottom:3px">${esc(`${whereOf(p)} · ${labelOf(p)}`)}</div>` : ''}
     ${esc(notifText(n))}`)
   host.appendChild(el)
   while (host.children.length > 3) host.firstChild.remove()
@@ -2953,8 +2953,10 @@ planDlg.addEventListener('click', (e) => {
 byId('print').addEventListener('click', () => window.print())
 
 // ── 상단 기능 탭 ─────────────────────────────────────────────────────────────
-// 스토리보드는 이 화면이고, 스토리 디벨롭·대본화는 story-graph.html 로 넘어간다(링크).
-// 대본 번역·키비주얼은 아직 화면이 없어서 보드 자리에 안내만 띄운다.
+// 스토리보드는 이 화면이고, 스토리 디벨롭·대본화는 story-graph.html, 키비주얼은
+// /key-visual/ 로 넘어간다(모두 링크). 대본 번역만 아직 화면이 없어서 보드 자리에
+// 안내를 띄운다 — 그래서 handled 에 board 와 translate 만 남는다. keyvisual 을
+// 여기 넣으면 버튼이 되어 눌러도 이동하지 않고 빈 안내만 뜬다.
 {
   const soon = byId('soon')
   const work = document.querySelector('.work')
@@ -2970,7 +2972,7 @@ byId('print').addEventListener('click', () => window.print())
   mountNav({
     mount: byId('navMount'),
     active: first,
-    handled: ['board', 'translate', 'keyvisual'],
+    handled: ['board', 'translate'],
     onSelect: openNav,
   })
   openNav(first)
