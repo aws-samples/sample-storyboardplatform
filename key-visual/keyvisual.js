@@ -414,16 +414,42 @@ function pushVersion(s, j) {
   wire('u', `publishOp  panel.version  ${s.id} v${j.ver}`)
 }
 
+/**
+ * 붙인 패널이 실제로 보이는 뷰로 '보드로' 링크를 맞춘다.
+ *
+ * 보드는 sessionStorage 의 마지막 뷰(sb.view · sb.ep)로 열린다. 그런데 여기서 만드는
+ * 패널에는 epId 가 없다 — 이 화면의 대본은 보드의 회차가 아니라 자체 샘플이라서
+ * 어느 회차의 것도 아니다. demo/app.js 의 cutsOf() 는 (p.epId ?? null) === viewEp 로
+ * 거르므로, 대본화로 회차를 만든 뒤라면 보드가 그 회차를 보고 있어서 epId 없는
+ * 패널은 목록에 아예 안 나온다 — 붙이기는 됐는데 컷 수가 늘지 않는 것처럼 보인다.
+ *
+ * app.js 의 pickView() 는 #cut=<panelId> 가 있으면 그 패널의 뷰(viewChar · viewEp)로
+ * 맞추고 그 패널을 고른다. 그 계약에 링크를 얹는다.
+ */
+function aimBoardLink(panelId) {
+  const a = $('#toBoard')
+  if (a && panelId) a.href = `/index.html#cut=${panelId}`
+}
+
 async function postToBoard() {
   const ops = opsForBoard(S.scenes, S.jobs, S.me?.id || 'local')
   if (!ops.length) return
+  // sendOp 이 옵셔널 체이닝이라 연결이 없으면 조용히 아무 일도 안 하고 지나간다.
+  // 그 상태로 '붙였습니다' 라고 말하면 안 된다 — 보드에 남는 것이 없다.
+  if (!S.net) {
+    wire('r', 'publishOp 보낼 곳이 없다 — 보드에 연결되지 않았다')
+    note('보드에 연결되지 않아 붙이지 못했습니다')
+    say('보드에 연결되지 않아 붙이지 못했습니다')
+    return
+  }
   for (const op of ops) {
     op.id = uid(); op.ts = now(); op.actor = S.me?.id || 'local'
-    S.net?.sendOp(op)
+    S.net.sendOp(op)
   }
   wire('u', `publishOp × ${ops.length}  보드에 씬 패널로 남긴다`)
   note(`키 비주얼 ${ops.length}장을 보드에 붙였습니다`)
   S.posted = true
+  aimBoardLink(ops[0].panel.id)
   paint()
   say(`${ops.length}장을 보드에 붙였습니다`)
 }
