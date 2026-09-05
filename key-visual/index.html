@@ -67,9 +67,10 @@ header{
 .ghost:hover{background:var(--fill);color:var(--ink)}
 
 /* ── 기능 탭 ───────────────────────────── */
-/* 모양은 demo/nav-tabs.js 가 넣는다. 여기서는 이 머리 띠의 좌우 여백(20px)에만 맞춘다.
-   투명 배경 — 위의 .bar 와 같은 흐린 흰 판 위에 그대로 앉는다 */
-#navMount .navbar{padding:0 14px;background:none}
+/* 모양은 demo/nav-tabs.js 가 넣는다. 여기서는 이 머리 띠의 좌우 여백에만 맞춘다.
+   투명 배경 — 위의 .bar 와 같은 흐린 흰 판 위에 그대로 앉는다.
+   padding 을 세로 0 으로만 덮고 좌우는 그쪽 값(얇은 모양은 10px)을 그대로 쓴다 */
+#navMount .navbar{padding-top:0;padding-bottom:0;background:none}
 
 /* ── 단계 탭 ───────────────────────────── */
 /* 기능 탭 아래 한 층. 위와 붙어 보이지 않게 위쪽 여백을 준다 */
@@ -381,7 +382,7 @@ aside{
     <span class="spacer"></span>
     <span class="tag" id="whoami" data-coach="whoami">…</span>
     <button class="ghost" id="coachBtn" type="button">안내 다시 보기</button>
-    <a class="ghost" id="toBoard" href="/index.html">보드로</a>
+    <a class="ghost" id="toBoard" href="/board.html">보드로</a>
   </div>
   <!--
     기능 탭 자리. 세 화면이 같은 바를 쓴다 — 모양은 demo/nav-tabs.js 가 넣는다.

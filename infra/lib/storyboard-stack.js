@@ -461,7 +461,12 @@ class StoryboardStack extends Stack {
      * 마지막 것 때문에 demo 를 루트에만 두면 /demo/core.js 가 403 이 되어
      * 브라우저에서 모듈 로드가 실패한다. 그래서 demo 를 루트와 /demo/ 양쪽에 올린다.
      * 최종 구조:
-     *   /aws-config.js  /index.html  /core.js …  /demo/core.js …  /key-visual/index.html
+     *   /aws-config.js  /index.html(홈)  /board.html  /core.js …
+     *   /demo/core.js …  /key-visual/index.html
+     *
+     * 아래 defaultRootObject 는 루트 '/' 에만 적용된다 — 하위 디렉터리에는 적용되지
+     * 않으므로 '/key-visual/' 은 403 이다. 그래서 탭 주소는 파일 이름까지 적는다
+     * (demo/nav-tabs.js 의 NAV_TABS).
      */
     const webDeploy = new s3deploy.BucketDeployment(this, 'Web', {
       destinationBucket: site,

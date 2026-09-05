@@ -6,10 +6,18 @@
  * (storyboard-stack.js 의 Web / WebDemo / WebKeyVisual 세 배포). 저장소 루트에는
  * index.html 이 아예 없다. 그래서 저장소를 그냥 서빙하면
  *   - '/'                     → 404 (index.html 이 루트에 없다)
- *   - '/index.html' (보드로)  → 404 ← 방금 고친 링크가 이걸 가리킨다
+ *   - '/board.html' (보드)    → 404
  *   - '/aws-config.js'        → 있다 (gitignore 된 로컬 파일)
  *   - '/demo/core.js'         → 있다 (keyvisual.js 가 '../demo/core.js' 로 부른다)
  * 즉 링크 수정이 맞는지 로컬에서 확인하려면 이 배치를 흉내내야 한다.
+ *
+ * 디렉터리 index 를 흉내내지 않는다 — 이게 중요하다. CloudFront 의
+ * defaultRootObject 는 루트 '/' 에만 적용되고 하위 디렉터리에는 적용되지 않는다.
+ * 즉 배포에서 '/key-visual/' 은 403 이고 '/key-visual/index.html' 만 200 이다.
+ * 예전 이 서버는 디렉터리를 보면 index.html 을 스스로 찾아줬는데, 그래서 탭의
+ * href='/key-visual/' 이 로컬에서는 열리고 배포에서만 403 이 났다. 로컬이 더
+ * 관대하면 이런 버그가 배포까지 간다. 그래서 루트만 예외로 두고 나머지 디렉터리는
+ * 배포처럼 403 을 돌려준다.
  *
  * 그리고 aws-config.js 의 genUrl 은 '/gen' 이라는 상대경로다. 배포에서는
  * CloudFront 가 그 경로만 ALB 로 보낸다. 로컬에는 그 CloudFront 가 없으므로
@@ -64,6 +72,11 @@ function candidates(p) {
   return out
 }
 
+/*
+ * 파일만 찾는다. 디렉터리를 만나면 index.html 로 넘어가지 않는다 — 위에 적은 대로
+ * 배포가 그렇게 동작하지 않기 때문이다. 루트 '/' 만 candidates 가 미리
+ * 'demo/index.html' 로 바꿔 두므로 그 한 곳은 열린다.
+ */
 async function findFile(urlPath) {
   for (const c of candidates(decodeURIComponent(urlPath.split('?')[0]))) {
     const abs = path.join(ROOT, c)
@@ -72,10 +85,6 @@ async function findFile(urlPath) {
     try {
       const s = await stat(abs)
       if (s.isFile()) return abs
-      if (s.isDirectory()) {
-        const idx = path.join(abs, 'index.html')
-        try { if ((await stat(idx)).isFile()) return idx } catch {}
-      }
     } catch {}
   }
   return null
@@ -118,8 +127,16 @@ createServer(async (req, res) => {
 
   const file = await findFile(url)
   if (!file) {
-    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
-    res.end(`404 ${url}\n찾아본 곳: ${candidates(url.split('?')[0]).join(', ')}\n`)
+    /*
+     * 디렉터리로 끝나는 주소는 403 으로 답한다. 배포의 S3 오리진이 그렇게 답하기
+     * 때문이다 — 404 로 답하면 "파일이 없다"로 읽히지만 실제 원인은 "디렉터리라서
+     * 못 준다"이고, 고칠 곳이 파일 위치가 아니라 링크 쪽이다.
+     */
+    const dirish = url.split('?')[0].endsWith('/')
+    res.writeHead(dirish ? 403 : 404, { 'content-type': 'text/plain; charset=utf-8' })
+    res.end(dirish
+      ? `403 ${url}\n디렉터리에는 index 가 없다 — 배포도 같다. 파일 이름까지 적어야 한다.\n`
+      : `404 ${url}\n찾아본 곳: ${candidates(url.split('?')[0]).join(', ')}\n`)
     return
   }
   const body = await readFile(file)
@@ -130,7 +147,9 @@ createServer(async (req, res) => {
   res.end(body)
 }).listen(PORT, () => {
   console.log(`로컬 서버   http://localhost:${PORT}`)
-  console.log(`  보드       http://localhost:${PORT}/index.html`)
-  console.log(`  키 비주얼  http://localhost:${PORT}/key-visual/`)
+  console.log(`  홈         http://localhost:${PORT}/`)
+  console.log(`  보드       http://localhost:${PORT}/board.html`)
+  console.log(`  디벨롭     http://localhost:${PORT}/story-graph.html`)
+  console.log(`  키 비주얼  http://localhost:${PORT}/key-visual/index.html`)
   console.log(`  /gen       ${ORIGIN ? `→ https://${ORIGIN}` : '없음 (SB_ORIGIN 미설정 → 502)'}`)
 })

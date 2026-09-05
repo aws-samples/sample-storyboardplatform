@@ -1399,7 +1399,7 @@ async function extract() {
 // ── 시동 ─────────────────────────────────────────────────────────────────────
 document.querySelectorAll('.tabs .tab').forEach((t) => { t.onclick = () => openTab(t.dataset.tab) })
 
-// 상단 기능 탭. 스토리보드와 키비주얼은 링크로 나가고(index.html · /key-visual/),
+// 상단 기능 탭. 스토리보드와 키비주얼은 링크로 나가고(/board.html · /key-visual/index.html),
 // 디벨롭·대본화·대본번역은 이 화면에서 받는다. keyvisual 을 handled 에 넣으면 버튼이
 // 되어 눌러도 이동하지 않으므로 넣지 않는다.
 // ?tab=script 로 들어오면 안쪽 [대본화] 가 처음부터 열려 있다.

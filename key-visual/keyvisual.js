@@ -429,7 +429,7 @@ function pushVersion(s, j) {
  */
 function aimBoardLink(panelId) {
   const a = $('#toBoard')
-  if (a && panelId) a.href = `/index.html#cut=${panelId}`
+  if (a && panelId) a.href = `/board.html#cut=${panelId}`
 }
 
 async function postToBoard() {
