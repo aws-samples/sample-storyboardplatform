@@ -531,7 +531,7 @@ import { DEMO_USERS } from './login.js'
 import { mountNav, navTabFromSearch, boardFromSearch } from './nav-tabs.js'
 import { entries, group, markOp, paintList } from './history.js'
 import { emptyPanel, guide as guideExample, guiding } from './onboard.js'
-import { demoActive, demoAdvance, demoSay } from './demo.js'
+import { demoActive, demoAdvance, demoSay, demoTitle } from './demo.js'
 import * as coach from './coach.js'
 import { pickProject, touch as touchProject } from './projects.js'
 
@@ -1589,7 +1589,6 @@ function paintWelcome() {
     onExample: () => runExample(),
     ownLabel: '직접 시작하기',
     onOwn: () => { $('scriptIn')?.focus(); openCoach() },
-    ...(demoActive() ? { eyebrow: demoSay('develop') } : {}),
     warn: NET
       ? '직접 하실 때의 추출과 생성은 Bedrock 을 부릅니다 — 한 번에 10~30초씩 걸리고, 여기 남는 기록은 같은 보드를 보는 사람에게도 보입니다. '
         + '예시는 미리 받아 둔 데이터만 쓰므로 기다리지 않습니다.'
@@ -1599,12 +1598,19 @@ function paintWelcome() {
   slot.classList.toggle('onbslot--wide', !!$('inputCard').hidden)
 }
 
-/** 판에 노드가 있으면 안내를 걷습니다. build 와 예시 안내가 같은 자리를 지납니다 */
+/**
+ * 판에 노드가 있으면 안내를 걷습니다. build 와 예시 안내가 같은 자리를 지납니다.
+ *
+ * 예시 프로젝트로 들어온 것이면(?demo=1) 이 판을 아예 띄우지 않습니다. 홈의 파란 버튼을
+ * 누른 사람은 「예시를 보겠다」를 이미 말한 사람인데, 여기서 「처음 오셨나요? … 예시를
+ * 눌러 보세요」를 다시 내밀면 같은 것을 두 번 묻는 셈입니다. build 가 runExample 보다
+ * 먼저 지나므로, 여기서 막지 않으면 한 프레임 깜빡이고 사라집니다.
+ */
 function syncWelcome() {
   const slot = $('onbSlot')
   if (!slot) return
   const empty = !STORE || !STORE.stats().nodes
-  if (empty && !guiding()) paintWelcome()
+  if (empty && !guiding() && !demoActive()) paintWelcome()
   else slot.hidden = true
 }
 
@@ -1668,14 +1674,18 @@ function runExample() {
       run: () => (SEEDS.length ? pickSeed(0, true) : null),
     },
     {
-      say: '여기까지가 예시입니다',
-      sub: '분기를 골라 [이 분기로 대본 생성] 을 누르면 개요 → 컷 → 대본으로 이어집니다. 이제 직접 해 보세요',
-      spot: 'histbox', do: '「지나간 일」을 눌러 예시를 마칩니다',
+      say: demoActive() ? '이 화면의 예시는 여기까지입니다' : '여기까지가 예시입니다',
+      sub: demoActive()
+        ? demoSay('develop')
+        : '분기를 골라 [이 분기로 대본 생성] 을 누르면 개요 → 컷 → 대본으로 이어집니다. 이제 직접 해 보세요',
+      spot: 'histbox',
+      do: demoActive() ? '「지나간 일」을 눌러 다음 화면으로 넘어갑니다' : '「지나간 일」을 눌러 예시를 마칩니다',
+      tag: demoActive() ? '다음 화면으로' : '여기를 누르십시오',
     },
   ]
 
   guideExample({
-    steps, title: '스토리 디벨롭',
+    steps, title: demoTitle('develop', '스토리 디벨롭'),
     onDone: () => {
       PLAYING_EXAMPLE = false
       syncWelcome()
@@ -2036,6 +2046,16 @@ if (configured && !session()) {
     who: (id) => nameMap(JOURNAL).get(id) || null,
   }).then(() => start()).then(() => {
     loadHistory()
+    /*
+     * 예시 프로젝트가 이 화면으로 데려온 것이면(?demo=1) 바로 예시를 시작한다.
+     * 키비주얼·보드도 같은 자리에서 같은 일을 한다(app/demo.js).
+     *
+     * 이 갈래가 없어서 홈의 파란 버튼이 먹지 않았다. 여기까지는 잘 왔는데 화면이
+     * 「처음 오셨나요?」 판을 띄우고 서 버렸고, 예시를 보려면 그 판의 [예시 보기] 를
+     * 한 번 더 눌러야 했다 — 파란 버튼을 누른 사람에게는 아무 일도 안 일어난 것으로
+     * 읽힌다. 실제로 그랬다.
+     */
+    if (demoActive()) { runExample(); return }
     /*
      * 판이 비어 있으면 코치마크를 열지 않는다 — 그때는 화면에 「처음 오셨나요?」 판이
      * 있고 그 판이 두 갈래를 이미 말해 준다. 막을 덮어 그것을 가릴 이유가 없다.

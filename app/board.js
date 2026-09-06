@@ -19,7 +19,7 @@ import * as coach from './coach.js'
 import { emptyPanel, guide as guideExample, guiding } from './onboard.js'
 import { entries, group, paintList, toEntry } from './history.js'
 import { pickProject, touch as touchProject } from './projects.js'
-import { demoActive, demoAdvance, demoSay } from './demo.js'
+import { demoActive, demoAdvance, demoSay, demoTitle } from './demo.js'
 
 const ROSTER = [
   { id: 'u1', name: '김하나', role: 'planner', color: '#E3A93C', job: '시나리오를 컷으로 쪼갭니다' },
@@ -1570,7 +1570,6 @@ function welcomePanel() {
       byId('scenario')?.focus()
       openCoach()
     },
-    ...(demoActive() ? { eyebrow: demoSay('board') } : {}),
     warn: '예시 내용은 이 보드에 실제로 저장되고 같은 보드를 보는 사람에게도 보입니다. '
       + '지우려면 관리 화면의 보드 비우기를 씁니다.',
   })
@@ -1611,13 +1610,17 @@ function runExample() {
     }
   })
   steps.push({
-    say: '여기까지가 예시입니다',
-    sub: '이제 컷을 눌러 오른쪽에서 고치거나, 관리 화면에서 보드를 비우고 직접 시작할 수 있습니다',
-    spot: 'histbox', do: '「지나간 일」을 눌러 예시를 마칩니다',
+    say: demoActive() ? '이 화면의 예시는 여기까지입니다' : '여기까지가 예시입니다',
+    sub: demoActive()
+      ? demoSay('board')
+      : '이제 컷을 눌러 오른쪽에서 고치거나, 관리 화면에서 보드를 비우고 직접 시작할 수 있습니다',
+    spot: 'histbox',
+    // 보드가 마지막 걸음이라 여기서는 두 갈래가 같은 말이 됩니다 — 둘 다 예시가 끝납니다
+    do: '「지나간 일」을 눌러 예시를 마칩니다',
     run: () => { pickView(); render() },
   })
   exampleRun = guideExample({
-    steps, title: '스토리보드',
+    steps, title: demoTitle('board', '스토리보드'),
     onDone: () => {
       exampleRun = null
       render()
@@ -1725,7 +1728,9 @@ function renderBoard() {
    * 아래 keep 루프가 board--empty 를 list 가 찼을 때 지우므로 이 판도 같은 클래스를
    * 달고 있어야 예시가 들어오는 순간 알아서 사라진다.
    */
-  const blank = !Object.keys(state.panels).length && !Object.keys(state.chars).length
+  // 예시 프로젝트로 들어온 것이면 「처음 오셨나요?」 판을 띄우지 않는다 — 같은 것을
+  // 두 번 묻는 셈이고, render 가 runExample 보다 먼저 지나 한 프레임 깜빡인다
+  const blank = !Object.keys(state.panels).length && !Object.keys(state.chars).length && !demoActive()
   if (!list.length) {
     if (blank) {
       if (!board.querySelector('.onbslot')) {

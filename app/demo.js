@@ -126,6 +126,19 @@ export function demoQuit(step) {
   return true
 }
 
+/**
+ * 안내 말풍선 왼쪽 위에 적을 이름. 예시 프로젝트를 밟는 중이면 몇 번째 걸음인지를
+ * 앞에 답니다 — 「처음 오셨나요?」 판을 예시 중에는 띄우지 않으므로(같은 것을 두 번
+ * 묻지 않으려고), 몇 걸음짜리 길인지 알려 주는 자리가 말풍선뿐입니다.
+ *
+ * @param {string} step - NAV_TABS 의 id
+ * @param {string} label - 이 화면의 이름
+ */
+export function demoTitle(step, label) {
+  const n = demoAt(step)
+  return n ? `예시 프로젝트 ${n}/${DEMO_TOTAL} · ${label}` : label
+}
+
 /** 이 단계가 몇 번째이고 다음이 무엇인지. 안내 문구에 적습니다 */
 export function demoSay(step) {
   const n = demoAt(step)

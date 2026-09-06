@@ -41,9 +41,9 @@
   } = await import(`./history.js?t=${Date.now()}`)
   const { newBoardId, store, touch, list, paintCards, pickProject,
   } = await import(`./projects.js?t=${Date.now()}`)
-  const { DEMO_BOARD, DEMO_NAME, DEMO_STEPS, DEMO_TOTAL, demoActive, demoAt, demoSay,
+  const { DEMO_BOARD, DEMO_NAME, DEMO_STEPS, DEMO_TOTAL, demoActive, demoAt, demoSay, demoTitle,
   } = await import(`./demo.js?t=${Date.now()}`)
-  const { emptyPanel, guide, guiding, guideAt, stop: stopGuide,
+  const { emptyPanel, guide, guiding, guideAt, guideMarks, stop: stopGuide,
   } = await import(`./onboard.js?t=${Date.now()}`)
   const coach = await import(`./coach.js?t=${Date.now()}`)
 
@@ -1946,6 +1946,19 @@
       && last === `예시 프로젝트 ${DEMO_TOTAL}/${DEMO_TOTAL} — 마지막 단계입니다. 마치면 홈으로 돌아갑니다.`
   })())
   ok('예시 중이 아니면 안내 문구를 내지 않는다', demoSay('board') === '')
+  /*
+   * 예시 프로젝트 중에는 「처음 오셨나요?」 판을 띄우지 않는다 — 파란 버튼을 누른
+   * 사람에게 「예시를 보시겠습니까」를 다시 묻는 셈이라서다. 그래서 몇 걸음짜리 길인지
+   * 알려 줄 자리가 말풍선의 이름뿐이다. 그 이름에 걸음 수가 들어가야 한다.
+   */
+  ok('예시 중에는 말풍선 이름에 걸음 수가 붙는다', (() => {
+    const back = location.search
+    window.history.replaceState({}, '', '/test.html?demo=1')
+    const on = demoTitle(DEMO_STEPS[0], '스토리 디벨롭')
+    window.history.replaceState({}, '', `/test.html${back}`)
+    return on === `예시 프로젝트 1/${DEMO_TOTAL} · 스토리 디벨롭`
+      && demoTitle('develop', '스토리 디벨롭') === '스토리 디벨롭'
+  })())
 
   /* ══ onboard.js: 빈 화면 안내와 예시 길잡이 ══════════════════════════════ */
 
@@ -2009,12 +2022,13 @@
       { say: '예시 시놉시스를 넣습니다', sub: '케데헌', spot: 'gone' },
       { say: '그래프를 뽑습니다', spot: 'gtwo' },
     ], title: '스토리 디벨롭' })
-    const lit = gSpot('gone').classList.contains('onb-spot') && !gSpot('gtwo').classList.contains('onb-spot')
+    const lit = guideMarks().lit === gSpot('gone')
     const on = guiding() && guideAt() === 0
     await painted()
     const root = document.querySelector('.onbg')
     const b = root?.querySelector('.onbg__b')
     const shape = !!root && !!root.querySelector('.onbg__veil')
+      && !!root.querySelector('.onbg__ring')
       && b.getAttribute('role') === 'dialog' && b.getAttribute('aria-modal') === 'true'
       && b.querySelector('.onbg__n').textContent === '1 / 2'
       && b.querySelector('.onbg__h').textContent === '예시 시놉시스를 넣습니다'
@@ -2044,32 +2058,76 @@
     return said
   })())
   /*
-   * 누를 곳을 눈으로 찾게 두지 않는다. 동그라미와 마우스 표시를 그 자리에 얹는다 —
-   * 둘 다 pointer-events:none 이라 정작 눌러야 하는 자리를 자기가 덮지 않는다.
+   * 누를 곳을 눈으로 찾게 두지 않는다. 테 · 물결 · 마우스 표시 · 꼬리표 네 가지를 그
+   * 자리에 얹는다 — 넷 다 pointer-events:none 이라 정작 눌러야 하는 자리를 덮지 않는다.
    */
-  ok('누를 자리에 동그라미와 마우스 표시를 얹는다', await (async () => {
+  ok('누를 자리에 테와 물결과 마우스 표시와 꼬리표를 얹는다', await (async () => {
+    guide({ steps: [{ say: 'A', spot: 'gone' }] })
+    await painted()
+    const four = ['ring', 'wave', 'hand', 'tag'].map((k) => document.querySelector(`.onbg__${k}`))
+    const hidden = four.every((n) => n?.getAttribute('aria-hidden') === 'true')
+    const said = four[3].textContent === '여기를 누르십시오'
+    stopGuide()
+    return four.every(Boolean) && hidden && said
+  })())
+  ok('꼬리표의 글도 단계마다 바꿔 달 수 있다', await (async () => {
+    guide({ steps: [{ say: 'A', spot: 'gone', tag: '이 칸을 누르십시오' }] })
+    await painted()
+    const said = document.querySelector('.onbg__tag').textContent === '이 칸을 누르십시오'
+    stopGuide()
+    return said
+  })())
+  /*
+   * 테는 자리보다 조금 넓게 두른다. 자리에 딱 붙이면 글자에 테가 닿아 읽기 어렵고,
+   * 좌표로 그리는 것이라 반픽셀 차이가 그대로 보인다.
+   */
+  ok('테는 자리를 좌표로 감싼다 — 요소에 class 를 붙이지 않는다', await (async () => {
     guide({ steps: [{ say: 'A', spot: 'gone' }] })
     await painted()
     const ring = document.querySelector('.onbg__ring')
-    const hand = document.querySelector('.onbg__hand')
-    const hidden = ring?.getAttribute('aria-hidden') === 'true' && hand?.getAttribute('aria-hidden') === 'true'
+    const r = gSpot('gone').getBoundingClientRect()
+    const box = ring.style
+    const wide = parseFloat(box.width) >= r.width && parseFloat(box.height) >= r.height
+    // 요소 자신에는 아무 표시도 붙지 않아야 한다 — 그것이 이 방식의 요점이다
+    const clean = !gSpot('gone').className && !gSpot('gone').style.zIndex
     stopGuide()
-    return !!ring && !!hand && hidden
+    return wide && clean
+  })())
+  /*
+   * 막에 구멍을 뚫는다. 짚은 자리를 위로 들어 올리지 않는다 — 그 자리가 z-index 를 가진
+   * 판 안에 있으면(스토리 디벨롭의 대본 칸) 판째로 막 아래에 깔린다. 실제로 그랬다.
+   */
+  ok('막은 손에 닿지 않고, 구멍 밖을 막는 판이 따로 선다', await (async () => {
+    guide({ steps: [{ say: 'A', spot: 'gone' }] })
+    await painted()
+    const veil = document.querySelector('.onbg__veil')
+    const holed = veil.style.backgroundImage.includes('mask')
+    // 위·아래·왼·오른 넷. 구멍 안쪽만 손에 닿는다
+    const guards = document.querySelectorAll('.onbg__guard').length
+    stopGuide()
+    return holed && guards === 4
+  })())
+  ok('짚을 자리가 없으면 화면 전체를 막는다 — 길은 말풍선의 버튼뿐이다', await (async () => {
+    guide({ steps: [{ say: 'A' }] })
+    await painted()
+    const guards = document.querySelectorAll('.onbg__guard')
+    const all = guards.length === 1 && parseFloat(guards[0].style.inset) === 0
+    stopGuide()
+    return all
   })())
   /*
    * 누를 곳과 봐야 할 것이 다른 단계가 흔하다 — 작은 버튼을 누르고 결과는 넓은 판에
-   * 들어간다. see 로 그 판도 막 위로 올린다. 올리지 않으면 무엇이 채워졌는지가 막에 묻힌다.
+   * 들어간다. see 로 그 판에도 구멍을 낸다. 안 내면 무엇이 채워졌는지가 막에 묻힌다.
    */
-  ok('see 로 준 자리도 막 위로 올린다', (() => {
-    guide({ steps: [{ say: 'A', spot: 'gone', see: 'gtwo' }] })
-    const seen = gSpot('gtwo').classList.contains('onb-see')
-    const lit = gSpot('gone').classList.contains('onb-spot')
+  ok('see 로 준 자리에도 구멍을 낸다', (() => {
+    const m = (guide({ steps: [{ say: 'A', spot: 'gone', see: 'gtwo' }] }), guideMarks())
     stopGuide()
-    return seen && lit && !gSpot('gtwo').classList.contains('onb-see')
+    return m.seen.length === 1 && m.seen[0] === gSpot('gtwo') && m.lit === gSpot('gone')
+      && guideMarks().seen.length === 0
   })())
   ok('see 는 여러 자리도 받는다', (() => {
     guide({ steps: [{ say: 'A', see: ['gone', 'gtwo'] }] })
-    const both = gSpot('gone').classList.contains('onb-see') && gSpot('gtwo').classList.contains('onb-see')
+    const both = guideMarks().seen.join() === [gSpot('gone'), gSpot('gtwo')].join()
     stopGuide()
     return both
   })())
@@ -2101,8 +2159,7 @@
     gSpot('gone').click()
     await new Promise((r) => setTimeout(r, 0))
     const moved = ran.join() === '1' && guideAt() === 1
-      && gSpot('gtwo').classList.contains('onb-spot')
-      && !gSpot('gone').classList.contains('onb-spot')
+      && guideMarks().lit === gSpot('gtwo')
     stopGuide()
     return moved
   })())
@@ -2162,7 +2219,7 @@
   /* spot 을 CSS 선택자로도 준다 — data-coach 를 못 붙이는 자리가 있다 */
   ok('짚을 자리를 CSS 선택자로도 준다', (() => {
     guide({ steps: [{ say: 'A', spot: '[data-coach="gtwo"]' }] })
-    const lit = gSpot('gtwo').classList.contains('onb-spot')
+    const lit = guideMarks().lit === gSpot('gtwo')
     stopGuide()
     return lit
   })())
@@ -2173,7 +2230,7 @@
     gSpot('gone').click()
     await new Promise((r) => setTimeout(r, 0))
     return done && !guiding() && !document.querySelector('.onbg')
-      && !gSpot('gone').classList.contains('onb-spot')
+      && guideMarks().lit === null
   })())
   ok('두 번 겹쳐 안내하지 않는다', (() => {
     guide({ steps: [{ say: 'A', spot: 'gone' }] })
@@ -2203,7 +2260,7 @@
     document.querySelector('.onbg__x').click()
     await new Promise((r) => setTimeout(r, 0))
     return done && !ran.length && !guiding() && !document.querySelector('.onbg')
-      && !gSpot('gone').classList.contains('onb-spot')
+      && guideMarks().lit === null
   })())
   ok('Esc 로도 그만둔다', (() => {
     let done = false

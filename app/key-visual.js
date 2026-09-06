@@ -21,7 +21,7 @@ import { emptyPanel, guide as guideExample, guiding } from './onboard.js'
 import { makeArt } from './art.js'
 import { entries, group, markOp, paintList } from './history.js'
 import { pickProject, touch as touchProject } from './projects.js'
-import { demoActive, demoAdvance, demoSay } from './demo.js'
+import { demoActive, demoAdvance, demoSay, demoTitle } from './demo.js'
 
 const cfg = window.SB_CONFIG || {}
 const $ = (s, r = document) => r.querySelector(s)
@@ -773,8 +773,14 @@ function step1() {
   a.append(row)
   w.append(a)
 
-  // 아직 아무것도 없으면 「씬 후보 0」 이라는 빈 칸 대신 두 갈래를 보여준다
-  if (!S.script.trim() && !S.scenes.length) { w.append(welcomePanel()); return w }
+  /*
+   * 아직 아무것도 없으면 「씬 후보 0」 이라는 빈 칸 대신 두 갈래를 보여준다.
+   *
+   * 예시 프로젝트로 들어온 것이면(?demo=1) 이 판을 띄우지 않는다 — 「예시를 보겠다」를
+   * 이미 누른 사람에게 「예시 보기」를 다시 내미는 셈이고, paint 가 runExample 보다
+   * 먼저 지나므로 한 프레임 깜빡였다 사라진다.
+   */
+  if (!S.script.trim() && !S.scenes.length && !demoActive()) { w.append(welcomePanel()); return w }
 
   const b = card(`씬 후보 ${S.scenes.length}`, S.scenes.length ? '씬을 고르지 않습니다. 목록 전체가 다음 단계로 넘어갑니다.' : '나누기를 누르면 여기에 나옵니다.')
   if (S.scenes.length) {
@@ -1082,7 +1088,6 @@ function welcomePanel() {
       $('.script')?.focus()
       openCoach()
     },
-    ...(demoActive() ? { eyebrow: demoSay('keyvisual') } : {}),
     warn: '예시는 미리 받아 둔 데이터만 씁니다 — 문장 모델도 생성 서버도 부르지 않으므로 '
       + '기다리는 시간이 없고, 그림은 「예시」로 표시된 대신 그림입니다. '
       + '진짜 그림은 예시를 마친 뒤 「이 씬만 다시 생성」을 누를 때 나옵니다.',
@@ -1149,15 +1154,19 @@ function runExample() {
       },
     },
     {
-      say: '여기까지가 예시입니다', do: '「지나간 일」을 눌러 예시를 마칩니다',
-      sub: '이제 대본을 바꿔 다시 나누거나, 「이 씬만 다시 생성」으로 진짜 그림을 받아 보드에 붙일 수 있습니다',
+      say: demoActive() ? '이 화면의 예시는 여기까지입니다' : '여기까지가 예시입니다',
+      do: demoActive() ? '「지나간 일」을 눌러 다음 화면으로 넘어갑니다' : '「지나간 일」을 눌러 예시를 마칩니다',
+      tag: demoActive() ? '다음 화면으로' : '여기를 누르십시오',
+      sub: demoActive()
+        ? demoSay('keyvisual')
+        : '이제 대본을 바꿔 다시 나누거나, 「이 씬만 다시 생성」으로 진짜 그림을 받아 보드에 붙일 수 있습니다',
       spot: 'histbox',
       run: () => paint(),
     },
   ]
 
   exampleRun = guideExample({
-    steps, title: '키 비주얼',
+    steps, title: demoTitle('keyvisual', '키 비주얼'),
     onDone: () => {
       exampleRun = null
       paint()

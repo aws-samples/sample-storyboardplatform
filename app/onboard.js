@@ -23,6 +23,22 @@
  * 같은 방식으로 막을 덮고(coach.js), 누를 자리 하나만 남깁니다. 그만두는 길은 말풍선
  * 모서리의 ×(그리고 Esc) 하나로 남겨 둡니다 — 막에 갇히는 화면을 만들 수는 없습니다.
  *
+ * ══ 막에 구멍을 뚫습니다. 짚은 자리를 들어 올리지 않습니다
+ *
+ * 코치마크는 가리킬 것에 class 를 붙여 z-index 로 막 위로 들어 올립니다. 그 방법이
+ * 여기서는 통하지 않았습니다 — 들어 올리려는 자리가 이미 z-index 를 가진 판 안에 있으면
+ * 그 판이 쌓임 문맥(stacking context)을 만들고, 안쪽 z-index 는 그 문맥 안에서만 셉니다.
+ * 스토리 디벨롭의 대본 칸이 그런 자리입니다 — 그래프 위에 얹힌 카드(.card 는
+ * position:absolute·z-index:5)의 안쪽이라, 여기서 z-index 를 104 로 줘도 화면에서는
+ * 카드째로 5 층에 남아 100 층의 막 아래에 깔립니다. 눌러야 하는 자리가 어두운 막에
+ * 묻혀 보이지도 눌리지도 않았습니다. 실제로 그랬습니다.
+ *
+ * 그래서 반대로 했습니다. 짚은 자리는 그 자리에 그대로 두고, 막에 그 모양대로 구멍을
+ * 뚫습니다(SVG mask). 막은 클릭을 받지 않고(pointer-events:none), 클릭을 막는 일은 구멍
+ * 주위를 두르는 판 넷(.onbg__guard)이 맡습니다. 그래서 사람이 누르는 것은 우리가 그린
+ * 무엇이 아니라 실제 그 버튼이고, 그 자리가 어떤 판 안에 들어 있든 상관이 없습니다.
+ * 테·동그라미·마우스 표시도 막 위에 좌표로 그립니다 — 요소에 얹으면 같은 이유로 묻힙니다.
+ *
  * 단계가 부르는 일은 미리 받아 둔 예시 데이터(app-walkthrough/data/)로만 채웁니다.
  * 예시에서 Bedrock 이나 생성 서버를 부르지 않습니다 — 한 번에 10~30초씩 걸리는 왕복을
  * 안내 중에 끼워 넣으면 배우는 시간이 아니라 기다리는 시간이 됩니다. 실제 모델은 예시를
@@ -67,69 +83,98 @@ const CSS = `
 
 /* ── 길잡이: 막 · 누를 자리 · 말풍선 ──────────── */
 /*
- * 코치마크(coach.js)와 같은 층 구조입니다. 다른 점은 하나 — 코치마크의 막은 어디를
- * 눌러도 다음 장으로 넘어가지만, 여기서는 짚어 준 자리만 눌러야 넘어갑니다. 그래서
- * 막에 클릭을 붙이지 않고, 짚은 자리를 막 위로 올려 그 자리만 손에 닿게 둡니다.
+ * 층 구조는 코치마크(coach.js)와 같은 자리에 한 칸 위(100~106)를 씁니다. 둘이 같이
+ * 뜨는 일은 없지만(각 화면의 openCoach 가 guiding() 을 보고 물러납니다), 겹쳤을 때
+ * 안내가 막 아래에 깔려 아무것도 못 누르는 화면이 되는 것이 가장 나쁩니다.
  *
- * z-index 는 코치마크와 겹치지 않게 한 칸 위(100~106)를 씁니다. 둘이 같이 뜨는 일은
- * 없지만(각 화면의 openCoach 가 guiding() 을 보고 물러납니다), 겹쳤을 때 안내가
- * 막 아래에 깔려 아무것도 못 누르는 화면이 되는 것이 가장 나쁩니다.
+ * 다른 점이 둘입니다. 코치마크의 막은 어디를 눌러도 다음 장으로 넘어가지만 여기서는
+ * 짚어 준 자리만 눌러야 넘어갑니다. 그리고 코치마크는 가리킬 것을 막 위로 들어 올리는데
+ * 여기서는 막에 구멍을 뚫습니다 — 위의 머리글에 적은 쌓임 문맥 때문입니다.
  */
 body.onbguiding { overflow: hidden; }
-.onbg { position: fixed; inset: 0; z-index: 100; font-family: var(--sb-sans, sans-serif); }
-.onbg__veil { position: absolute; inset: 0; background: rgba(15, 20, 30, .62); }
+/*
+ * 층의 뿌리. 화면 전체를 덮지만 손에는 닿지 않습니다(pointer-events:none) — 이 판이
+ * 클릭을 받으면 구멍 안의 진짜 버튼에 손이 닿지 않습니다. 클릭을 받는 것은 아래에서
+ * 그것을 되돌리는 둘뿐입니다: 구멍 밖을 막는 판(.onbg__guard)과 말풍선(.onbg__b).
+ */
+.onbg {
+  position: fixed; inset: 0; z-index: 100; pointer-events: none;
+  font-family: var(--sb-sans, sans-serif);
+}
 
 /*
- * 지금 봐야 하는 것. 막 위로 올리기만 하고 테는 두르지 않습니다 — 테는 「눌러야 하는
- * 자리」의 표시로 아껴 둡니다(.onb-spot). 배경을 칠하는 이유는 반투명한 판이 막 위에
- * 올라오면 뒤의 어두운 막이 비쳐 글씨가 읽히지 않기 때문입니다.
+ * 막. 구멍은 SVG mask 로 뚫습니다 — 흰 곳은 남고 검은 곳은 지워집니다. box-shadow 로
+ * 사각형 하나를 오리는 흔한 방법을 쓰지 않은 이유는 구멍이 둘 이상일 수 있기
+ * 때문입니다(누를 자리 하나 + 봐야 할 판 여러 개).
+ *
+ * pointer-events:none 입니다. 막이 클릭을 받으면 구멍 안의 진짜 버튼에 손이 닿지
+ * 않습니다. 막을 뚫었다는 것은 눈에만 뚫린 것이 아니라 손에도 뚫렸다는 뜻입니다.
  */
-.onb-see { position: relative; z-index: 103; background: var(--sb-panel, #fff); border-radius: var(--sb-r-lg, 10px); }
+.onbg__veil { position: absolute; inset: 0; background: rgba(15, 20, 30, .66); pointer-events: none; }
 
 /*
- * 눌러야 하는 자리. 막 위로 올리고 파란 테를 둘러 숨을 쉬게 합니다.
- * 테는 box-shadow 로 그립니다 — outline 이나 border 는 자리를 밀어 화면이 흔들립니다.
+ * 구멍 밖의 클릭을 막는 판 넷(위·아래·왼·오른). 막이 클릭을 받지 않으므로 막는 일은
+ * 이쪽이 맡습니다. 이 판들이 없으면 어두워진 자리를 그냥 누를 수 있어서, 안내 중에
+ * 엉뚱한 버튼이 눌리고 그 버튼이 Bedrock 을 부르는 자리일 수도 있습니다.
  */
-.onb-spot {
-  position: relative; z-index: 104; cursor: pointer;
-  box-shadow: 0 0 0 3px var(--sb-accent, #1a56db), 0 0 0 9px rgba(26, 86, 219, .22);
-  border-radius: var(--sb-r, 6px);
+.onbg__guard { position: absolute; background: transparent; pointer-events: auto; }
+
+/*
+ * 누를 자리에 두르는 테. 요소에 붙이지 않고 막 위에 좌표로 그립니다 — 요소에 붙이면
+ * 그 요소가 어떤 판 안에 있느냐에 따라 막 아래에 깔립니다(머리글의 쌓임 문맥).
+ */
+.onbg__ring {
+  position: absolute; z-index: 104; pointer-events: none;
+  border: 2.5px solid var(--sb-accent, #1a56db); border-radius: var(--sb-r, 6px);
+  box-shadow: 0 0 0 5px rgba(26, 86, 219, .3), 0 0 22px rgba(26, 86, 219, .5);
   animation: onbPulse 1.7s ease-in-out infinite;
 }
 @keyframes onbPulse {
-  50% { box-shadow: 0 0 0 3px var(--sb-accent, #1a56db), 0 0 0 15px rgba(26, 86, 219, .07); }
+  50% { box-shadow: 0 0 0 11px rgba(26, 86, 219, .1), 0 0 22px rgba(26, 86, 219, .3); }
 }
 
 /*
- * 누를 곳을 가리키는 동그라미와 마우스 표시. 둘 다 pointer-events:none 입니다 —
- * 정작 눌러야 하는 자리를 자기가 덮어 버리면 안 됩니다.
+ * 그 자리를 가리키는 물결과 마우스 표시. 둘 다 pointer-events:none 입니다 — 정작
+ * 눌러야 하는 자리를 자기가 덮어 버리면 안 됩니다.
  *
- * 동그라미는 자리의 중앙에 놓고, 마우스 표시는 그 오른쪽 아래에 둡니다. 커서가 실제로
+ * 물결은 자리의 중앙에서 퍼지고, 마우스 표시는 그 오른쪽 아래에 둡니다. 커서가 실제로
  * 그 방향에서 다가오기 때문에 그렇게 두는 편이 「여기를 누르라」로 읽힙니다.
  */
-.onbg__ring {
+.onbg__wave {
   position: absolute; z-index: 105; pointer-events: none;
-  width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%;
-  border: 2px solid var(--sb-accent, #1a56db); background: rgba(26, 86, 219, .14);
-  animation: onbRing 1.7s ease-out infinite;
+  width: 54px; height: 54px; margin: -27px 0 0 -27px; border-radius: 50%;
+  border: 2px solid var(--sb-accent, #1a56db); background: rgba(26, 86, 219, .18);
+  animation: onbWave 1.7s ease-out infinite;
 }
-@keyframes onbRing {
-  0% { transform: scale(.68); opacity: .95; }
-  70% { transform: scale(1.32); opacity: .12; }
-  100% { transform: scale(1.32); opacity: 0; }
+@keyframes onbWave {
+  0% { transform: scale(.55); opacity: .95; }
+  70% { transform: scale(1.5); opacity: .12; }
+  100% { transform: scale(1.5); opacity: 0; }
 }
 .onbg__hand {
   position: absolute; z-index: 106; pointer-events: none;
-  font-size: 24px; line-height: 1; filter: drop-shadow(0 3px 7px rgba(15, 20, 30, .5));
+  font-size: 27px; line-height: 1; filter: drop-shadow(0 3px 7px rgba(15, 20, 30, .55));
   animation: onbHand 1.7s ease-in-out infinite;
 }
 @keyframes onbHand {
   0%, 100% { transform: translate(0, 0); }
-  50% { transform: translate(-4px, -4px); }
+  50% { transform: translate(-5px, -5px); }
+}
+/*
+ * 「여기를 누르십시오」 꼬리표. 자리 바로 위(자리가 화면 위쪽이면 아래)에 붙입니다.
+ * 말풍선은 자리에서 떨어져 앉을 수 있어서, 자리 옆에 이름을 하나 더 달아 둡니다.
+ */
+.onbg__tag {
+  position: absolute; z-index: 106; pointer-events: none; white-space: nowrap;
+  padding: 5px 10px; border-radius: 999px;
+  background: var(--sb-accent, #1a56db); color: #fff;
+  font: 600 11.5px/1 var(--sb-sans, sans-serif);
+  box-shadow: 0 4px 14px rgba(26, 86, 219, .45);
+  animation: onbHand 1.7s ease-in-out infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .onb-spot, .onbg__ring, .onbg__hand { animation: none; }
-  .onbg__ring { opacity: .5; transform: scale(1); }
+  .onbg__ring, .onbg__wave, .onbg__hand, .onbg__tag { animation: none; }
+  .onbg__wave { opacity: .5; transform: scale(1); }
 }
 
 /*
@@ -137,7 +182,7 @@ body.onbguiding { overflow: hidden; }
  * 다른 점은 「다음」 버튼이 없다는 것입니다 — 넘어가는 길은 짚어 준 자리뿐입니다.
  */
 .onbg__b {
-  position: absolute; z-index: 106; width: 330px; padding: 16px;
+  position: absolute; z-index: 106; pointer-events: auto; width: 330px; padding: 16px;
   background: var(--sb-panel, #fff); border-radius: var(--sb-r-lg, 10px);
   box-shadow: 0 12px 34px rgba(15, 20, 30, .34); display: grid; gap: 9px;
   color: var(--sb-ink, #111318);
@@ -244,6 +289,15 @@ export const guiding = () => !!live
 /** 지금 몇 번째 단계인지. 0부터입니다. 돌지 않으면 -1 입니다 */
 export const guideAt = () => (live ? live.i : -1)
 
+/**
+ * 지금 짚은 자리와 같이 내보인 자리들.
+ *
+ * 화면이 쓰는 것이 아니라 검사가 씁니다. 예전에는 요소에 붙은 class(.onb-spot ·
+ * .onb-see)로 「무엇을 짚었나」를 확인할 수 있었는데, 이제 요소에 아무것도 붙이지
+ * 않으므로(막에 구멍을 뚫습니다) 물어볼 자리가 하나 있어야 합니다.
+ */
+export const guideMarks = () => ({ lit: live?.lit || null, seen: [...(live?.seen || [])] })
+
 /*
  * 선택자 하나를 찾습니다. 못 찾으면 null 입니다.
  *
@@ -263,20 +317,26 @@ const one = (name) => (name ? q(`[data-coach="${name}"]`) || q(name) : null)
 const spotOf = (step) => one(step?.spot)
 
 /**
- * 막 위로 올려 보여 줄 자리들. see 를 따로 주지 않으면 누를 자리만 올립니다.
+ * 막에 구멍을 내어 같이 보여 줄 자리들. see 를 따로 주지 않으면 누를 자리만 냅니다.
  *
  * 두 가지를 가르는 이유는, 누를 곳이 작은 버튼이고 봐야 할 것은 그 결과가 들어갈 넓은
- * 판인 경우가 흔하기 때문입니다 — 버튼만 올리면 「무엇이 채워졌는지」가 막에 묻힙니다.
+ * 판인 경우가 흔하기 때문입니다 — 버튼만 내면 「무엇이 채워졌는지」가 막에 묻힙니다.
  */
 function seesOf(step) {
   const names = Array.isArray(step?.see) ? step.see : step?.see ? [step.see] : []
   return names.map(one).filter(Boolean)
 }
 
+/*
+ * 짚어 둔 것을 놓습니다.
+ *
+ * 이제 요소에 class 를 붙이지 않으므로 걷어 낼 것도 없습니다 — 지우는 것은 우리가 그린
+ * 막뿐이고 그것은 draw 가 매번 새로 그립니다. 그래도 이 함수는 남겨 둡니다. 「지금 짚고
+ * 있는 것이 무엇인가」를 한 곳에서 비우는 자리가 있어야 showStep 과 stop 이 같은 길을
+ * 지납니다.
+ */
 function unspot() {
   if (!live) return
-  live.lit?.classList.remove('onb-spot')
-  for (const n of live.seen || []) n.classList.remove('onb-see')
   live.lit = null
   live.seen = []
 }
@@ -293,57 +353,140 @@ function showStep() {
   unspot()
   const s = live.steps[live.i]
   const el = spotOf(s)
-  if (el) {
-    live.lit = el
-    el.classList.add('onb-spot')
-  } else if (s?.spot) {
-    console.warn('[onboard] 짚을 자리를 못 찾았습니다 —', s.spot)
-  }
+  if (el) live.lit = el
+  else if (s?.spot) console.warn('[onboard] 짚을 자리를 못 찾았습니다 —', s.spot)
   live.seen = seesOf(s)
-  for (const n of live.seen) n.classList.add('onb-see')
   // 안쪽에서 스크롤되는 판 속에 있으면 화면 밖일 수 있습니다. 좌표를 재기 전에 끌어옵니다
   for (const n of [el, ...live.seen]) n?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
   // 화면이 다시 그려진 뒤에 좌표를 잽니다 — coach.js 의 show 와 같은 이유입니다
   requestAnimationFrame(() => draw())
 }
 
-/** 막·동그라미·마우스 표시·말풍선을 지금 좌표에 맞춰 다시 그립니다 */
+/** 자리가 화면 안에 실제로 그려져 있는지. 0×0 이거나 화면 밖이면 없는 것으로 봅니다 */
+const onScreen = (r) => !!r && r.width > 0 && r.height > 0
+  && r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth
+
+/** 구멍 하나의 네 변. 자리보다 살짝 넓게 잡아 테가 글자에 붙지 않게 합니다 */
+const holeOf = (r, pad = 6) => ({
+  left: Math.max(0, r.left - pad), top: Math.max(0, r.top - pad),
+  right: Math.min(innerWidth, r.right + pad), bottom: Math.min(innerHeight, r.bottom + pad),
+})
+
+/**
+ * 막·테·물결·마우스 표시·꼬리표·말풍선을 지금 좌표에 맞춰 다시 그립니다.
+ *
+ * 순서가 있습니다. 막을 먼저 깔고, 그 위에 클릭을 막는 판을 두르고, 그 위에 표시를
+ * 얹고, 말풍선을 마지막에 올립니다. 표시가 다 pointer-events:none 이므로 이 순서가
+ * 「보이는 것」의 순서일 뿐 「눌리는 것」에는 영향이 없습니다.
+ */
 function draw() {
   if (!live) return
   const s = live.steps[live.i]
   const root = live.root
   root.textContent = ''
 
-  const veil = mk('div', 'onbg__veil')
-  root.append(veil)
+  const spot = live.lit ? live.lit.getBoundingClientRect() : null
+  const lit = onScreen(spot) ? spot : null
+  const boxes = [...(lit ? [lit] : []),
+    ...live.seen.map((n) => n.getBoundingClientRect()).filter(onScreen)]
 
-  const boxes = []
-  if (live.lit) {
-    const r = live.lit.getBoundingClientRect()
-    boxes.push(r)
+  root.append(veilWith(boxes.map((r) => holeOf(r))))
+
+  /*
+   * 구멍 밖의 클릭을 막는 판. 누를 자리 하나만 열어 둡니다 — see 로 낸 구멍은 보여
+   * 주려고 낸 것이고 거기까지 열면 안내 중에 그 판의 버튼이 눌립니다.
+   */
+  if (lit) for (const g of guards(holeOf(lit))) root.append(g)
+  else root.append(guardAll())
+
+  if (lit) {
     /*
-     * 동그라미와 마우스 표시. 자리가 화면 밖으로 밀렸으면(스크롤이 안 되는 판 안에
-     * 있는 경우) 얹지 않습니다 — 허공에 손가락을 띄우는 것보다 없는 편이 낫습니다.
+     * 테·물결·마우스 표시·꼬리표. 자리가 화면 밖으로 밀렸으면 아무것도 얹지 않습니다 —
+     * 허공에 손가락을 띄우는 것보다 없는 편이 낫습니다(그래서 lit 이 null 입니다).
      */
-    if (r.width && r.height && r.bottom > 0 && r.top < innerHeight) {
-      const cx = r.left + r.width / 2
-      const cy = r.top + r.height / 2
-      const ring = mk('span', 'onbg__ring')
-      ring.style.cssText = `left:${cx}px;top:${cy}px`
-      ring.setAttribute('aria-hidden', 'true')
-      const hand = mk('span', 'onbg__hand', '🖱')
-      hand.style.cssText = `left:${cx + 13}px;top:${cy + 8}px`
-      hand.setAttribute('aria-hidden', 'true')
-      root.append(ring, hand)
-    }
-  }
-  for (const n of live.seen) boxes.push(n.getBoundingClientRect())
+    const h = holeOf(lit)
+    const ring = mk('span', 'onbg__ring')
+    ring.style.cssText = `left:${h.left}px;top:${h.top}px;`
+      + `width:${h.right - h.left}px;height:${h.bottom - h.top}px`
+    ring.setAttribute('aria-hidden', 'true')
 
-  root.append(bubble(s, boxes))
+    const cx = (h.left + h.right) / 2
+    const cy = (h.top + h.bottom) / 2
+    const wave = mk('span', 'onbg__wave')
+    wave.style.cssText = `left:${cx}px;top:${cy}px`
+    wave.setAttribute('aria-hidden', 'true')
+
+    const hand = mk('span', 'onbg__hand', '🖱')
+    hand.style.cssText = `left:${cx + 14}px;top:${cy + 9}px`
+    hand.setAttribute('aria-hidden', 'true')
+
+    /* 꼬리표는 자리 위에 붙이고, 위에 자리가 없으면 아래로 내립니다 */
+    const tag = mk('span', 'onbg__tag', s?.tag || '여기를 누르십시오')
+    const above = h.top > 34
+    tag.style.cssText = `left:${Math.max(6, h.left)}px;`
+      + `top:${above ? h.top - 30 : Math.min(innerHeight - 28, h.bottom + 9)}px`
+    tag.setAttribute('aria-hidden', 'true')
+
+    root.append(ring, wave, hand, tag)
+  }
+
+  root.append(bubble(s, boxes, !!lit))
 }
 
-/** 말풍선 한 장. 넘어가는 길은 짚은 자리이고, 자리가 없을 때만 「다음」이 나옵니다 */
-function bubble(s, boxes) {
+/**
+ * 구멍 뚫린 막 한 장.
+ *
+ * SVG mask 로 뚫습니다 — 흰 것은 남고 검은 것은 지워집니다. 구멍이 하나면 box-shadow
+ * 로도 되지만 여기서는 여러 개일 수 있어서(누를 자리 + 봐야 할 판들) 마스크 쪽이 맞습니다.
+ * mask 를 못 읽는 브라우저에서는 구멍 없는 막이 되고, 그때도 클릭은 아래 guards 가
+ * 가리므로 눌러야 할 자리는 여전히 눌립니다 — 어둡게 보일 뿐입니다.
+ *
+ * 괄호를 손으로 한 번 더 감쌉니다. encodeURIComponent 는 ( 와 ) 를 그냥 둡니다 — 그래서
+ * 안쪽의 url(#m) 이 그대로 남고, CSS 는 그 닫는 괄호를 바깥 url() 의 끝으로 읽어
+ * 선언 하나가 통째로 버려집니다. 실제로 그랬습니다(막이 아예 안 그려졌습니다).
+ */
+function veilWith(holes) {
+  const veil = mk('div', 'onbg__veil')
+  if (!holes.length) return veil
+  const rects = holes.map((h) => `<rect x="${h.left}" y="${h.top}" `
+    + `width="${Math.max(0, h.right - h.left)}" height="${Math.max(0, h.bottom - h.top)}" `
+    + 'rx="8" fill="#000"/>').join('')
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${innerWidth}" height="${innerHeight}">`
+    + `<mask id="m"><rect width="100%" height="100%" fill="#fff"/>${rects}</mask>`
+    + `<rect width="100%" height="100%" fill="#0f141e" fill-opacity=".66" mask="url(#m)"/></svg>`
+  const enc = encodeURIComponent(svg).replace(/\(/g, '%28').replace(/\)/g, '%29')
+  // 바탕색은 지웁니다 — 안 지우면 뚫은 구멍 뒤에 그 색이 그대로 남습니다
+  veil.style.cssText = 'background-color:transparent;'
+    + `background-image:url("data:image/svg+xml;utf8,${enc}")`
+  return veil
+}
+
+/** 구멍 하나를 둘러 클릭을 막는 판 넷. 구멍 안쪽만 손에 닿습니다 */
+function guards(h) {
+  const box = (css) => { const n = mk('div', 'onbg__guard'); n.style.cssText = css; return n }
+  return [
+    box(`left:0;top:0;right:0;height:${Math.max(0, h.top)}px`),
+    box(`left:0;top:${h.bottom}px;right:0;bottom:0`),
+    box(`left:0;top:${h.top}px;width:${Math.max(0, h.left)}px;height:${h.bottom - h.top}px`),
+    box(`left:${h.right}px;top:${h.top}px;right:0;height:${h.bottom - h.top}px`),
+  ]
+}
+
+/** 누를 자리가 없는 단계에서는 화면 전체를 막습니다. 그때 길은 말풍선의 버튼뿐입니다 */
+function guardAll() {
+  const n = mk('div', 'onbg__guard')
+  n.style.cssText = 'inset:0'
+  return n
+}
+
+/**
+ * 말풍선 한 장. 넘어가는 길은 짚은 자리이고, 자리가 없을 때만 「다음」이 나옵니다.
+ *
+ * @param {boolean} lit - 짚은 자리가 화면에 실제로 그려져 있는지. live.lit 이 있어도
+ *   그 자리가 0×0 이거나 화면 밖이면 테를 얹지 못했으므로 「표시된 곳」이 없습니다.
+ *   그때 「표시된 곳을 눌러 주십시오」만 적으면 누를 곳이 하나도 없는 화면이 됩니다.
+ */
+function bubble(s, boxes, lit) {
   const b = mk('div', 'onbg__b')
   b.setAttribute('role', 'dialog')
   b.setAttribute('aria-modal', 'true')
@@ -365,7 +508,7 @@ function bubble(s, boxes) {
   if (s?.sub) b.append(mk('p', 'onbg__p', s.sub))
 
   // 짚은 자리가 있으면 「어디를 누르라」를 적고, 없으면 버튼을 내어 줍니다
-  if (live.lit) {
+  if (lit) {
     b.append(mk('div', 'onbg__do', s?.do || '표시된 곳을 눌러 주십시오'))
   } else {
     const go = mk('button', 'onbg__next', s?.go || '다음')
@@ -426,9 +569,9 @@ async function fire() {
 /**
  * 예시를 클릭에 맞춰 안내합니다. 타이머가 없습니다 — 사람이 누를 때만 넘어갑니다.
  *
- * 화면을 막으로 덮고, 지금 봐야 하는 것과 눌러야 하는 자리만 그 위로 올립니다. 그
- * 자리에는 동그라미와 마우스 표시가 얹혀서 어디를 눌러야 하는지 한눈에 보입니다.
- * 누르면 그 자리의 원래 동작은 막고 run 이 대신 돌아 내용이 채워집니다.
+ * 화면을 막으로 덮고, 지금 봐야 하는 것과 눌러야 하는 자리에만 구멍을 뚫습니다. 그
+ * 자리에는 테 · 물결 · 마우스 표시 · 꼬리표 넉 장이 얹혀서 어디를 눌러야 하는지 한눈에
+ * 보입니다. 누르면 그 자리의 원래 동작은 막고 run 이 대신 돌아 내용이 채워집니다.
  *
  * 각 단계는 { say, sub?, spot?, see?, do?, go?, run? } 입니다.
  *   say   말풍선의 큰 줄. 지금 무엇을 하는지
@@ -436,6 +579,7 @@ async function fire() {
  *   spot  누를 자리. data-coach 이름이거나 CSS 선택자
  *   see   같이 막 위로 올려 보여 줄 자리들. 누를 곳과 결과가 들어갈 판이 다를 때 씁니다
  *   do    「표시된 곳을 눌러 주십시오」 대신 적을 한 줄
+ *   tag   자리에 붙는 꼬리표의 글자. 기본은 「여기를 누르십시오」
  *   go    자리를 못 찾았을 때만 나오는 버튼의 글자. 기본은 「다음」
  *   run   실제로 화면을 바꾸는 함수. 동기·비동기 둘 다 됩니다
  *
