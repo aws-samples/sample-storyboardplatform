@@ -531,6 +531,7 @@ import { DEMO_USERS } from './login.js'
 import { mountNav, navTabFromSearch, boardFromSearch } from './nav-tabs.js'
 import { entries, group, markOp, paintList } from './history.js'
 import { emptyPanel, guide as guideExample, guiding } from './onboard.js'
+import { demoActive, demoAdvance, demoSay } from './demo.js'
 import * as coach from './coach.js'
 import { pickProject, touch as touchProject } from './projects.js'
 
@@ -1588,6 +1589,7 @@ function paintWelcome() {
     onExample: () => runExample(),
     ownLabel: '직접 시작하기',
     onOwn: () => { $('scriptIn')?.focus(); openCoach() },
+    ...(demoActive() ? { eyebrow: demoSay('develop') } : {}),
     warn: NET
       ? '직접 하실 때의 추출과 생성은 Bedrock 을 부릅니다 — 한 번에 10~30초씩 걸리고, 여기 남는 기록은 같은 보드를 보는 사람에게도 보입니다. '
         + '예시는 미리 받아 둔 데이터만 쓰므로 기다리지 않습니다.'
@@ -1629,7 +1631,7 @@ function runExample() {
     {
       say: '예시 시놉시스를 넣습니다',
       sub: '케이팝 데몬 헌터스 — 세 사람이 노래로 결계를 붙잡고 있는 이야기입니다',
-      spot: '#scriptIn', go: '이 단계 실행',
+      spot: '#scriptIn', see: 'input',
       run: async () => {
         try {
           const res = await fetch('/app-walkthrough/data/kdh-synopsis.txt', { cache: 'no-store' })
@@ -1647,7 +1649,7 @@ function runExample() {
       sub: NET
         ? '직접 하실 때는 이 버튼이 Bedrock 으로 이 일을 합니다. 예시는 미리 뽑아 둔 결과를 얹으므로 기다리지 않습니다'
         : '로컬 모드에서는 추출이 막혀 있어 미리 뽑아 둔 결과를 얹습니다',
-      spot: 'extract', go: '이 단계 실행',
+      spot: 'extract', see: 'input',
       run: async () => {
         await boot()
         if (STORE) mark(`예시 그래프를 얹었습니다 — 노드 ${STORE.stats().nodes}개`)
@@ -1656,28 +1658,30 @@ function runExample() {
     {
       say: '탐지기 12종이 이야기 씨앗을 찾습니다',
       sub: '숨긴 비밀 · 삼각관계 · 체호프의 총 … 인물 사이에 걸린 것을 그래프에서 읽어 냅니다',
-      spot: 'tabs', go: '이 단계 실행',
+      spot: 'tabs', see: 'stats',
       run: () => { openTab('seeds') },
     },
     {
       say: '씨앗 하나에서 분기를 만듭니다',
       sub: '직접 하실 때는 이 버튼이 모델을 부릅니다. 예시는 미리 받아 둔 분기를 그 자리에 세웁니다',
-      spot: '[data-seed="0"]', go: '이 단계 실행',
+      spot: '[data-seed="0"]', see: 'tabs',
       run: () => (SEEDS.length ? pickSeed(0, true) : null),
     },
     {
       say: '여기까지가 예시입니다',
       sub: '분기를 골라 [이 분기로 대본 생성] 을 누르면 개요 → 컷 → 대본으로 이어집니다. 이제 직접 해 보세요',
-      spot: 'histbox', go: '끝내기',
+      spot: 'histbox', do: '「지나간 일」을 눌러 예시를 마칩니다',
     },
   ]
 
   guideExample({
-    steps,
+    steps, title: '스토리 디벨롭',
     onDone: () => {
       PLAYING_EXAMPLE = false
       syncWelcome()
       paintHist()
+      // 예시 프로젝트를 밟고 있으면 다음 화면(키비주얼)으로 넘어간다 (demo.js)
+      if (demoAdvance('develop')) return
       openCoach()
     },
   })

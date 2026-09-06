@@ -1,12 +1,12 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>core.js · graph-schema.js · graph-engine.js · graph-probes.js · story.js · graph-view.js · history.js · onboard.js · coach.js 자체 검사</title>
+<title>core.js · graph-schema.js · graph-engine.js · graph-probes.js · story.js · graph-view.js · history.js · projects.js · demo.js · onboard.js · coach.js 자체 검사</title>
 <style>
   body { font: 14px/1.6 ui-monospace, Menlo, monospace; background: #16181C; color: #E8E4DA; padding: 32px; }
   .pass { color: #6FCF97 } .fail { color: #FF6B5E; font-weight: 700 }
   h1 { font-size: 16px; letter-spacing: .12em; text-transform: uppercase; color: #E3A93C }
 </style>
-<h1>core.js · graph-schema.js · graph-engine.js · graph-probes.js · story.js · graph-view.js · history.js · onboard.js · coach.js 자체 검사</h1>
+<h1>core.js · graph-schema.js · graph-engine.js · graph-probes.js · story.js · graph-view.js · history.js · projects.js · demo.js · onboard.js · coach.js 자체 검사</h1>
 <pre id="out"></pre>
 <script type="module">
   const {
@@ -37,8 +37,12 @@
   const { parseField, runPlanJob, PLAN_TIMEOUT_MS } = await import(`./net.js?t=${Date.now()}`)
   const { NAV_TABS, navTab, navHref, navTabFromSearch, mountNav,
   } = await import(`./nav-tabs.js?t=${Date.now()}`)
-  const { MARK, markOp, toEntry, entries, group, when, paintList,
+  const { MARK, markOp, toEntry, entries, group, when, paintList, paintTable,
   } = await import(`./history.js?t=${Date.now()}`)
+  const { newBoardId, store, touch, list, paintCards, pickProject,
+  } = await import(`./projects.js?t=${Date.now()}`)
+  const { DEMO_BOARD, DEMO_NAME, DEMO_STEPS, DEMO_TOTAL, demoActive, demoAt, demoSay,
+  } = await import(`./demo.js?t=${Date.now()}`)
   const { emptyPanel, guide, guiding, guideAt, stop: stopGuide,
   } = await import(`./onboard.js?t=${Date.now()}`)
   const coach = await import(`./coach.js?t=${Date.now()}`)
@@ -1598,6 +1602,351 @@
   ok('목록의 CSS 는 한 번만 넣는다', document.querySelectorAll('#histCss').length === 1)
   ok('mount 가 없어도 던지지 않는다', (() => { paintList(null, []); return true })())
 
+  /*
+   * 표(paintTable). 홈의 「팀원들의 작업 상황」이 쓰는 모양이다. 위의 목록과 같은 줄을
+   * 받지만 여러 프로젝트를 한자리에 모으므로 어느 판의 일인지가 칸으로 나와야 한다 —
+   * 그 칸이 없거나 줄마다 어긋나면 표가 「누가 뭘 했나」를 엉뚱한 판에 붙여 말한다.
+   */
+  const tRow = (o = {}) => group(entries([{
+    ...markOp({ step: 'board', actor: 'u1', what: '컷 하나를 만들었습니다', ...o }), ts: 1,
+  }])).map((e) => ({ ...e, boardId: o.boardId || 'p-a', pjName: o.pjName || '여름 파일럿' }))
+
+  ok('표는 프로젝트·단계·한 일·누가·언제 칸을 낸다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    paintTable(mount, tRow())
+    const cols = [...mount.querySelectorAll('thead th')].map((n) => n.textContent)
+    const r = cols.join(',') === '프로젝트,단계,한 일,누가,언제'
+      && mount.querySelectorAll('thead th[scope="col"]').length === 5
+    mount.remove()
+    return r
+  })())
+  /* 어느 판의 일인지가 그 줄의 머리다 — 화면 읽기 도구도 그렇게 읽어야 나머지 칸이 붙는다 */
+  ok('프로젝트 이름이 줄의 머리 칸으로 들어간다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    paintTable(mount, tRow())
+    const pj = mount.querySelector('tbody th.htab__pj')
+    const r = pj?.textContent === '여름 파일럿' && pj.getAttribute('scope') === 'row'
+    mount.remove()
+    return r
+  })())
+  ok('이름이 없는 판은 판 id 로 적는다 — 빈 칸으로 두지 않는다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    paintTable(mount, tRow().map((e) => ({ ...e, pjName: '' })))
+    const r = mount.querySelector('tbody th.htab__pj')?.textContent === 'p-a'
+    mount.remove()
+    return r
+  })())
+  ok('단계 이름과 한 일이 각자의 칸에 들어간다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    paintTable(mount, tRow())
+    const r = mount.querySelector('.htab__step')?.textContent === '스토리보드'
+      && mount.querySelectorAll('tbody td')[1].textContent.includes('컷 하나를 만들었습니다')
+    mount.remove()
+    return r
+  })())
+  ok('예시 줄에는 표에서도 「예시」 표시가 붙는다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    paintTable(mount, tRow({ example: true }))
+    const r = mount.querySelector('.htab__ex')?.textContent === '예시'
+    mount.remove()
+    return r
+  })())
+  ok('「열기」를 누르면 그 줄이 onPick 으로 넘어온다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    const got = []
+    paintTable(mount, tRow({ ref: 'p1', refKind: 'panel' }), { onPick: (e) => got.push(e) })
+    const col = [...mount.querySelectorAll('thead th')].map((n) => n.textContent)
+    mount.querySelector('.htab__go').click()
+    mount.remove()
+    return col.includes('이어서') && got.length === 1
+      && got[0].ref === 'p1' && got[0].boardId === 'p-a'
+  })())
+  ok('onPick 이 없으면 「이어서」 칸을 만들지 않는다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    paintTable(mount, tRow())
+    const r = !mount.querySelector('button') && mount.querySelectorAll('thead th').length === 5
+    mount.remove()
+    return r
+  })())
+  ok('비었으면 표를 세우지 않고 비었다고 적는다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    paintTable(mount, [], { none: '아직 지나간 일이 없습니다.' })
+    const r = !mount.querySelector('table')
+      && mount.querySelector('.hist__none')?.textContent === '아직 지나간 일이 없습니다.'
+    mount.remove()
+    return r
+  })())
+  ok('표를 다시 그리면 앞의 줄이 남지 않는다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    paintTable(mount, tRow({ what: 'A' }))
+    paintTable(mount, tRow({ what: 'B' }))
+    const r = mount.querySelectorAll('tbody tr').length === 1 && mount.textContent.includes('B')
+    mount.remove()
+    return r
+  })())
+  ok('표에도 mount 가 없어도 던지지 않는다', (() => { paintTable(null, []); return true })())
+
+  /* ══ projects.js: 작업판 앞에 서는 문 ═════════════════════════════════════ */
+
+  /*
+   * 이 검사는 한동안 /tmp 의 별도 하네스에 있었다. 거기 두면 이 파일을 돌리는 사람은
+   * 프로젝트 문이 검사된다는 사실 자체를 모른다 — 그래서 여기로 옮겼다.
+   *
+   * 로컬 모드(SB_CONFIG 가 없다)로 돈다. 그 모드의 저장소는 localStorage 라서 검사가
+   * 남긴 것이 다음 검사에 섞인다 — 그래서 매번 비우고 시작한다.
+   */
+  const PJ_KEY = 'sb.projects.v1'
+  const pjClear = () => localStorage.removeItem(PJ_KEY)
+
+  /*
+   * 이름을 그대로 주소에 쓰지 않는다. 한글은 남는 ASCII 가 없어 거의 늘 'p-…' 가 되고,
+   * 뒤의 무작위 조각이 같은 이름을 두 번 만든 두 팀을 한 판에 넣는 것을 막는다.
+   */
+  ok('프로젝트 이름에서 주소에 쓸 id 를 만든다', (() => {
+    const ascii = newBoardId('Summer Pilot 2')
+    const kr = newBoardId('여름 스튜디오')
+    return /^summer-pilot-2-[a-z0-9]+$/.test(ascii) && /^p-[a-z0-9]+$/.test(kr)
+      && newBoardId('같은 이름') !== newBoardId('같은 이름')
+  })())
+  ok('id 가 끝없이 길어지지 않는다', newBoardId('a'.repeat(200)).length <= 24 + 8)
+
+  ok('로컬 모드의 저장소를 쓴다', store().mode === 'local')
+
+  /*
+   * 이름은 처음 한 번만 박힌다. 배포 쪽 리졸버(infra/resolvers/putProject.js)가
+   * if_not_exists 로 같은 규칙을 지킨다 — 두 곳이 다르면 로컬에서 되던 것이 배포에서
+   * 다르게 돌아 읽는 사람이 그 차이를 코드에서 찾지 못한다.
+   */
+  ok('카드의 이름은 처음 한 번만 박히고 마지막 손길만 갱신된다', await (async () => {
+    pjClear()
+    await touch({ boardId: 'p-x', actor: 'u1', name: '처음 이름', what: '프로젝트를 만들었습니다' })
+    const after = await touch({ boardId: 'p-x', actor: 'u2', name: '덮어쓰기', what: '컷을 만들었습니다' })
+    const rows = await list()
+    pjClear()
+    return after.name === '처음 이름' && after.createdBy === 'u1'
+      && after.lastActor === 'u2' && after.lastWhat === '컷을 만들었습니다'
+      && rows.length === 1
+  })())
+  ok('목록은 최근에 손댄 판이 앞에 온다', await (async () => {
+    pjClear()
+    await touch({ boardId: 'p-old', actor: 'u1', name: '오래된 판' })
+    await new Promise((r) => setTimeout(r, 2))
+    await touch({ boardId: 'p-new', actor: 'u1', name: '방금 판' })
+    const rows = await list()
+    pjClear()
+    return rows.map((r) => r.boardId).join() === 'p-new,p-old'
+  })())
+  ok('판을 고르지 않은 채로 카드를 갱신하려 하면 아무 일도 하지 않는다',
+    (await touch({ actor: 'u1' })) === null)
+
+  const pjRows = [
+    { boardId: 'p-a', name: '여름 파일럿', updatedAt: '2', lastActor: 'u1', lastWhat: '컷을 만들었습니다' },
+    { boardId: 'p-b', name: '겨울 편', updatedAt: '1' },
+  ]
+
+  ok('카드에 이름과 마지막 손길이 적힌다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    paintCards(mount, pjRows, { who: (id) => (id === 'u1' ? { name: '가온' } : null) })
+    const first = mount.querySelector('[data-board="p-a"]')
+    const r = first.querySelector('.pj__name').textContent === '여름 파일럿'
+      && first.querySelector('.pj__last').textContent === '가온 · 컷을 만들었습니다'
+      && mount.querySelectorAll('.pj__card').length === 2
+    mount.remove()
+    return r
+  })())
+  /* 아직 아무 일도 없는 판을 빈 줄로 두면 카드가 고장 난 것처럼 읽힌다 */
+  ok('아직 아무 일도 없는 판도 그 말을 적는다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    paintCards(mount, pjRows)
+    const r = mount.querySelector('[data-board="p-b"] .pj__last').textContent === '아직 아무 일도 없습니다'
+    mount.remove()
+    return r
+  })())
+  ok('카드를 누르면 그 판이 onPick 으로 넘어온다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    const got = []
+    paintCards(mount, pjRows, { onPick: (p) => got.push(p.boardId) })
+    mount.querySelector('[data-board="p-b"]').click()
+    const isBtn = mount.querySelector('.pj__card').tagName === 'BUTTON'
+    mount.remove()
+    return isBtn && got.join() === 'p-b'
+  })())
+  ok('onPick 이 없으면 읽기만 하는 목록이다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    paintCards(mount, pjRows)
+    const r = !mount.querySelector('button') && mount.querySelector('.pj__card').tagName === 'DIV'
+    mount.remove()
+    return r
+  })())
+  ok('지금 보고 있는 판에는 표시를 단다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    paintCards(mount, pjRows, { current: 'p-b' })
+    const r = mount.querySelector('[data-board="p-b"]').getAttribute('aria-current') === 'true'
+      && mount.querySelector('[data-board="p-a"]').getAttribute('aria-current') === null
+    mount.remove()
+    return r
+  })())
+  ok('카드가 없으면 비었다고 적는다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    paintCards(mount, [], { none: '아직 만든 프로젝트가 없습니다.' })
+    const r = mount.querySelector('.pj__none')?.textContent === '아직 만든 프로젝트가 없습니다.'
+    mount.remove()
+    return r
+  })())
+  ok('카드를 다시 그리면 앞의 카드가 남지 않는다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    paintCards(mount, pjRows)
+    paintCards(mount, [pjRows[0]])
+    const r = mount.querySelectorAll('.pj__card').length === 1
+    mount.remove()
+    return r
+  })())
+  ok('카드 CSS 도 한 번만 넣는다', document.querySelectorAll('#projectsCss').length === 1)
+  ok('카드 mount 가 없어도 던지지 않는다', (() => { paintCards(null, pjRows); return true })())
+
+  /*
+   * 문은 주소에 ?board= 가 없을 때만 선다. 카드를 눌러 들어온 사람이나 링크를 받은
+   * 사람에게 같은 문을 두 번 열면, 고른 판이 있는데도 다시 고르라는 화면이 된다.
+   */
+  ok('주소에 판이 적혀 있으면 문을 세우지 않고 그 판을 그대로 돌려준다', await (async () => {
+    const back = location.search
+    window.history.replaceState({}, '', '/test.html?board=p-linked')
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    const got = await pickProject({ step: 'board', mount })
+    const none = !mount.querySelector('.pjwrap')
+    mount.remove()
+    window.history.replaceState({}, '', `/test.html${back}`)
+    return got === 'p-linked' && none
+  })())
+  /*
+   * 판이 안 적혀 있으면 문을 세운다. pickProject 의 약속은 일부러 해결되지 않으므로
+   * (고르면 화면을 다시 연다) await 하지 않고 화면에 선 것을 본다.
+   */
+  ok('판이 안 적혀 있으면 문을 세우고 목록과 새로 만드는 칸을 같이 낸다', await (async () => {
+    pjClear()
+    await touch({ boardId: 'p-a', actor: 'u1', name: '여름 파일럿', what: '컷을 만들었습니다' })
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    pickProject({ step: 'keyvisual', mount })
+    const box = mount.querySelector('.pjwrap .pj')
+    const shape = !!box
+      && box.querySelector('.pj__eyebrow').textContent === '키비주얼'
+      && box.querySelector('.pj__h').textContent === '어느 프로젝트를 여시겠습니까?'
+      && !!box.querySelector('#pjName') && !!box.querySelector('#pjMake')
+      && !!box.querySelector('#pjSkip')
+    await new Promise((r) => setTimeout(r, 0))
+    const listed = !!box.querySelector('[data-board="p-a"]')
+      && box.querySelector('#pjNote').textContent.includes('프로젝트 1개')
+    mount.remove()
+    pjClear()
+    return shape && listed
+  })())
+  /* 목록을 못 읽어도 새로 만드는 길은 살아 있어야 한다 — 여기서 막히면 아무 일도 못 한다 */
+  ok('목록이 비어 있어도 첫 판을 여는 길을 남긴다', await (async () => {
+    pjClear()
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    pickProject({ step: 'board', mount })
+    await new Promise((r) => setTimeout(r, 0))
+    const box = mount.querySelector('.pj')
+    const r = !!box.querySelector('.pj__none') && !box.querySelector('.pj__card')
+      && !box.querySelector('#pjMake').disabled
+    mount.remove()
+    return r
+  })())
+  /* 코치마크가 목록을 가리킬 수 있어야 한다. 앵커가 빠지면 그 장이 조용히 건너뛰어진다 */
+  ok('문의 목록에는 코치마크가 가리킬 표시가 붙어 있다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    pickProject({ step: 'board', mount })
+    const r = !!mount.querySelector('[data-coach="projects"]')
+    mount.remove()
+    return r
+  })())
+  /* 이름을 비운 채 눌러도 판을 만들지 않는다 — 이름 없는 카드가 목록에 쌓인다 */
+  ok('이름을 비운 채 눌러도 판을 만들지 않는다', await (async () => {
+    pjClear()
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    pickProject({ step: 'board', mount })
+    mount.querySelector('#pjNew').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await new Promise((r) => setTimeout(r, 0))
+    const rows = await list()
+    mount.remove()
+    pjClear()
+    return rows.length === 0
+  })())
+
+  /* ══ demo.js: 네 화면을 잇는 한 번의 예시 ════════════════════════════════ */
+
+  /*
+   * 이 파일이 들고 있는 상태는 주소 하나뿐이다 — ?demo=1. 그래서 검사도 주소만 넣어
+   * 본다. localStorage 나 전역 변수에 두지 않은 이유가 여기서도 보인다: 새로고침해도
+   * 그 자리이고, 검사에서도 화면을 세우지 않고 값만 물어볼 수 있다.
+   *
+   * 화면을 실제로 넘기는 것(demoAdvance·startDemo·demoQuit)은 location.href 를 갈아
+   * 끼우므로 여기서 부르지 않는다. jsdom 은 그 자리에서 「구현되지 않았다」를 뱉고,
+   * 브라우저에서는 검사 페이지 자체가 다른 화면으로 떠난다.
+   */
+  ok('예시는 「예시 프로젝트」 한 판에만 쌓인다', DEMO_BOARD === 'demo' && DEMO_NAME === '예시 프로젝트')
+  /*
+   * 밟는 순서가 이야기가 만들어지는 순서와 같아야 한다. 홈의 단계 목록도 같은 배열
+   * (NAV_TABS)에서 번호를 매기므로, 여기가 어긋나면 「01 → 02」로 읽은 사람이 예시에서
+   * 거꾸로 걷는다.
+   */
+  ok('밟는 순서가 단계 순서와 같다', (() => {
+    const order = NAV_TABS.map((t) => t.id).filter((id) => DEMO_STEPS.includes(id))
+    return order.join() === DEMO_STEPS.join() && DEMO_TOTAL === DEMO_STEPS.length
+  })())
+  /*
+   * 대본화는 일부러 빠져 있다 — 디벨롭과 같은 화면의 안쪽 탭이고 그 화면의 예시가 이미
+   * 그 탭을 가리키며 끝난다. 이 한 줄이 「빠뜨렸나」와 「일부러 뺐나」를 가른다.
+   */
+  ok('대본화는 같은 화면의 안쪽 탭이라 따로 밟지 않는다', !DEMO_STEPS.includes('script'))
+  ok('DEMO_STEPS 는 모두 실제로 있는 단계다',
+    DEMO_STEPS.every((id) => !!navTab(id)))
+  ok('?demo=1 일 때만 예시를 밟는 중이다', (() => {
+    return demoActive('?demo=1') === true && demoActive('?demo=done') === false
+      && demoActive('') === false && demoActive('?board=p-a') === false
+  })())
+  ok('몇 번째 걸음인지 1부터 센다', (() => {
+    const at = DEMO_STEPS.map((id) => demoAt(id, '?demo=1'))
+    return at.join() === DEMO_STEPS.map((_, i) => i + 1).join()
+      && demoAt('script', '?demo=1') === 0        // 밟지 않는 단계
+      && demoAt('board', '') === 0                // 예시 중이 아니다
+  })())
+  /*
+   * 안내 문구가 다음에 어디로 가는지를 말해야 한다. 말해 주지 않으면 화면이 갑자기
+   * 바뀐 것으로 읽히고, 마지막 걸음에서는 「끝났다」를 알 길이 없다.
+   */
+  ok('안내 문구가 지금 걸음과 다음 갈 곳을 말한다', (() => {
+    const back = location.search
+    window.history.replaceState({}, '', '/test.html?demo=1')
+    const first = demoSay(DEMO_STEPS[0])
+    const last = demoSay(DEMO_STEPS.at(-1))
+    window.history.replaceState({}, '', `/test.html${back}`)
+    return first === `예시 프로젝트 1/${DEMO_TOTAL} — 이 단계를 마치면 「${navTab(DEMO_STEPS[1]).label}」로 넘어갑니다.`
+      && last === `예시 프로젝트 ${DEMO_TOTAL}/${DEMO_TOTAL} — 마지막 단계입니다. 마치면 홈으로 돌아갑니다.`
+  })())
+  ok('예시 중이 아니면 안내 문구를 내지 않는다', demoSay('board') === '')
+
   /* ══ onboard.js: 빈 화면 안내와 예시 길잡이 ══════════════════════════════ */
 
   ok('빈 화면 안내에 큰 줄과 설명이 들어간다', (() => {
@@ -1647,20 +1996,88 @@
   document.body.appendChild(gStage)
   const gSpot = (k) => document.querySelector(`[data-coach="${k}"]`)
 
-  ok('길잡이는 띠를 세우고 첫 단계를 적고 그 자리에 테를 두른다', (() => {
-    const h = guide({ steps: [
+  /*
+   * 테와 body 의 표시는 guide 가 돌아오는 즉시 붙지만, 막·동그라미·말풍선은 좌표를 잰
+   * 뒤에 그려집니다 — onboard.js 의 showStep 이 requestAnimationFrame 을 한 번 지납니다
+   * (coach.js 와 같은 이유). 그래서 말풍선 안을 읽는 검사는 한 프레임을 기다립니다.
+   * 기다리지 않으면 .onbg 는 있는데 그 속이 비어 있는 상태를 읽습니다.
+   */
+  const painted = () => new Promise((r) => setTimeout(r, 40))
+
+  ok('길잡이는 막을 덮고 첫 단계를 적고 그 자리에 테를 두른다', await (async () => {
+    guide({ steps: [
       { say: '예시 시놉시스를 넣습니다', sub: '케데헌', spot: 'gone' },
       { say: '그래프를 뽑습니다', spot: 'gtwo' },
-    ] })
-    const bar = document.querySelector('.onbbar')
-    const shape = !!bar && bar.getAttribute('role') === 'status'
-      && bar.querySelector('.onbbar__n').textContent === '1 / 2'
-      && bar.querySelector('.onbbar__say b').textContent === '예시 시놉시스를 넣습니다'
-      && bar.querySelector('.onbbar__say small').textContent === '케데헌'
+    ], title: '스토리 디벨롭' })
     const lit = gSpot('gone').classList.contains('onb-spot') && !gSpot('gtwo').classList.contains('onb-spot')
     const on = guiding() && guideAt() === 0
+    await painted()
+    const root = document.querySelector('.onbg')
+    const b = root?.querySelector('.onbg__b')
+    const shape = !!root && !!root.querySelector('.onbg__veil')
+      && b.getAttribute('role') === 'dialog' && b.getAttribute('aria-modal') === 'true'
+      && b.querySelector('.onbg__n').textContent === '1 / 2'
+      && b.querySelector('.onbg__h').textContent === '예시 시놉시스를 넣습니다'
+      && b.querySelector('.onbg__p').textContent === '케데헌'
+      && b.querySelector('.onbg__crumb span').textContent === '스토리 디벨롭'
     stopGuide()
     return shape && lit && on
+  })())
+  /*
+   * 짚은 자리가 있으면 넘어가는 길은 그 자리뿐이다. 「다음」 버튼을 같이 내면 사람은
+   * 그 버튼만 눌러 끝까지 가고, 배우라고 짚어 준 자리를 우리가 건너뛰게 해 준 셈이 된다.
+   */
+  ok('짚은 자리가 있으면 「다음」 버튼을 내지 않고 어디를 누르라고만 적는다', await (async () => {
+    guide({ steps: [{ say: 'A', spot: 'gone' }] })
+    await painted()
+    const b = document.querySelector('.onbg__b')
+    const said = b.querySelector('.onbg__do')?.textContent === '표시된 곳을 눌러 주십시오'
+    const none = !b.querySelector('.onbg__next')
+    stopGuide()
+    return said && none
+  })())
+  ok('그 한 줄을 단계마다 바꿔 적을 수 있다', await (async () => {
+    guide({ steps: [{ say: 'A', spot: 'gone', do: '「지나간 일」을 눌러 예시를 마칩니다' }] })
+    await painted()
+    const said = document.querySelector('.onbg__do').textContent === '「지나간 일」을 눌러 예시를 마칩니다'
+    stopGuide()
+    return said
+  })())
+  /*
+   * 누를 곳을 눈으로 찾게 두지 않는다. 동그라미와 마우스 표시를 그 자리에 얹는다 —
+   * 둘 다 pointer-events:none 이라 정작 눌러야 하는 자리를 자기가 덮지 않는다.
+   */
+  ok('누를 자리에 동그라미와 마우스 표시를 얹는다', await (async () => {
+    guide({ steps: [{ say: 'A', spot: 'gone' }] })
+    await painted()
+    const ring = document.querySelector('.onbg__ring')
+    const hand = document.querySelector('.onbg__hand')
+    const hidden = ring?.getAttribute('aria-hidden') === 'true' && hand?.getAttribute('aria-hidden') === 'true'
+    stopGuide()
+    return !!ring && !!hand && hidden
+  })())
+  /*
+   * 누를 곳과 봐야 할 것이 다른 단계가 흔하다 — 작은 버튼을 누르고 결과는 넓은 판에
+   * 들어간다. see 로 그 판도 막 위로 올린다. 올리지 않으면 무엇이 채워졌는지가 막에 묻힌다.
+   */
+  ok('see 로 준 자리도 막 위로 올린다', (() => {
+    guide({ steps: [{ say: 'A', spot: 'gone', see: 'gtwo' }] })
+    const seen = gSpot('gtwo').classList.contains('onb-see')
+    const lit = gSpot('gone').classList.contains('onb-spot')
+    stopGuide()
+    return seen && lit && !gSpot('gtwo').classList.contains('onb-see')
+  })())
+  ok('see 는 여러 자리도 받는다', (() => {
+    guide({ steps: [{ say: 'A', see: ['gone', 'gtwo'] }] })
+    const both = gSpot('gone').classList.contains('onb-see') && gSpot('gtwo').classList.contains('onb-see')
+    stopGuide()
+    return both
+  })())
+  ok('막이 덮인 동안에는 뒤가 스크롤되지 않는다', (() => {
+    guide({ steps: [{ say: 'A', spot: 'gone' }] })
+    const locked = document.body.classList.contains('onbguiding')
+    stopGuide()
+    return locked && !document.body.classList.contains('onbguiding')
   })())
   /*
    * 저 혼자 넘어가지 않는다는 것을 검사한다. 이 한 줄이 자동 재생으로 되돌아가는 것을 막는다 —
@@ -1703,6 +2120,16 @@
     b.onclick = null
     return hit.join() === 'step'
   })())
+  /* 키보드로 그 자리에 닿은 사람도 같은 길을 쓴다 */
+  ok('짚은 자리에서 Enter 를 눌러도 그 단계가 돈다', await (async () => {
+    const ran = []
+    guide({ steps: [{ say: 'A', spot: 'gone', run: () => ran.push(1) }, { say: 'B', spot: 'gtwo' }] })
+    gSpot('gone').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await new Promise((r) => setTimeout(r, 0))
+    const moved = ran.join() === '1' && guideAt() === 1
+    stopGuide()
+    return moved
+  })())
   /* 짚은 자리가 아닌 곳을 눌러도 단계가 돌지 않는다 — 잘못 누른 것으로 넘어가면 안 된다 */
   ok('짚지 않은 자리를 눌러도 넘어가지 않는다', await (async () => {
     const ran = []
@@ -1713,16 +2140,24 @@
     stopGuide()
     return still
   })())
-  /* 띠의 버튼도 같은 길이다. 자리를 못 찾는 단계는 이 버튼만으로 넘어간다 */
-  ok('띠의 버튼으로도 그 단계를 실행한다', await (async () => {
+  /* 자리를 못 찾은 단계에서만 버튼이 나온다. 그때는 그 버튼이 유일한 길이다 */
+  ok('자리를 못 찾은 단계는 말풍선의 버튼으로 넘어간다', await (async () => {
     const ran = []
     guide({ steps: [{ say: 'A', run: () => ran.push(1) }, { say: 'B', spot: 'gtwo' }] })
-    const label = document.querySelector('.onbbar__btn').textContent
-    document.querySelector('.onbbar__btn').click()
+    await painted()
+    const label = document.querySelector('.onbg__next').textContent
+    document.querySelector('.onbg__next').click()
     await new Promise((r) => setTimeout(r, 0))
     const moved = ran.join() === '1' && guideAt() === 1
     stopGuide()
     return label === '다음' && moved
+  })())
+  ok('그 버튼의 이름도 단계마다 바꿔 달 수 있다', await (async () => {
+    guide({ steps: [{ say: 'A', go: '대본을 넣습니다' }] })
+    await painted()
+    const label = document.querySelector('.onbg__next').textContent
+    stopGuide()
+    return label === '대본을 넣습니다'
   })())
   /* spot 을 CSS 선택자로도 준다 — data-coach 를 못 붙이는 자리가 있다 */
   ok('짚을 자리를 CSS 선택자로도 준다', (() => {
@@ -1737,36 +2172,44 @@
     guide({ steps: [{ say: '끝', spot: 'gone' }], onDone: () => { done = true } })
     gSpot('gone').click()
     await new Promise((r) => setTimeout(r, 0))
-    return done && !guiding() && !document.querySelector('.onbbar')
+    return done && !guiding() && !document.querySelector('.onbg')
       && !gSpot('gone').classList.contains('onb-spot')
   })())
   ok('두 번 겹쳐 안내하지 않는다', (() => {
     guide({ steps: [{ say: 'A', spot: 'gone' }] })
     const second = guide({ steps: [{ say: 'B' }] })
-    const one = document.querySelectorAll('.onbbar').length === 1
+    const one = document.querySelectorAll('.onbg').length === 1
     stopGuide()
     return second === null && one && !guiding()
   })())
-  ok('단계가 없으면 띠를 세우지 않고 바로 끝낸다', (() => {
+  ok('단계가 없으면 막을 덮지 않고 바로 끝낸다', (() => {
     let done = false
     const h = guide({ steps: [], onDone: () => { done = true } })
-    return h === null && done && !document.querySelector('.onbbar') && !guiding()
+    return h === null && done && !document.querySelector('.onbg') && !guiding()
   })())
   /*
-   * 그만둘 수 없는 안내는 안내가 아니라 방해다. 그리고 끝까지 가도, 중간에 그만둬도
-   * onDone 을 한 번은 지나야 한다 — 화면이 그걸로 안내 판을 다시 그린다.
+   * 그만둘 수 없는 안내는 안내가 아니라 방해다 — 막까지 덮은 화면이라 더 그렇다. 나가는
+   * 길은 말풍선의 × 와 Esc 둘이고, 끝까지 가도 중간에 그만둬도 onDone 을 한 번은 지나야
+   * 한다 — 화면이 그걸로 안내 판을 다시 그린다.
    */
-  ok('「예시 끝내기」로 그만두면 남은 단계는 돌지 않는다', await (async () => {
+  ok('말풍선의 × 로 그만두면 남은 단계는 돌지 않는다', await (async () => {
     const ran = []
     let done = false
     guide({
       steps: [{ say: 'A', spot: 'gone', run: () => ran.push(1) }, { say: 'B', run: () => ran.push(2) }],
       onDone: () => { done = true },
     })
-    document.querySelector('.onbbar__btn--go').click()
+    await painted()
+    document.querySelector('.onbg__x').click()
     await new Promise((r) => setTimeout(r, 0))
-    return done && !ran.length && !guiding() && !document.querySelector('.onbbar')
+    return done && !ran.length && !guiding() && !document.querySelector('.onbg')
       && !gSpot('gone').classList.contains('onb-spot')
+  })())
+  ok('Esc 로도 그만둔다', (() => {
+    let done = false
+    guide({ steps: [{ say: 'A', spot: 'gone' }], onDone: () => { done = true } })
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    return done && !guiding() && !document.querySelector('.onbg')
   })())
   /* 한 단계가 걸려도 안내가 그 자리에 멈춰 서면 안 된다 — 다음 단계로 넘어간다 */
   ok('단계 하나가 걸려도 다음으로 넘어간다', await (async () => {
@@ -1782,10 +2225,15 @@
     await new Promise((r) => setTimeout(r, 0))
     return moved && ran.join() === '2' && !guiding()
   })())
-  /* 자리를 못 찾아도 안내가 서야 한다. 없는 자리에 테를 두르느니 띠로만 넘기는 편이 낫다 */
-  ok('짚을 자리를 못 찾아도 안내는 선다', (() => {
+  /*
+   * 자리를 못 찾아도 안내가 서야 한다. 없는 자리에 테를 두르느니 버튼으로 넘기는 편이
+   * 낫고, 무엇보다 막을 덮은 채로 누를 곳이 하나도 없으면 그 화면은 갇힌다.
+   */
+  ok('짚을 자리를 못 찾아도 안내는 서고 넘어갈 버튼이 나온다', await (async () => {
     guide({ steps: [{ say: 'A', spot: '없는자리' }] })
-    const up = guiding() && !!document.querySelector('.onbbar')
+    await painted()
+    const up = guiding() && !!document.querySelector('.onbg')
+      && !!document.querySelector('.onbg__next')
     stopGuide()
     return up
   })())

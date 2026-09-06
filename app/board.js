@@ -19,6 +19,7 @@ import * as coach from './coach.js'
 import { emptyPanel, guide as guideExample, guiding } from './onboard.js'
 import { entries, group, paintList, toEntry } from './history.js'
 import { pickProject, touch as touchProject } from './projects.js'
+import { demoActive, demoAdvance, demoSay } from './demo.js'
 
 const ROSTER = [
   { id: 'u1', name: '김하나', role: 'planner', color: '#E3A93C', job: '시나리오를 컷으로 쪼갭니다' },
@@ -1569,6 +1570,7 @@ function welcomePanel() {
       byId('scenario')?.focus()
       openCoach()
     },
+    ...(demoActive() ? { eyebrow: demoSay('board') } : {}),
     warn: '예시 내용은 이 보드에 실제로 저장되고 같은 보드를 보는 사람에게도 보입니다. '
       + '지우려면 관리 화면의 보드 비우기를 씁니다.',
   })
@@ -1600,7 +1602,7 @@ function runExample() {
     const from = m.at
     const to = marks[i + 1]?.at ?? ops.length
     return {
-      say: m.say, sub: m.sub, spot: EXAMPLE_SPOTS[i], go: '이 단계 실행',
+      say: m.say, sub: m.sub, spot: EXAMPLE_SPOTS[i], see: 'board',
       run: () => {
         for (const op of ops.slice(from, to)) push(op)
         if (!selectedId) { pickView() }
@@ -1611,14 +1613,20 @@ function runExample() {
   steps.push({
     say: '여기까지가 예시입니다',
     sub: '이제 컷을 눌러 오른쪽에서 고치거나, 관리 화면에서 보드를 비우고 직접 시작할 수 있습니다',
-    spot: 'histbox', go: '끝내기',
+    spot: 'histbox', do: '「지나간 일」을 눌러 예시를 마칩니다',
     run: () => { pickView(); render() },
   })
   exampleRun = guideExample({
-    steps,
+    steps, title: '스토리보드',
     onDone: () => {
       exampleRun = null
       render()
+      /*
+       * 예시 프로젝트를 밟고 있으면 다음 화면으로 넘어간다 — 보드는 마지막 단계라
+       * 홈으로 돌아간다(demo.js 의 DEMO_STEPS). 그때는 코치마크를 열지 않는다.
+       * 화면을 떠나는 중에 막을 덮으면 한 번 반짝하고 사라진다.
+       */
+      if (demoAdvance('board')) return
       // 예시를 다 본 뒤에 화면의 어디를 눌러야 하는지 짚어 준다. 순서가 반대면
       // (코치마크 먼저) 가리킬 컷이 아직 없어 빈 자리를 가리키게 된다
       openCoach()
@@ -3333,6 +3341,16 @@ async function boot() {
    * 화면에 「처음 오셨나요?」 판이 있고, 그 판이 두 갈래를 이미 말해 준다. 막을 덮어
    * 그 판을 가릴 이유가 없다. 예시를 보거나 직접 시작하면 그 뒤에 코치마크가 열린다.
    */
+  if (demoActive()) {
+    /*
+     * 예시 프로젝트가 이 화면으로 데려온 것이다. 사람이 「예시 보기」를 한 번 더 누를
+     * 이유가 없으므로 바로 시작한다. 판에 이미 컷이 있어도 시작한다 — 앞의 단계에서
+     * 넘어온 길이고, 예시는 예시 판에만 쌓인다(demo.js 의 DEMO_BOARD).
+     */
+    runExample()
+    return
+  }
+
   if (!coach.seen(COACH_KEY) && Object.keys(state.panels).length) openCoach()
 }
 

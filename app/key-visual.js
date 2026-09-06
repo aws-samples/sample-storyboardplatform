@@ -21,6 +21,7 @@ import { emptyPanel, guide as guideExample, guiding } from './onboard.js'
 import { makeArt } from './art.js'
 import { entries, group, markOp, paintList } from './history.js'
 import { pickProject, touch as touchProject } from './projects.js'
+import { demoActive, demoAdvance, demoSay } from './demo.js'
 
 const cfg = window.SB_CONFIG || {}
 const $ = (s, r = document) => r.querySelector(s)
@@ -1081,6 +1082,7 @@ function welcomePanel() {
       $('.script')?.focus()
       openCoach()
     },
+    ...(demoActive() ? { eyebrow: demoSay('keyvisual') } : {}),
     warn: '예시는 미리 받아 둔 데이터만 씁니다 — 문장 모델도 생성 서버도 부르지 않으므로 '
       + '기다리는 시간이 없고, 그림은 「예시」로 표시된 대신 그림입니다. '
       + '진짜 그림은 예시를 마친 뒤 「이 씬만 다시 생성」을 누를 때 나옵니다.',
@@ -1110,13 +1112,13 @@ function runExample() {
   const blocks = SAMPLE.split(/\n[ \t]*\n/).filter((x) => x.trim()).length
   const steps = [
     {
-      say: '예시 대본을 넣습니다', go: '이 단계 실행',
+      say: '예시 대본을 넣습니다', see: 'script',
       sub: `${blocks}개 블록 · 극장 하나를 배경으로 한 짧은 대본입니다`,
       spot: 'script',
       run: () => { S.script = SAMPLE; S.step = 1; paint() },
     },
     {
-      say: '대본을 씬으로 나눕니다', go: '이 단계 실행',
+      say: '대본을 씬으로 나눕니다', see: 'script',
       sub: '빈 줄로 블록을 자르고, 슬러그가 같은 인접 블록은 한 씬으로 합칩니다',
       spot: 'split',
       run: () => {
@@ -1129,13 +1131,13 @@ function runExample() {
       },
     },
     {
-      say: '씬마다 이미지 프롬프트를 올립니다', go: '이 단계 실행',
+      say: '씬마다 이미지 프롬프트를 올립니다', see: 'prompts',
       sub: '직접 하실 때는 문장 모델이 이 칸을 채웁니다. 예시는 미리 받아 둔 것을 올리므로 기다리지 않습니다',
       spot: 'prompts',
       run: () => fillPromptsFromSample(),
     },
     {
-      say: '씬마다 그림 한 장을 세웁니다', go: '이 단계 실행',
+      say: '씬마다 그림 한 장을 세웁니다', see: 'queue',
       sub: '직접 하실 때는 이 버튼이 생성 서버를 부릅니다 — 장당 10초 남짓입니다. 예시 그림은 그 자리에 바로 들어갑니다',
       spot: 'gen',
       run: () => {
@@ -1147,7 +1149,7 @@ function runExample() {
       },
     },
     {
-      say: '여기까지가 예시입니다', go: '끝내기',
+      say: '여기까지가 예시입니다', do: '「지나간 일」을 눌러 예시를 마칩니다',
       sub: '이제 대본을 바꿔 다시 나누거나, 「이 씬만 다시 생성」으로 진짜 그림을 받아 보드에 붙일 수 있습니다',
       spot: 'histbox',
       run: () => paint(),
@@ -1155,10 +1157,13 @@ function runExample() {
   ]
 
   exampleRun = guideExample({
-    steps,
+    steps, title: '키 비주얼',
     onDone: () => {
       exampleRun = null
       paint()
+      // 예시 프로젝트를 밟고 있으면 다음 화면으로 넘어간다 (demo.js). 화면을 떠나는
+      // 중에 막을 덮으면 한 번 반짝하고 사라지므로 코치마크는 열지 않는다
+      if (demoAdvance('keyvisual')) return
       // 예시가 끝난 뒤에 짚는다. 순서가 반대면 가리킬 것이 아직 화면에 없다
       openCoach()
     },
@@ -1433,6 +1438,12 @@ async function boot() {
    * 화면에 「처음 오셨나요?」 판이 있고 그 판이 두 갈래를 이미 말해 준다. 막을 덮어
    * 그것을 가릴 이유가 없다. 예시를 보거나 직접 시작하면 그 뒤에 열린다.
    */
+  if (demoActive()) {
+    // 예시 프로젝트가 데려온 길이다. 「예시 보기」를 한 번 더 누를 이유가 없다
+    runExample()
+    return
+  }
+
   if (!coach.seen(COACH_KEY) && S.script.trim()) openCoach()
 }
 

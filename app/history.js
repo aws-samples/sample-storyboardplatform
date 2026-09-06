@@ -245,6 +245,51 @@ button.hist__row:hover { background: var(--sb-fill, #f8f9fb); }
   padding: 14px 12px; background: var(--sb-panel, #fff); font-size: 12.5px;
   color: var(--sb-ink-3, #767f8c); line-height: 1.6;
 }
+
+/*
+ * 표 모양. 위의 목록(.hist)과 같은 줄을 다르게 그린 것입니다.
+ *
+ * 두 모양을 다 두는 이유는 보여 줄 칸의 수가 다르기 때문입니다. 한 판 안에서 보는
+ * 목록은 프로젝트가 늘 같아서 「누가 · 뭘 · 언제」 세 가지면 되고, 목록이 좁은 기둥에
+ * 들어갑니다. 반면 홈의 「팀원들의 작업 상황」은 여러 프로젝트를 한자리에 모으므로
+ * 어느 프로젝트에서 한 일인지가 먼저 와야 하고, 그 칸이 줄마다 세로로 맞아야 눈이
+ * 훑을 수 있습니다. 그 정렬이 표가 하는 일입니다.
+ */
+.htab { width: 100%; border-collapse: collapse; font-family: var(--sb-sans, sans-serif); }
+.htab caption { text-align: left; padding: 0 0 8px; font-size: 11.5px; color: var(--sb-ink-3, #767f8c); }
+.htab th {
+  padding: 0 10px 7px; text-align: left; white-space: nowrap;
+  font: 600 11px/1.4 var(--sb-sans, sans-serif); color: var(--sb-ink-3, #767f8c);
+  border-bottom: 1px solid var(--sb-line, #e4e7ec);
+}
+.htab td {
+  padding: 9px 10px; font-size: 12.5px; line-height: 1.5; vertical-align: top;
+  border-bottom: 1px solid var(--sb-line-2, #f1f3f6); color: var(--sb-ink, #111318);
+}
+.htab tbody tr:hover { background: var(--sb-fill, #f8f9fb); }
+.htab__pj { font-weight: 600; letter-spacing: -.01em; }
+.htab__who { white-space: nowrap; }
+.htab__t { font: 400 11.5px var(--sb-mono, monospace); color: var(--sb-ink-3, #767f8c); white-space: nowrap; }
+.htab__step {
+  display: inline-block; font: 500 10.5px/1 var(--sb-mono, monospace); white-space: nowrap;
+  color: var(--sb-accent, #1a56db); background: var(--sb-accent-soft, #eef2ff);
+  padding: 4px 7px; border-radius: 4px;
+}
+.htab__ex {
+  margin-left: 6px; font: 500 10px/1 var(--sb-mono, monospace); color: var(--sb-ink-3, #767f8c);
+  border: 1px solid var(--sb-line, #e4e7ec); padding: 3px 5px; border-radius: 4px; white-space: nowrap;
+}
+.htab__go {
+  font: inherit; font-size: 11.5px; white-space: nowrap; cursor: pointer;
+  color: var(--sb-accent, #1a56db); background: none;
+  border: 1px solid var(--sb-line, #e4e7ec); border-radius: var(--sb-r, 6px); padding: 4px 9px;
+}
+.htab__go:hover { border-color: var(--sb-accent, #1a56db); background: var(--sb-accent-soft, #eef2ff); }
+@media (max-width: 720px) {
+  /* 좁은 화면에서는 「이어서」 칸과 단계 칸을 접습니다 — 남는 칸이 프로젝트·한 일·누가입니다 */
+  .htab th:nth-child(2), .htab td:nth-child(2) { display: none; }
+  .htab th:last-child, .htab td:last-child { display: none; }
+}
 `
 
 let styled = false
@@ -308,4 +353,88 @@ export function paintList(mount, list, { onPick, none = '아직 기록이 없습
     row.append(mk('span', 'hist__t', when(e.ts, nowMs)))
     mount.append(row)
   }
+}
+
+/**
+ * 히스토리를 표로 그립니다. 여러 프로젝트의 일을 한자리에 모아 볼 때 씁니다.
+ *
+ * 칸은 「프로젝트 · 단계 · 한 일 · 누가 · 언제 · 이어서」입니다. 프로젝트가 맨 앞인
+ * 이유는 여러 판이 섞여 있을 때 사람이 가장 먼저 묻는 것이 그것이기 때문입니다.
+ *
+ * <table> 을 쓴 것은 모양 때문이 아닙니다. 칸의 뜻이 머리줄에 적혀 있어서 화면
+ * 읽기 프로그램이 각 칸을 「프로젝트: 여름 단편」처럼 읽어 줍니다 — div 를 격자로
+ * 늘어놓으면 그 연결이 사라집니다.
+ *
+ * @param {HTMLElement} mount
+ * @param {Array} list - entries() 나 group() 의 결과. 각 줄에 boardId·pjName 이 붙어 있어야
+ *        프로젝트 칸이 채워집니다(홈이 프로젝트 카드에서 이름을 받아 붙입니다)
+ * @param {object} o
+ * @param {(e: object) => void} [o.onPick] - 「이어서」 칸. 없으면 그 칸을 만들지 않습니다
+ * @param {string} [o.none] - 비었을 때의 한 줄
+ * @param {string} [o.caption] - 표 위의 설명 한 줄
+ * @param {number} [o.nowMs]
+ */
+export function paintTable(mount, list, { onPick, none = '아직 기록이 없습니다.', caption, nowMs } = {}) {
+  if (!mount) return
+  const doc = mount.ownerDocument || document
+  injectCss(doc)
+  mount.textContent = ''
+  mount.className = ''
+  if (!list?.length) {
+    mount.className = 'hist'
+    mount.append(mk('div', 'hist__none', none))
+    return
+  }
+
+  const table = mk('table', 'htab')
+  if (caption) table.append(mk('caption', null, caption))
+  const head = mk('tr')
+  const cols = ['프로젝트', '단계', '한 일', '누가', '언제']
+  if (onPick) cols.push('이어서')
+  for (const c of cols) {
+    const th = mk('th', null, c)
+    th.scope = 'col'
+    head.append(th)
+  }
+  const thead = mk('thead')
+  thead.append(head)
+  table.append(thead)
+
+  const body = mk('tbody')
+  for (const e of list) {
+    const tr = mk('tr')
+
+    // 프로젝트 칸은 행의 머리입니다 — 나머지 칸이 「무엇에 대한 것인지」를 이것이 말합니다
+    const pj = mk('th', 'htab__pj', e.pjName || e.boardId || '이름 없는 판')
+    pj.scope = 'row'
+    tr.append(pj)
+
+    const step = mk('td')
+    step.append(mk('span', 'htab__step', e.stepLabel))
+    tr.append(step)
+
+    const what = mk('td', null, e.what)
+    if (e.example) what.append(mk('span', 'htab__ex', '예시'))
+    tr.append(what)
+
+    tr.append(mk('td', 'htab__who', e.name))
+    tr.append(mk('td', 'htab__t', when(e.ts, nowMs)))
+
+    if (onPick) {
+      const cell = mk('td')
+      // 이어서 갈 자리가 없는 줄에는 버튼을 두지 않습니다 — 눌러도 아무 일 없는 버튼입니다
+      if (e.ref != null || e.boardId) {
+        const b = mk('button', 'htab__go', '열기')
+        b.type = 'button'
+        b.title = '여기서 이어서 합니다'
+        b.onclick = () => onPick(e)
+        cell.append(b)
+      }
+      tr.append(cell)
+    }
+
+    body.append(tr)
+  }
+  table.append(body)
+  mount.append(table)
 }
