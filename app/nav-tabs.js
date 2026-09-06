@@ -55,8 +55,49 @@ export const navTab = (id) => NAV_TABS.find((t) => t.id === id) || null
  * 지금은 네 탭 모두 href 가 있어 이 함수는 그것을 그대로 돌려줍니다. 모르는 id 가
  * 들어오면 홈으로 보냅니다 — 이 갈래가 없으면 href 가 undefined 인 <a> 가 되어
  * 눌렀을 때 /undefined 같은 곳으로 가 404 가 납니다. 실제로 그랬습니다.
+ *
+ * boardId 를 주면 ?board= 로 달아 줍니다. 고른 프로젝트가 화면을 옮겨도 따라가야 하기
+ * 때문입니다 — net.js 는 이미 그 값을 읽고 있었는데(opsClient·awsTransport), 정작
+ * 링크가 그것을 들고 가지 않아서 탭 한 번 누르면 기본 보드로 떨어졌습니다.
+ *
+ * 기본 보드도 생략하지 않고 답니다. 프로젝트 보드(app/projects.js)가 「주소에 board 가
+ * 없으면 아직 고르지 않은 것」으로 보고 문을 세우기 때문입니다 — 생략하면 기본 보드를
+ * 고른 사람이 탭을 누를 때마다 그 문을 다시 만납니다.
+ *
+ * @param {string} id - NAV_TABS 의 id
+ * @param {string} [boardId] - 고른 프로젝트. 없으면 붙이지 않습니다(=아직 고르지 않음)
  */
-export const navHref = (id) => navTab(id)?.href || '/'
+export function navHref(id, boardId) {
+  const base = navTab(id)?.href || '/'
+  if (!boardId) return base
+  // '대본화' 처럼 이미 ?tab= 이 붙은 주소가 있어 & 인지 ? 인지 갈라 봅니다
+  return `${base}${base.includes('?') ? '&' : '?'}board=${encodeURIComponent(boardId)}`
+}
+
+/**
+ * 프로젝트를 고르지 않았을 때의 보드. net.js 의 opsClient·awsTransport 가 쓰는
+ * 기본값과 같습니다 — 두 곳이 다르면 주소에 board 가 없을 때 서로 다른 로그를 봅니다.
+ */
+export const DEFAULT_BOARD = 'demo'
+
+/**
+ * 주소에 적힌 프로젝트. 없으면 null 입니다 — 「아직 고르지 않았다」와 「기본 보드를
+ * 골랐다」를 가려야 하는 자리(프로젝트 보드의 문, 탭 링크)가 이것을 씁니다.
+ * @param {string} [search] - location.search. 테스트에서 넣어 봅니다
+ */
+export function boardParam(search = typeof location === 'undefined' ? '' : location.search) {
+  return new URLSearchParams(String(search || '').replace(/^\?/, '')).get('board') || null
+}
+
+/**
+ * 지금 보고 있는 프로젝트. 주소의 ?board= 이고, 없으면 설정의 기본 보드입니다.
+ * 실제로 로그를 읽고 쓰는 자리가 이것을 씁니다 — net.js 의 기본값과 같아야 합니다.
+ * @param {string} [search] - location.search
+ */
+export function boardFromSearch(search = typeof location === 'undefined' ? '' : location.search) {
+  const cfg = typeof window === 'undefined' ? null : window.SB_CONFIG
+  return boardParam(search) || cfg?.boardId || DEFAULT_BOARD
+}
 
 /**
  * ?tab= 으로 들어온 탭 이름. 모르는 값이면 그 화면의 기본 탭으로 떨어집니다.
@@ -145,11 +186,13 @@ function injectCss(doc) {
  * @param {(id: string) => void} o.onSelect - handled 탭을 눌렀을 때
  * @param {boolean} o.slim - 얇은 모양. 홈이 단계를 다 보여주므로 기본이 true 입니다
  * @param {boolean} o.home - 오른쪽 끝에 홈으로 가는 길을 둡니다
+ * @param {string} o.board - 고른 프로젝트. 다른 화면으로 가는 링크에 ?board= 로 달립니다.
+ *        기본값은 주소에서 읽습니다 — 화면마다 따로 챙기지 않아도 프로젝트가 따라갑니다
  * @returns {{ setActive: (id: string) => void, active: () => string }}
  */
 export function mountNav({
   mount, active = 'develop', handled = [], onSelect = () => {},
-  slim = true, home = true,
+  slim = true, home = true, board = boardParam(),
 }) {
   const doc = mount.ownerDocument
   injectCss(doc)
@@ -167,7 +210,7 @@ export function mountNav({
     // 링크라야 가운데 클릭·주소 복사가 되고, 이동은 브라우저가 같은 탭에서 합니다.
     const el = doc.createElement(mine.has(t.id) ? 'button' : 'a')
     el.className = 'navtab'
-    if (el.tagName === 'A') el.href = navHref(t.id)
+    if (el.tagName === 'A') el.href = navHref(t.id, board)
     else el.type = 'button'
     el.dataset.nav = t.id
     // 얇은 모양에서는 설명 줄이 감춰지므로 title 로도 남겨 둡니다

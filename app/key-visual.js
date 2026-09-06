@@ -15,11 +15,12 @@ import { ART_ROLES, orderKeyBetween } from './core.js'
 import { configured, idToken, session } from './auth.js'
 import { connect } from './net.js'
 import { showLogin } from './login.js'
-import { mountNav } from './nav-tabs.js'
+import { mountNav, boardFromSearch } from './nav-tabs.js'
 import * as coach from './coach.js'
 import { emptyPanel, guide as guideExample, guiding } from './onboard.js'
 import { makeArt } from './art.js'
 import { entries, group, markOp, paintList } from './history.js'
+import { pickProject, touch as touchProject } from './projects.js'
 
 const cfg = window.SB_CONFIG || {}
 const $ = (s, r = document) => r.querySelector(s)
@@ -96,6 +97,8 @@ function mark(what, { ref = null, example = false } = {}) {
   const op = markOp({ step: 'keyvisual', actor: S.me?.id || 'local', what, ref, example })
   S.journal.push(op)
   try { S.net?.sendOp?.(op) } catch (e) { wire('r', `기록을 남기지 못했습니다 — ${e.message}`) }
+  // 프로젝트 카드의 「마지막 손길」도 같은 문장으로 고친다. 실패는 삼킨다(projects.touch)
+  touchProject({ boardId: boardFromSearch(), actor: S.me?.id, what })
   paintHist()
 }
 
@@ -1348,6 +1351,19 @@ async function boot() {
     S.me = s || await showLogin($('#gate'))
   }
   S.me = S.me || session() || { id: 'local', name: '로컬', role: 'planner' }
+
+  /*
+   * 작업판 앞에 프로젝트 보드를 세운다. 주소에 ?board= 가 있으면 그대로 지나간다.
+   * 고르면 그 주소로 화면을 다시 여는 것이라 이 await 은 끝나지 않는다 — 아래의
+   * connect() 도 로그 읽기도 시작하지 않는다. 어느 보드인지 모르는 채로 소켓을 열면
+   * 고른 뒤에 그것을 다 물려야 한다.
+   */
+  await pickProject({
+    step: 'keyvisual',
+    actor: S.me?.id,
+    who: (id) => S.peers.get(id) || (id === S.me?.id ? S.me : null),
+  })
+
   /*
    * 대본 칸은 비어 있는 채로 시작한다. 예전에는 여기서 S.script = SAMPLE 이었다 —
    * 그러면 처음 온 사람이 자기가 넣지도 않은 대본 앞에서, 그것이 예시인지 남이 넣은

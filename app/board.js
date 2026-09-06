@@ -14,10 +14,11 @@ import { SEED_ART } from './seed-art.js'
 import { connect } from './net.js'
 import { configured, idToken, session, logout } from './auth.js'
 import { showLogin } from './login.js'
-import { mountNav } from './nav-tabs.js'
+import { mountNav, boardFromSearch } from './nav-tabs.js'
 import * as coach from './coach.js'
 import { emptyPanel, guide as guideExample, guiding } from './onboard.js'
-import { entries, group, paintList } from './history.js'
+import { entries, group, paintList, toEntry } from './history.js'
+import { pickProject, touch as touchProject } from './projects.js'
 
 const ROSTER = [
   { id: 'u1', name: '김하나', role: 'planner', color: '#E3A93C', job: '시나리오를 컷으로 쪼갭니다' },
@@ -151,6 +152,29 @@ let linkTimer = 0
 let replaying = false
 let lastTs = 0
 
+/*
+ * 프로젝트 카드의 「마지막 손길」을 고칩니다.
+ *
+ * 무슨 일이었는지는 history.js 가 이미 한 줄로 옮기는 법을 알고 있으므로 그것을 그대로
+ * 씁니다 — 카드에 적을 문장을 여기서 또 만들면 목록과 카드가 서로 다른 말을 합니다.
+ * 히스토리에 넣지 않는 op(프레즌스·읽음 표시 따위)는 toEntry 가 null 을 주고, 그런
+ * 것으로는 카드를 건드리지 않습니다. 「본 일」이 아니라서입니다.
+ *
+ * 컷 9개를 한 번에 만들면 op 도 9건입니다. 그때마다 쓰면 같은 카드에 아홉 번 쓰는
+ * 것이므로, 마지막 것만 조금 늦춰 한 번 보냅니다.
+ */
+let cardTimer = null
+let cardWhat = ''
+function touchCard(op) {
+  const e = toEntry(op, (id) => person(id))
+  if (!e) return
+  cardWhat = e.what
+  clearTimeout(cardTimer)
+  cardTimer = setTimeout(() => {
+    touchProject({ boardId: boardFromSearch(), actor: me.id, what: cardWhat })
+  }, 600)
+}
+
 function emit(op) {
   op.id = uid()
   op.ts = now()
@@ -158,6 +182,7 @@ function emit(op) {
   seenOps.add(op.id)
   applyOp(op)
   net?.sendOp(op)
+  touchCard(op)
   save()
   render()
 }
@@ -171,6 +196,7 @@ function emitMany(ops) {
     applyOp(op)
     net?.sendOp(op)
   }
+  if (ops.length) touchCard(ops.at(-1))
   save()
   render()
 }
@@ -399,18 +425,25 @@ function saveRead() {
   localStorage.setItem(readKey(), JSON.stringify([...readIds].slice(-300)))
 }
 
+/*
+ * 로컬 모드의 판 저장 자리. 프로젝트마다 다릅니다 — 한때 'sb.state' 한 칸이었는데,
+ * 프로젝트 보드가 생긴 뒤로는 그러면 A 를 열었다가 B 를 열면 A 의 컷이 B 에 그대로
+ * 나타납니다. 배포 모드는 이 함수를 타지 않습니다(op 로그가 판입니다).
+ */
+const stateKey = () => `sb.state.${boardFromSearch()}`
+
 let saveTimer = null
 function save() {
   if (net?.mode === 'aws') return
   clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
-    try { localStorage.setItem('sb.state', JSON.stringify(state)) } catch {  }
+    try { localStorage.setItem(stateKey(), JSON.stringify(state)) } catch {  }
   }, 220)
 }
 
 function load() {
   try {
-    const raw = localStorage.getItem('sb.state')
+    const raw = localStorage.getItem(stateKey())
     if (raw) {
       const s = scrub(JSON.parse(raw))
       if (!s.chars || !s.notifs) return false
@@ -3240,6 +3273,17 @@ async function boot() {
     renderMe()
     pollGpu()
   }
+
+  /*
+   * 작업판 앞에 프로젝트 보드를 세웁니다. 주소에 ?board= 가 있으면(카드를 눌러 왔거나
+   * 링크를 받았으면) 아무것도 뜨지 않고 그대로 지나갑니다.
+   *
+   * 고르면 그 주소로 화면을 다시 여는 것이라, 여기서 await 이 끝나지 않습니다 —
+   * 아래의 net.connect 도 로그 재생도 시작하지 않습니다. 일부러입니다. 어느 보드인지
+   * 모르는 채로 소켓을 열고 판을 세우면, 고른 뒤에 그것을 다 물려야 합니다.
+   */
+  await pickProject({ step: 'board', actor: me?.id, who: (id) => person(id) })
+
   loadRead()
   net = await connect({
     onOp: recvOp,

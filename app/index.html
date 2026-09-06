@@ -231,6 +231,19 @@
       시놉시스에서 시작해 대본이 되고, 그림이 나오고, 마지막에 보드에 얹힙니다.
       순서대로 가도 되고 필요한 단계만 골라도 됩니다.
     </p>
+    <!--
+      우리 팀 프로젝트. 단계 목록보다 위에 둡니다 — 들어온 사람이 먼저 알아야 하는 것은
+      "어떤 기능이 있나" 가 아니라 "우리가 뭘 하고 있었나" 입니다. 카드의 모양과 목록은
+      app/projects.js 가 넣습니다(.pj__*). 프로젝트가 하나도 없으면 이 자리는 접힙니다.
+    -->
+    <section class="act" id="pjBox" hidden data-coach="projects">
+      <h2 class="act__h">우리 팀 프로젝트
+        <span class="act__n" id="pjN"></span>
+      </h2>
+      <div id="pjList"></div>
+      <p class="act__note" id="pjNote"></p>
+    </section>
+
     <ol class="steps" id="steps" data-coach="steps"></ol>
     <p class="foot" id="foot"></p>
 

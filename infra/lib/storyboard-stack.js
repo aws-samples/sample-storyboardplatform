@@ -124,6 +124,9 @@ class StoryboardStack extends Stack {
     js(ops, 'PutOp', 'Mutation', 'publishOp', 'putOp.js')
     js(ops, 'ListOps', 'Query', 'listOps', 'listOps.js')
     js(bus, 'Presence', 'Mutation', 'publishPresence', 'presence.js')
+    // 프로젝트 카드는 같은 Ops 테이블의 pk='PROJECTS' 한 자리에 산다. op 와 달리 TTL 이 없다
+    js(ops, 'PutProject', 'Mutation', 'putProject', 'putProject.js')
+    js(ops, 'ListProjects', 'Query', 'listProjects', 'listProjects.js')
     // plan 결과는 GraphFn 이 Ops 테이블에 적어 둔 것을 읽어 온다
     js(ops, 'PlanResult', 'Query', 'planResult', 'planResult.js')
     // plan 자체는 GraphFn 이 받는다 — 데이터소스는 graphDs 를 만든 뒤에 붙인다.

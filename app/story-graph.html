@@ -528,10 +528,11 @@ import { planClient, graphClient, opsClient } from './net.js'
 import { createGraphView, graphDelta, KIND_COLOR, KIND_LABEL } from './graph-view.js'
 import { configured, session, login, setNewPassword, logout } from './auth.js'
 import { DEMO_USERS } from './login.js'
-import { mountNav, navTabFromSearch } from './nav-tabs.js'
+import { mountNav, navTabFromSearch, boardFromSearch } from './nav-tabs.js'
 import { entries, group, markOp, paintList } from './history.js'
 import { emptyPanel, guide as guideExample, guiding } from './onboard.js'
 import * as coach from './coach.js'
+import { pickProject, touch as touchProject } from './projects.js'
 
 const $ = (id) => document.getElementById(id)
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) =>
@@ -608,6 +609,15 @@ let PLAYING_EXAMPLE = false // 예시 재생 중. 그 사이의 기록에 exampl
  */
 const OPS = opsClient()
 
+/*
+ * 지금 보고 있는 프로젝트. 주소의 ?board= 이다 (app/nav-tabs.js).
+ *
+ * Neptune 의 projectId 로도 이것을 그대로 쓴다. 한때 여기가 늘 'default' 였는데,
+ * 그러면 프로젝트를 갈아도 그래프는 한 벌이라 A 에서 뽑은 인물이 B 의 판에 그대로
+ * 서 있었다. 로그는 보드마다 갈라져 있었으니 목록만 갈라지고 판은 섞이는 셈이었다.
+ */
+const BOARD = boardFromSearch()
+
 // ── 지나간 일 ────────────────────────────────────────────────────────────────
 // 이 화면에서 한 일을 보드와 같은 로그에 남긴다. kind 는 step.mark 하나뿐이고
 // (app/history.js) 보드의 applyOp 는 모르는 kind 를 그냥 지나가므로 판을 흔들지 않는다.
@@ -629,6 +639,8 @@ function mark(what, { step = 'develop', ref = null, refKind = null } = {}) {
   JOURNAL.push(op)
   // 기록은 이 화면의 본 일이 아니다. 못 남겨도 화면은 그대로 간다
   try { OPS?.sendOp?.(op)?.catch?.(() => {}) } catch { /* 로컬 모드 */ }
+  // 프로젝트 카드의 「마지막 손길」도 같은 문장으로 고친다 (app/projects.js)
+  touchProject({ boardId: BOARD, actor: me?.id, what })
   paintHist()
 }
 
@@ -728,7 +740,7 @@ async function loadMock() {
  * — 새 대본을 뽑았거나 목데이터로 되돌렸다면 그것이 이제 사실이다.
  */
 function newStore(graph) {
-  const store = createGraphStore(graph, { net: GRAPH_NET })
+  const store = createGraphStore(graph, { net: GRAPH_NET, projectId: BOARD })
   store.save?.() // 인메모리 판에는 없다. 저장이 끝났는지는 flush 로 본다
   return store
 }
@@ -1832,7 +1844,7 @@ async function boot() {
 async function start() {
   let stored = null
   try {
-    stored = await loadGraphStore({ net: GRAPH_NET })
+    stored = await loadGraphStore({ net: GRAPH_NET, projectId: BOARD })
   } catch (err) {
     console.warn('[story-graph] Neptune 에서 그래프를 읽지 못했다 — 빈 판으로 시작한다', err)
   }
@@ -1848,7 +1860,7 @@ async function start() {
 
   if (!stored || !stored.stats().nodes) {
     // 빈 저장소로 판을 세운다. STORE 가 null 이면 renderNetwork·renderSeeds 가 터진다
-    build(createGraphStore({ nodes: [], edges: [] }))
+    build(createGraphStore({ nodes: [], edges: [] }, { projectId: BOARD }))
     $('srcBadge').textContent = 'graph: 비어 있음'
     return
   }
@@ -2006,7 +2018,19 @@ if (configured && !session()) {
   showGate()
 } else {
   showWho()
-  start().then(() => {
+  /*
+   * 판을 세우기 전에 프로젝트 보드를 먼저 세운다. 주소에 ?board= 가 있으면 아무것도
+   * 뜨지 않고 바로 start() 로 간다.
+   *
+   * 고르면 그 주소로 화면을 다시 여는 것이라 이 약속은 해결되지 않는다 — Neptune 을
+   * 읽지도, 목데이터를 미리 읽지도 않는다. 어느 프로젝트인지 모르는 채로 그래프를
+   * 세우면 고른 뒤에 그것을 다 물려야 한다.
+   */
+  pickProject({
+    step: navTabFromSearch(location.search, 'develop') === 'script' ? 'script' : 'develop',
+    actor: session()?.id,
+    who: (id) => nameMap(JOURNAL).get(id) || null,
+  }).then(() => start()).then(() => {
     loadHistory()
     /*
      * 판이 비어 있으면 코치마크를 열지 않는다 — 그때는 화면에 「처음 오셨나요?」 판이

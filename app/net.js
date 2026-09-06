@@ -206,6 +206,53 @@ export function opsClient(boardId) {
   }
 }
 
+const PROJECT_FIELDS = 'boardId name createdAt createdBy updatedAt lastActor lastWhat'
+
+const Q_PROJECTS = `query Projects($nextToken: String) {
+  listProjects(nextToken: $nextToken) {
+    items { ${PROJECT_FIELDS} }
+    nextToken
+  }
+}`
+
+const M_PUT_PROJECT = `mutation PutProject($boardId: ID!, $name: String, $actor: ID!, $what: String, $ts: String!) {
+  putProject(boardId: $boardId, name: $name, actor: $actor, what: $what, ts: $ts) { ${PROJECT_FIELDS} }
+}`
+
+/**
+ * 프로젝트 카드를 읽고 쓰는 클라이언트. 작업판 앞에 세우는 보드가 씁니다.
+ *
+ * op 로그와 따로 두는 까닭은 두 가지입니다. op 는 pk=BOARD#<id> 로 흩어져 있어서
+ * 「보드가 몇 개 있나」를 물으면 테이블을 훑어야 하고, 30일 TTL 이 걸려 있어서
+ * 한 달 쉰 프로젝트는 이름까지 사라집니다. 카드는 pk='PROJECTS' 한 자리에 모으고
+ * TTL 을 걸지 않습니다.
+ *
+ * @returns {{list: Function, put: Function}|null} 설정이 없으면 null — 부르는 쪽이
+ *          브라우저 저장소로 내려갑니다
+ */
+export function projectsClient() {
+  const cfg = window.SB_CONFIG
+  if (!cfg?.graphqlUrl) return null
+  return {
+    list: async () => {
+      const out = []
+      let token = null
+      do {
+        const d = await gqlPost(cfg, Q_PROJECTS, { nextToken: token })
+        out.push(...d.listProjects.items)
+        token = d.listProjects.nextToken
+      } while (token)
+      return out
+    },
+    put: async ({ boardId, name, actor, what, ts }) => {
+      const d = await gqlPost(cfg, M_PUT_PROJECT, {
+        boardId, name: name ?? null, actor, what: what ?? null, ts: pad(ts ?? Date.now()),
+      })
+      return d.putProject
+    },
+  }
+}
+
 const Q_LOAD_GRAPH = `query LoadGraph($projectId: String) { loadGraph(projectId: $projectId) }`
 const Q_QUERY_GRAPH = `query QueryGraph($spec: AWSJSON!) { queryGraph(spec: $spec) }`
 const M_SAVE_GRAPH = `mutation SaveGraph($spec: AWSJSON!) { saveGraph(spec: $spec) }`

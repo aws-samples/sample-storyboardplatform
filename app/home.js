@@ -20,11 +20,54 @@ import { setHtml } from './dom.js'
 import { opsClient } from './net.js'
 import { entries, group, paintList } from './history.js'
 import { emptyPanel } from './onboard.js'
+import { list as listProjects, paintCards } from './projects.js'
 import * as coach from './coach.js'
 
 const byId = (id) => document.getElementById(id)
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+
+/* ══ 우리 팀 프로젝트 ══════════════════════════════ */
+
+/*
+ * 홈에서도 프로젝트 카드를 보여줍니다. 각 화면 앞에 서는 문(projects.pickProject)과
+ * 같은 목록·같은 모양이고, 다른 것은 여기서는 문이 아니라 목록이라는 것뿐입니다 —
+ * 들어온 사람이 「어디부터 시작할까요」를 읽기 전에 「우리가 뭘 하고 있었나」를
+ * 먼저 보게 합니다.
+ *
+ * 카드를 누르면 스토리보드로 갑니다. 프로젝트에서 마지막으로 한 일이 어느 단계였든
+ * 컷이 모이는 곳은 보드이고, 다른 단계로는 거기서 상단 탭으로 갑니다 — 그때 ?board=
+ * 가 따라갑니다(navHref).
+ */
+let projects = []
+
+/*
+ * 목록을 읽어 그립니다. 로컬 모드에서도 부릅니다 — 그때는 AppSync 가 아니라 브라우저
+ * 저장소에서 옵니다(projects.store 가 갈라 줍니다). 배포 모드에서는 토큰이 필요하므로
+ * 로그인 뒤에 부릅니다.
+ */
+async function loadProjects() {
+  projects = await listProjects().catch((e) => {
+    console.warn('[home] 프로젝트를 읽지 못했다', e.message)
+    return []
+  })
+  paintProjects()
+}
+
+function paintProjects() {
+  const box = byId('pjBox')
+  box.hidden = !projects.length
+  if (!projects.length) return
+  byId('pjN').textContent = `${projects.length}개`
+  const who = nameMap(ops)
+  paintCards(byId('pjList'), projects.slice(0, 8), {
+    who: (id) => who.get(id) || null,
+    onPick: (p) => { location.href = navHref('board', p.boardId) },
+  })
+  setHtml(byId('pjNote'),
+    '카드를 누르면 그 프로젝트의 보드가 열립니다 — 주소에 프로젝트가 담기므로 '
+    + '상단 탭으로 다른 단계로 넘어가도 같은 판을 봅니다.')
+}
 
 /* 단계 넷. 번호는 NAV_TABS 순서에서 나옵니다 — 별도로 적어 두면 어긋납니다 */
 function paintSteps() {
@@ -138,6 +181,11 @@ function paintWelcome() {
  */
 const HOME_CARDS = [
   {
+    head: '우리 팀이 하던 것이 먼저입니다',
+    body: '프로젝트마다 판이 따로 있습니다 — 대본도, 씬별 그림도, 컷도 그 안에 담깁니다.\n카드를 누르면 그 프로젝트의 보드가 열리고, 상단 탭으로 다른 단계로 넘어가도 같은 판을 봅니다.\n새 프로젝트는 각 화면에 들어갈 때 이름을 붙여 만듭니다.',
+    spot: ['projects'],
+  },
+  {
     head: '순서대로 다섯 단계',
     body: '시놉시스에서 시작해 대본이 되고, 그림이 나오고, 마지막에 보드에 얹힙니다.\n순서대로 가도 되고 필요한 단계만 골라도 됩니다.\n각 화면 위쪽 탭으로도 서로 오갈 수 있습니다.',
     spot: ['steps'],
@@ -175,6 +223,7 @@ async function boot() {
      * 보여줄 「지나간 일」이 아닙니다. 그래서 처음 안내만 띄웁니다.
      */
     paintAct()
+    await loadProjects()
     return
   }
 
@@ -188,6 +237,8 @@ async function boot() {
     return []
   }) || []
   paintAct()
+  // 카드에 적힌 사람 이름을 로그의 명부에서 받으므로 ops 를 읽은 뒤에 그립니다
+  await loadProjects()
 
   // 처음 온 사람에게는 판이 이미 떠 있습니다. 기록이 있는 사람에게만 짚어 줍니다
   if (!coach.seen(COACH_KEY) && ops.length) openCoach()
