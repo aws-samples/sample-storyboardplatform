@@ -232,7 +232,7 @@ class GraphStore {
       const prev = this.nodeById.get(n.id)
       if (prev) {
         prev.props = { ...asProps(n.props), ...asProps(prev.props) }
-        g.warnings.push(`${n.name}: 이미 있는 id "${n.id}" — props 만 합쳤다`)
+        g.warnings.push(`${n.name}: 이미 있는 id "${n.id}" — props 만 합쳤습니다`)
         continue
       }
       this.nodes.push(n)
@@ -256,7 +256,7 @@ class GraphStore {
     const added = []
     for (const e of g.edges) {
       const k = edgeKey(e)
-      if (have.has(k)) { g.warnings.push(`${k}: 이미 있는 엣지 — 넣지 않는다`); continue }
+      if (have.has(k)) { g.warnings.push(`${k}: 이미 있는 엣지 — 넣지 않습니다`); continue }
       have.add(k)
       this.suppressed.delete(k)
       if (isDerived(e)) this.given.push(e)
@@ -331,7 +331,7 @@ class NeptuneGraphStore extends GraphStore {
   /** Neptune 왕복을 줄에 세운다. 실패는 삼키지 않고 flush 가 돌려줄 자리에 쌓는다 */
   queue(label, run) {
     this.pending = this.pending.then(run).catch((err) => {
-      const msg = `Neptune ${label} 실패 — 화면은 그대로지만 저장되지 않았다: ${err.message}`
+      const msg = `Neptune ${label} 실패 — 화면은 그대로지만 저장되지 않았습니다: ${err.message}`
       this.failures.push(msg)
       this.warnings.push(msg)
     })

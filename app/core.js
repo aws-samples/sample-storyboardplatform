@@ -407,22 +407,22 @@ const tensionOf = (v) => {
 export function normalizeGraph(raw, { maxNodes = 300, maxEdges = 900 } = {}) {
   const warnings = []
   const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}
-  if (!raw || typeof raw !== 'object') warnings.push('그래프가 객체가 아니다 — 빈 그래프로 둔다')
+  if (!raw || typeof raw !== 'object') warnings.push('그래프가 객체가 아닙니다 — 빈 그래프로 둡니다')
   const rawNodes = src.nodes ?? src.entities
   const rawEdges = src.edges ?? src.relations ?? src.links
-  if (!Array.isArray(rawNodes)) warnings.push('nodes 배열이 없다')
-  if (!Array.isArray(rawEdges)) warnings.push('edges 배열이 없다')
+  if (!Array.isArray(rawNodes)) warnings.push('nodes 배열이 없습니다')
+  if (!Array.isArray(rawEdges)) warnings.push('edges 배열이 없습니다')
 
   const nodes = []
   const byId = new Map()
   const byName = new Map()
   for (const n of asList(rawNodes)) {
-    if (!n || typeof n !== 'object') { warnings.push('노드가 객체가 아니다 — 버린다'); continue }
+    if (!n || typeof n !== 'object') { warnings.push('노드가 객체가 아닙니다 — 버립니다'); continue }
     const name = clip(n.name ?? n.label, 60)
     const kind = clip(n.kind ?? n.type, 20)
-    if (!name) { warnings.push(`이름 없는 노드를 버린다 (id=${clip(n.id, 40) || '없음'})`); continue }
+    if (!name) { warnings.push(`이름 없는 노드를 버립니다 (id=${clip(n.id, 40) || '없음'})`); continue }
     if (!KIND_OK.has(kind)) {
-      warnings.push(`${name}: 모르는 kind "${kind || '없음'}" — 노드를 버린다`)
+      warnings.push(`${name}: 모르는 kind "${kind || '없음'}" — 노드를 버립니다`)
       continue
     }
     const props = asProps(n.props ?? n.attrs)
@@ -432,15 +432,15 @@ export function normalizeGraph(raw, { maxNodes = 300, maxEdges = 900 } = {}) {
       id = asId(name) || `n${nodes.length + 1}`
       let seq = 2
       while (byId.has(id)) id = `${asId(name) || 'n'}_${seq++}`
-      warnings.push(`${name}: id 가 없어 "${id}" 로 만들었다 — 통용 표기와 다를 수 있다`)
+      warnings.push(`${name}: id 가 없어 "${id}" 로 만들었습니다 — 통용 표기와 다를 수 있습니다`)
     }
     const prev = byId.get(id)
     if (prev) {
       prev.props = { ...props, ...prev.props }
-      warnings.push(`중복 id "${id}" (${prev.name} / ${name}) — 처음 것만 남기고 props 를 합친다`)
+      warnings.push(`중복 id "${id}" (${prev.name} / ${name}) — 처음 것만 남기고 props 를 합칩니다`)
       continue
     }
-    if (nodes.length >= maxNodes) { warnings.push(`노드가 ${maxNodes}개를 넘어 나머지를 잘랐다`); break }
+    if (nodes.length >= maxNodes) { warnings.push(`노드가 ${maxNodes}개를 넘어 나머지를 잘랐습니다`); break }
     const node = { id, kind, name, props }
     nodes.push(node)
     byId.set(id, node)
@@ -460,26 +460,26 @@ export function normalizeGraph(raw, { maxNodes = 300, maxEdges = 900 } = {}) {
     const id = asId(raw)
     if (byId.has(id)) return id
     const hit = alias.get(raw) ?? alias.get(id) ?? ''
-    if (hit) warnings.push(`"${raw}" 는 id 가 아니라 이름이다 — "${hit}" 로 읽었다`)
+    if (hit) warnings.push(`"${raw}" 는 id 가 아니라 이름입니다 — "${hit}" 로 읽었습니다`)
     return hit
   }
 
   const edges = []
   const seen = new Set()
   for (const e of asList(rawEdges)) {
-    if (!e || typeof e !== 'object') { warnings.push('엣지가 객체가 아니다 — 버린다'); continue }
+    if (!e || typeof e !== 'object') { warnings.push('엣지가 객체가 아닙니다 — 버립니다'); continue }
     const sRaw = e.s ?? e.from ?? e.subject
     const oRaw = e.o ?? e.to ?? e.object
     const s = refOf(sRaw)
     const o = refOf(oRaw)
     const p = clip(e.p ?? e.rel ?? e.pred, 40).toLowerCase().replace(/[^a-z0-9_]+/g, '_')
     const label = `${clip(sRaw, 40) || '없음'} ${p || '?'} ${clip(oRaw, 40) || '없음'}`
-    if (!REL_OK.has(p)) { warnings.push(`${label}: 모르는 술어 — 엣지를 버린다`); continue }
-    if (!s || !o) { warnings.push(`${label}: 없는 노드를 가리킨다 — 엣지를 버린다`); continue }
-    if (s === o) { warnings.push(`${label}: 자기 자신을 가리킨다 — 엣지를 버린다`); continue }
+    if (!REL_OK.has(p)) { warnings.push(`${label}: 모르는 술어 — 엣지를 버립니다`); continue }
+    if (!s || !o) { warnings.push(`${label}: 없는 노드를 가리킵니다 — 엣지를 버립니다`); continue }
+    if (s === o) { warnings.push(`${label}: 자기 자신을 가리킵니다 — 엣지를 버립니다`); continue }
     const key = edgeKey({ s, p, o })
-    if (seen.has(key)) { warnings.push(`${label}: 같은 엣지가 두 번 왔다 — 처음 것만 남긴다`); continue }
-    if (edges.length >= maxEdges) { warnings.push(`엣지가 ${maxEdges}개를 넘어 나머지를 잘랐다`); break }
+    if (seen.has(key)) { warnings.push(`${label}: 같은 엣지가 두 번 왔습니다 — 처음 것만 남깁니다`); continue }
+    if (edges.length >= maxEdges) { warnings.push(`엣지가 ${maxEdges}개를 넘어 나머지를 잘랐습니다`); break }
     seen.add(key)
 
     const props = asProps(e.props)
@@ -491,7 +491,7 @@ export function normalizeGraph(raw, { maxNodes = 300, maxEdges = 900 } = {}) {
     let asserted = e.asserted === undefined ? !e.derived : !!e.asserted
     let derived = clip(e.derived, 40) || null
     if (DERIVED_ONLY.has(p) && asserted) {
-      warnings.push(`${label}: 파생 전용 술어라 asserted:false 로 내린다`)
+      warnings.push(`${label}: 파생 전용 술어라 asserted:false 로 내립니다`)
       asserted = false
       derived = derived || 'unknown'
     }
@@ -530,19 +530,19 @@ export function validateAgainstCanon(newGraph, existingGraph) {
   for (const n of nn) {
     const prev = oldById.get(n.id)
     if (prev) {
-      if (prev.kind !== n.kind) put('error', 'node_kind', `${n.id}: 기존 ${prev.kind} 인데 새로 ${n.kind} 로 왔다`)
-      if (prev.name !== n.name) put('error', 'node_name', `${n.id}: 기존 "${prev.name}" 인데 새로 "${n.name}" 이다 — 다른 인물이 같은 id 를 쓴다`)
+      if (prev.kind !== n.kind) put('error', 'node_kind', `${n.id}: 기존 ${prev.kind} 인데 새로 ${n.kind} 로 왔습니다`)
+      if (prev.name !== n.name) put('error', 'node_name', `${n.id}: 기존 "${prev.name}" 인데 새로 "${n.name}" 입니다 — 다른 인물이 같은 id 를 씁니다`)
       for (const [k, level] of Object.entries(CANON_KEYS)) {
         const a = prev.props?.[k]
         const b = n.props?.[k]
         if (a !== undefined && b !== undefined && String(a) !== String(b)) {
-          put(level, `node_${k}`, `${n.name}: ${k} 가 기존 ${a} 인데 새로 ${b} 다`)
+          put(level, `node_${k}`, `${n.name}: ${k} 가 기존 ${a} 인데 새로 ${b} 입니다`)
         }
       }
       continue
     }
     const same = oldByName.get(n.name)
-    if (same) put('warn', 'alias_split', `"${n.name}" 이 기존 id "${same.id}" 와 새 id "${n.id}" 로 갈라진다`)
+    if (same) put('warn', 'alias_split', `"${n.name}" 이 기존 id "${same.id}" 와 새 id "${n.id}" 로 갈라집니다`)
   }
 
   const oldEdges = new Map(oe.map((e) => [edgeKey(e), e]))
@@ -555,25 +555,25 @@ export function validateAgainstCanon(newGraph, existingGraph) {
       const a = prev.props?.type
       const b = e.props?.type
       if (a !== undefined && b !== undefined && a !== b) {
-        put('error', 'edge_type', `${e.s} ${e.p} ${e.o}: 기존 type "${a}" 인데 새로 "${b}" 다`)
+        put('error', 'edge_type', `${e.s} ${e.p} ${e.o}: 기존 type "${a}" 인데 새로 "${b}" 입니다`)
       }
       if (prev.asserted === true && e.asserted === false) {
-        put('warn', 'edge_downgrade', `${e.s} ${e.p} ${e.o}: 기존은 명시인데 새로 추론으로 왔다`)
+        put('warn', 'edge_downgrade', `${e.s} ${e.p} ${e.o}: 기존은 명시인데 새로 추론으로 왔습니다`)
       }
       continue
     }
     // 같은 두 노드 사이에 서로 못 서는 관계가 붙는 경우
     for (const old of oldPairs.get(`${e.s}|${e.o}`) || []) {
       if ((old.p === 'targets' && e.p === 'protects') || (old.p === 'protects' && e.p === 'targets')) {
-        put('warn', 'rel_mutex', `${e.s}→${e.o}: 기존 ${old.p} 와 새 ${e.p} 가 함께 선다`)
+        put('warn', 'rel_mutex', `${e.s}→${e.o}: 기존 ${old.p} 와 새 ${e.p} 가 함께 섭니다`)
       }
     }
     // 비밀: 아는 사람과 모르는 사람이 같을 수는 없다
     if (e.p === 'knows' && oldEdges.has(edgeKey({ s: e.o, p: 'hidden_from', o: e.s }))) {
-      put('error', 'secret_contradiction', `${e.s} 는 ${e.o} 를 모르는 쪽으로 기록돼 있다 (hidden_from)`)
+      put('error', 'secret_contradiction', `${e.s} 는 ${e.o} 를 모르는 쪽으로 기록돼 있습니다 (hidden_from)`)
     }
     if (e.p === 'hidden_from' && oldEdges.has(edgeKey({ s: e.o, p: 'knows', o: e.s }))) {
-      put('error', 'secret_contradiction', `${e.o} 는 ${e.s} 를 아는 쪽으로 기록돼 있다 (knows)`)
+      put('error', 'secret_contradiction', `${e.o} 는 ${e.s} 를 아는 쪽으로 기록돼 있습니다 (knows)`)
     }
   }
 
@@ -614,12 +614,12 @@ const BRANCH_IDS = ['A', 'B', 'C', 'D']
 const wbEdges = (list, warnings, label) => {
   const out = []
   for (const e of asList(list)) {
-    if (!e || typeof e !== 'object') { warnings.push(`${label}: 엣지가 객체가 아니다 — 버린다`); continue }
+    if (!e || typeof e !== 'object') { warnings.push(`${label}: 엣지가 객체가 아닙니다 — 버립니다`); continue }
     const s = clip(e.s ?? e.from ?? e.subject, 60)
     const o = clip(e.o ?? e.to ?? e.object, 60)
     const p = clip(e.p ?? e.rel ?? e.pred, 40).toLowerCase().replace(/[^a-z0-9_]+/g, '_')
-    if (!REL_OK.has(p)) { warnings.push(`${label}: 어휘에 없는 술어 "${p || '없음'}" — 엣지를 버린다`); continue }
-    if (!s || !o) { warnings.push(`${label}: ${p} 엣지의 s/o 가 비었다 — 버린다`); continue }
+    if (!REL_OK.has(p)) { warnings.push(`${label}: 어휘에 없는 술어 "${p || '없음'}" — 엣지를 버립니다`); continue }
+    if (!s || !o) { warnings.push(`${label}: ${p} 엣지의 s/o 가 비었습니다 — 버립니다`); continue }
     const edge = { s, p, o }
     const note = clip(e.note ?? e.cause, 120)
     if (note) edge.note = note
@@ -655,29 +655,29 @@ const wbEdges = (list, warnings, label) => {
 export function normalizeStory(raw, { maxBranches = 4, maxBeats = 8 } = {}) {
   const warnings = []
   const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}
-  if (src !== raw) warnings.push('스토리가 객체가 아니다 — 빈 스토리로 둔다')
+  if (src !== raw) warnings.push('스토리가 객체가 아닙니다 — 빈 스토리로 둡니다')
   const rawBranches = src.branches ?? src.options ?? src.paths
-  if (!Array.isArray(rawBranches)) warnings.push('branches 배열이 없다')
+  if (!Array.isArray(rawBranches)) warnings.push('branches 배열이 없습니다')
 
   const branches = []
   for (const b of asList(rawBranches)) {
-    if (!b || typeof b !== 'object') { warnings.push('분기가 객체가 아니다 — 버린다'); continue }
-    if (branches.length >= maxBranches) { warnings.push(`분기가 ${maxBranches}개를 넘어 나머지를 잘랐다`); break }
+    if (!b || typeof b !== 'object') { warnings.push('분기가 객체가 아닙니다 — 버립니다'); continue }
+    if (branches.length >= maxBranches) { warnings.push(`분기가 ${maxBranches}개를 넘어 나머지를 잘랐습니다`); break }
     const id = clip(b.id, 2).toUpperCase() || BRANCH_IDS[branches.length] || String(branches.length + 1)
     const label = clip(b.label ?? b.title, 40)
     const premise = clip(b.premise ?? b.summary ?? b.desc, 800)
 
     const beats = []
     for (const t of asList(b.beats ?? b.cuts)) {
-      if (beats.length >= maxBeats) { warnings.push(`${id}: 비트가 ${maxBeats}개를 넘어 나머지를 잘랐다`); break }
+      if (beats.length >= maxBeats) { warnings.push(`${id}: 비트가 ${maxBeats}개를 넘어 나머지를 잘랐습니다`); break }
       if (typeof t === 'string' || typeof t === 'number') {
         const line = clip(t, 400)
         if (line) beats.push(line)
         continue
       }
-      if (!t || typeof t !== 'object') { warnings.push(`${id}: 비트가 문자열도 객체도 아니다 — 버린다`); continue }
+      if (!t || typeof t !== 'object') { warnings.push(`${id}: 비트가 문자열도 객체도 아닙니다 — 버립니다`); continue }
       const action = clip(t.action ?? t.summary ?? t.text, 400)
-      if (!action) { warnings.push(`${id}: action 없는 비트를 버린다`); continue }
+      if (!action) { warnings.push(`${id}: action 없는 비트를 버립니다`); continue }
       const beat = { action }
       const scene = clip(t.scene, 24)
       if (scene) beat.scene = scene
@@ -692,7 +692,7 @@ export function normalizeStory(raw, { maxBranches = 4, maxBeats = 8 } = {}) {
     for (const [k, v] of Object.entries(asProps(b.outcome ?? b.consequence))) {
       const key = clip(k, 24)
       const val = clip(v && typeof v === 'object' ? Object.values(v).join(' ') : v, 160)
-      if (!key || !val) { warnings.push(`${id}: 결과 "${key || k}" 를 읽지 못해 버린다`); continue }
+      if (!key || !val) { warnings.push(`${id}: 결과 "${key || k}" 를 읽지 못해 버립니다`); continue }
       outcome[key] = val
     }
 
@@ -701,9 +701,9 @@ export function normalizeStory(raw, { maxBranches = 4, maxBeats = 8 } = {}) {
     for (const n of asList(wb.nodes ?? wb.add_nodes)) {
       const name = clip(n?.name ?? n?.label, 60)
       const kind = clip(n?.kind ?? n?.type, 20)
-      if (!name) { warnings.push(`${id} 역기입: 이름 없는 노드를 버린다`); continue }
+      if (!name) { warnings.push(`${id} 역기입: 이름 없는 노드를 버립니다`); continue }
       if (!KIND_OK.has(kind)) {
-        warnings.push(`${id} 역기입: 모르는 kind "${kind || '없음'}" (${name}) — 노드를 버린다`)
+        warnings.push(`${id} 역기입: 모르는 kind "${kind || '없음'}" (${name}) — 노드를 버립니다`)
         continue
       }
       const node = { name, kind }
@@ -724,10 +724,10 @@ export function normalizeStory(raw, { maxBranches = 4, maxBeats = 8 } = {}) {
       remove_edges: wbEdges(wb.remove_edges ?? wb.remove ?? wb.removeEdges, warnings, `${id} 역기입 삭제`),
     }
 
-    if (!label && !premise && !beats.length) { warnings.push(`${id}: 빈 분기를 버린다`); continue }
-    if (!label) warnings.push(`${id}: label 이 없어 "분기 ${id}" 로 둔다`)
-    if (!premise) warnings.push(`${id}: 전개 요약(premise)이 없다`)
-    if (!beats.length) warnings.push(`${id}: 비트가 없다`)
+    if (!label && !premise && !beats.length) { warnings.push(`${id}: 빈 분기를 버립니다`); continue }
+    if (!label) warnings.push(`${id}: label 이 없어 "분기 ${id}" 로 둡니다`)
+    if (!premise) warnings.push(`${id}: 전개 요약(premise)이 없습니다`)
+    if (!beats.length) warnings.push(`${id}: 비트가 없습니다`)
 
     branches.push({
       id,
@@ -740,7 +740,7 @@ export function normalizeStory(raw, { maxBranches = 4, maxBeats = 8 } = {}) {
     })
   }
 
-  if (!branches.length) warnings.push('쓸 수 있는 분기가 하나도 없다')
+  if (!branches.length) warnings.push('쓸 수 있는 분기가 하나도 없습니다')
 
   const pivot = asProps(src.pivot)
   const out = {

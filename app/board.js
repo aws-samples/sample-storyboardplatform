@@ -20,11 +20,11 @@ import { emptyPanel, guide as guideExample, guiding } from './onboard.js'
 import { entries, group, paintList } from './history.js'
 
 const ROSTER = [
-  { id: 'u1', name: '김하나', role: 'planner', color: '#E3A93C', job: '시나리오를 컷으로 쪼갠다' },
-  { id: 'u2', name: '이도현', role: 'artist', color: '#4FA97A', job: '구도를 그리고 올린다' },
-  { id: 'u3', name: '박서준', role: 'director', color: '#7FB3E8', job: '피드백하고 승인한다' },
-  { id: 'u4', name: '최유진', role: 'reviewer', color: '#D69AC9', job: '메모로 의견을 남긴다' },
-  { id: 'u5', name: '정민아', role: 'admin', color: '#C77B62', job: '팀원을 등록하고 역할을 정한다' },
+  { id: 'u1', name: '김하나', role: 'planner', color: '#E3A93C', job: '시나리오를 컷으로 쪼갭니다' },
+  { id: 'u2', name: '이도현', role: 'artist', color: '#4FA97A', job: '구도를 그리고 올립니다' },
+  { id: 'u3', name: '박서준', role: 'director', color: '#7FB3E8', job: '피드백하고 승인합니다' },
+  { id: 'u4', name: '최유진', role: 'reviewer', color: '#D69AC9', job: '메모로 의견을 남깁니다' },
+  { id: 'u5', name: '정민아', role: 'admin', color: '#C77B62', job: '팀원을 등록하고 역할을 정합니다' },
 ]
 
 const PALETTE = ['#E3A93C', '#4FA97A', '#7FB3E8', '#D69AC9', '#C77B62', '#8FA65B']
@@ -1600,17 +1600,17 @@ function runExample() {
  */
 const BOARD_CARDS = [
   {
-    head: '왼쪽에서 이야기가 들어온다',
+    head: '왼쪽에서 이야기가 들어옵니다',
     body: '시나리오를 붙이고 컷으로 분해합니다.\n빈 줄이 컷 경계입니다.\n이야기부터 만들려면 위의 이야기 기획을 씁니다.',
     spot: ['scenario'],
   },
   {
-    head: '가운데가 보드다',
+    head: '가운데가 보드입니다',
     body: '컷은 씬으로 묶이고 순서대로 시간이 매겨집니다.\n끌어서 순서를 바꿀 수 있습니다.',
     spot: ['board'],
   },
   {
-    head: '오른쪽에서 한 컷을 다룬다',
+    head: '오른쪽에서 한 컷을 다룹니다',
     body: '고른 컷의 그림·대사·카메라·상태가 여기 있습니다.\n그림 위를 눌러 그 자리에 의견을 남길 수도 있습니다.',
     spot: ['detail'],
   },

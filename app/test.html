@@ -522,7 +522,7 @@
   ok('id 대신 이름으로 온 참조를 되돌린다', (() => {
     const g = normalizeGraph(G([N('celine', 'Character', '셀린'), N('rumi', 'Character', '루미')],
       [{ s: '셀린', p: 'mentor_of', o: '루미' }]))
-    return g.edges[0]?.s === 'celine' && g.edges[0]?.o === 'rumi' && g.warnings.some((w) => w.includes('이름이다'))
+    return g.edges[0]?.s === 'celine' && g.edges[0]?.o === 'rumi' && g.warnings.some((w) => w.includes('이름입니다'))
   })())
   ok('파생 전용 술어를 명시로 주면 추론으로 내린다', (() => {
     const g = normalizeGraph(G([N('a', 'Character'), N('b', 'Character')], [E('a', 'has_leverage_over', 'b')]))
@@ -887,7 +887,7 @@
     const st = createGraphStore(G([N('a', 'Character', '가온')], []), { net: fakeNet({}, { fail: true }) })
     st.addNodes([{ kind: 'Object', name: '낡은 열쇠' }])
     const { failures } = await st.flush()
-    return st.stats().nodes === 2 && failures.length === 1 && failures[0].includes('저장되지 않았다')
+    return st.stats().nodes === 2 && failures.length === 1 && failures[0].includes('저장되지 않았습니다')
       && (await st.flush()).failures.length === 0
   })())
   ok('loadGraphStore 는 Neptune 에 남은 판을 읽어 파생을 다시 만든다', await (async () => {
@@ -1037,7 +1037,7 @@
     } }] })
     const wb = st.branches[0].writeback
     return wb.nodes.length === 1 && wb.edges.length === 1
-      && st.warnings.filter((w) => w.includes('버린다')).length >= 2
+      && st.warnings.filter((w) => w.includes('버립니다')).length >= 2
   })())
   ok('지시서 스키마(summary·consequence·add_edges)도 받아 준다', (() => {
     const st = normalizeStory({ branches: [{
@@ -1960,6 +1960,17 @@
     const m = src.match(/const \w+_CARDS = \[([\s\S]*?)\n\]/)
     const words = ['빠르', '무한', '제작 기간', '단축'].filter((w) => m && m[1].includes(w))
     ok(`${name} 코치마크에 금칙어가 없다`, !!m && !words.length, words.join(', '))
+
+    /*
+     * 화면에 뜨는 글은 경어체다. 머리글 · 본문 · 꼬리표를 한 줄씩 갈라 끝을 본다 —
+     * 「보드다」처럼 평서형으로 끝나면 안내를 읽는 사람에게 반말로 들린다.
+     * 문장 끝만 본다. '씬마다' · '끌어다' 처럼 문장 가운데 오는 말은 걸리지 않는다.
+     */
+    const said = [...(m ? m[1] : '').matchAll(/(?:head|body|text):\s*((?:'[^']*'|`[^`]*`|"[^"]*")(?:\s*\+\s*(?:'[^']*'|`[^`]*`))*)/g)]
+      .flatMap((x) => x[1].replace(/['"`]\s*\+\s*['"`]/g, '').replace(/^['"`]|['"`]$/g, '').split(/\\n|\n/))
+      .map((t) => t.trim()).filter(Boolean)
+    const plain = said.filter((t) => /[가-힣](?<!니)다[.!?]?$/.test(t))
+    ok(`${name} 코치마크가 경어체다`, said.length > 0 && !plain.length, plain.join(' / '))
   }
 
   // ── net.js: AWSJSON 필드 풀기 ─────────────────────────────────────────────
@@ -2064,7 +2075,7 @@
     const { post } = fakePlanServer(1e9, null)
     const t0 = Date.now()
     try { await runPlanJob(post, { prompt: '충분히 긴 프롬프트다' }, { pollMs: 1, timeoutMs: 120 }); return false }
-    catch (e) { return e.message.includes('안에 끝나지 않았다') && Date.now() - t0 < 3000 }
+    catch (e) { return e.message.includes('안에 끝나지 않았습니다') && Date.now() - t0 < 3000 }
   })())
   ok('기본 대기 상한은 Lambda 타임아웃과 같은 120초', PLAN_TIMEOUT_MS === 120_000)
 

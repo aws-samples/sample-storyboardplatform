@@ -95,7 +95,7 @@ function note(text, who) {
 function mark(what, { ref = null, example = false } = {}) {
   const op = markOp({ step: 'keyvisual', actor: S.me?.id || 'local', what, ref, example })
   S.journal.push(op)
-  try { S.net?.sendOp?.(op) } catch (e) { wire('r', `기록을 남기지 못했다 — ${e.message}`) }
+  try { S.net?.sendOp?.(op) } catch (e) { wire('r', `기록을 남기지 못했습니다 — ${e.message}`) }
   paintHist()
 }
 
@@ -539,7 +539,7 @@ async function postToBoard() {
   // sendOp 이 옵셔널 체이닝이라 연결이 없으면 조용히 아무 일도 안 하고 지나간다.
   // 그 상태로 '붙였습니다' 라고 말하면 안 된다 — 보드에 남는 것이 없다.
   if (!S.net) {
-    wire('r', 'publishOp 보낼 곳이 없다 — 보드에 연결되지 않았다')
+    wire('r', 'publishOp 보낼 곳이 없습니다 — 보드에 연결되지 않았습니다')
     note('보드에 연결되지 않아 붙이지 못했습니다')
     say('보드에 연결되지 않아 붙이지 못했습니다')
     return
@@ -549,7 +549,7 @@ async function postToBoard() {
     S.net.sendOp(op)
     S.journal.push(op)
   }
-  wire('u', `publishOp × ${ops.length}  보드에 씬 패널로 남긴다`)
+  wire('u', `publishOp × ${ops.length}  보드에 씬 패널로 남깁니다`)
   note(`키 비주얼 ${ops.length}장을 보드에 붙였습니다`)
   S.posted = true
   aimBoardLink(ops[0].panel.id)
@@ -1172,35 +1172,35 @@ function runExample() {
 const KV_CARDS = [
   {
     step: 1,
-    head: '대본은 이 계정 안에 머문다',
+    head: '대본은 이 계정 안에 머뭅니다',
     body: '여기 붙인 대본은 우리 계정 안에서만 읽힙니다.\n그림 설명을 쓰는 모델도, 그림을 그리는 모델도\n같은 계정 안에 있습니다.',
     spot: ['script'],
     next: '다음', skip: '건너뛰기',
   },
   {
     step: 3,
-    head: '만드는 동안만 장비가 켜진다',
+    head: '만드는 동안만 장비가 켜집니다',
     body: '그래픽 장비는 업무 시간에만 켜져 있습니다.\n첫 장이 조금 늦는 것은 그때 모델을 올리기\n때문입니다. 밤과 주말에는 내려가 있습니다.',
     spot: ['rig', 'queue'],
     next: '다음', skip: '건너뛰기',
   },
   {
     step: 3,
-    head: '생성 권한은 서버에서 확인한다',
+    head: '생성 권한은 서버에서 확인합니다',
     body: '검수자에게 버튼을 숨기지 않습니다.\n요청이 도착하면 서버가 역할을 보고 거절합니다.\n화면을 우회해도 결과는 같습니다.',
     spot: ['perm', 'whoami'],
     next: '다음', skip: '건너뛰기',
   },
   {
     step: 3,
-    head: '직접 들 것만 직접 든다',
+    head: '직접 들 것만 직접 듭니다',
     body: '문장을 다루는 모델은 맡기고,\n그림 모델만 우리가 띄웁니다.\n두 종류가 같이 도는데 관리하는 것은 하나입니다.',
     spot: ['tab2', 'rig'],
-    tags: [{ on: 'tab2', text: '문장 모델 · 맡긴다' }, { on: 'rig', text: '그림 모델 · 우리가 띄운다' }],
+    tags: [{ on: 'tab2', text: '문장 모델 · 맡깁니다' }, { on: 'rig', text: '그림 모델 · 우리가 띄웁니다' }],
     next: '다음', skip: '건너뛰기',
   },
   {
-    head: '지나간 일은 옆 기둥에 남는다',
+    head: '지나간 일은 옆 기둥에 남습니다',
     body: '누가 어느 단계에서 무엇을 했는지 오른쪽에 모입니다.\n줄을 누르면 그 씬으로 갑니다 — 이어서 하는 자리입니다.\n보드와 같은 기록을 봅니다.',
     spot: ['histbox'],
     next: '시작하기', skip: '다시 보지 않기',
@@ -1400,7 +1400,7 @@ async function boot() {
    * 기록을 못 읽은 것이 생성을 막을 이유는 아니다.
    */
   const past = await S.net?.fetchOps?.().catch((e) => {
-    wire('r', `기록을 읽지 못했다 — ${e.message}`)
+    wire('r', `기록을 읽지 못했습니다 — ${e.message}`)
     return null
   })
   // 목록은 최근 30줄만 그린다. 오래된 것을 다 들고 있을 이유가 없다

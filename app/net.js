@@ -132,7 +132,7 @@ export async function runPlanJob(post, spec, opts = {}) {
 
   const started = await post(M_PLAN, { spec: JSON.stringify(spec) })
   const jobId = started?.plan?.jobId
-  if (!jobId) throw new Error('plan jobId 를 받지 못했다')
+  if (!jobId) throw new Error('plan jobId 를 받지 못했습니다')
 
   const deadline = Date.now() + timeoutMs
   let fails = 0
@@ -152,7 +152,7 @@ export async function runPlanJob(post, spec, opts = {}) {
     if (got?.status === 'done') return { text: got.text, usage: got.usage, stop: got.stop }
     if (got?.status === 'error') throw new Error(got.error || 'plan 실패')
   }
-  throw new Error(`plan 이 ${Math.round(timeoutMs / 1000)}초 안에 끝나지 않았다`)
+  throw new Error(`plan 이 ${Math.round(timeoutMs / 1000)}초 안에 끝나지 않았습니다`)
 }
 
 /**

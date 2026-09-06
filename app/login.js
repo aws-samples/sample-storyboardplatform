@@ -6,11 +6,11 @@ const DEMO_PW = window.SB_CONFIG?.demoPw || ''
 
 /** 데모 계정. story-graph.html 의 로그인 문도 같은 목록을 쓴다 */
 export const DEMO_USERS = [
-  { id: 'u1', name: '김하나', role: '기획', job: '시나리오를 컷으로 쪼갠다', color: '#E3A93C' },
-  { id: 'u2', name: '이도현', role: '아티스트', job: '구도를 그리고 올린다', color: '#4FA97A' },
-  { id: 'u3', name: '박서준', role: '감독', job: '피드백하고 승인한다', color: '#7FB3E8' },
-  { id: 'u4', name: '최유진', role: '리뷰', job: '메모로 의견을 남긴다', color: '#D69AC9' },
-  { id: 'u5', name: '정민아', role: '관리', job: '팀원을 등록하고 역할을 정한다', color: '#C77B62' },
+  { id: 'u1', name: '김하나', role: '기획', job: '시나리오를 컷으로 쪼갭니다', color: '#E3A93C' },
+  { id: 'u2', name: '이도현', role: '아티스트', job: '구도를 그리고 올립니다', color: '#4FA97A' },
+  { id: 'u3', name: '박서준', role: '감독', job: '피드백하고 승인합니다', color: '#7FB3E8' },
+  { id: 'u4', name: '최유진', role: '리뷰', job: '메모로 의견을 남깁니다', color: '#D69AC9' },
+  { id: 'u5', name: '정민아', role: '관리', job: '팀원을 등록하고 역할을 정합니다', color: '#C77B62' },
 ]
 const DEMO_BLOCK = `
   <span class="lf__label">데모 계정 — 눌러서 바로 들어가기</span>
