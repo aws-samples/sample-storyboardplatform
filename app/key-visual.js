@@ -11,14 +11,14 @@
  * 그때는 화면이 무엇이 없어서 못 하는지 그대로 말한다. 흉내내지 않는다.
  */
 
-import { ART_ROLES, orderKeyBetween } from '../demo/core.js'
-import { configured, idToken, session } from '../demo/auth.js'
-import { connect } from '../demo/net.js'
-import { showLogin } from '../demo/login.js'
-import { mountNav } from '../demo/nav-tabs.js'
-import * as coach from '../demo/coach.js'
-import { emptyPanel, play as playExample, playing } from '../demo/onboard.js'
-import { entries, group, markOp, paintList } from '../demo/history.js'
+import { ART_ROLES, orderKeyBetween } from './core.js'
+import { configured, idToken, session } from './auth.js'
+import { connect } from './net.js'
+import { showLogin } from './login.js'
+import { mountNav } from './nav-tabs.js'
+import * as coach from './coach.js'
+import { emptyPanel, play as playExample, playing } from './onboard.js'
+import { entries, group, markOp, paintList } from './history.js'
 
 const cfg = window.SB_CONFIG || {}
 const $ = (s, r = document) => r.querySelector(s)
@@ -86,7 +86,7 @@ function note(text, who) {
  * 이 화면이 하는 일 중 보드에 op 로 남는 것은 붙이기(panel.add)와 다시 그리기
  * (panel.version)뿐이다. 대본을 나눈 것, 프롬프트를 받은 것, 몇 장을 그린 것은
  * 여기서만 알고 있었고 그래서 홈이나 보드에서는 보이지 않았다. step.mark 로 남기면
- * demo/history.js 가 그것을 한 줄로 옮긴다 — applyOp 는 모르는 kind 라 지나가므로
+ * app/history.js 가 그것을 한 줄로 옮긴다 — applyOp 는 모르는 kind 라 지나가므로
  * 보드의 판은 흔들리지 않는다.
  *
  * 실패해도 삼킨다. 기록을 못 남긴 것이 이 화면의 본 일을 멈출 이유는 아니다.
@@ -424,7 +424,7 @@ export function opsForBoard(scenes, jobs, actor, newId = uid) {
   return ops
 }
 
-/** 붙여둔 패널을 다시 그렸을 때. demo/app.js 의 panel.version 과 같은 모양이어야 한다. */
+/** 붙여둔 패널을 다시 그렸을 때. app/board.js 의 panel.version 과 같은 모양이어야 한다. */
 function pushVersion(s, j) {
   j.ver = (j.ver || 1) + 1
   const op = {
@@ -445,7 +445,7 @@ function pushVersion(s, j) {
  *
  * 보드는 sessionStorage 의 마지막 뷰(sb.view · sb.ep)로 열린다. 그런데 여기서 만드는
  * 패널에는 epId 가 없다 — 이 화면의 대본은 보드의 회차가 아니라 자체 샘플이라서
- * 어느 회차의 것도 아니다. demo/app.js 의 cutsOf() 는 (p.epId ?? null) === viewEp 로
+ * 어느 회차의 것도 아니다. app/board.js 의 cutsOf() 는 (p.epId ?? null) === viewEp 로
  * 거르므로, 대본화로 회차를 만든 뒤라면 보드가 그 회차를 보고 있어서 epId 없는
  * 패널은 목록에 아예 안 나온다 — 붙이기는 됐는데 컷 수가 늘지 않는 것처럼 보인다.
  *

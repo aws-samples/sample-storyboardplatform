@@ -1,5 +1,5 @@
 {
- "_note": "fixtures/kdh-synopsis.txt → extractGraphPrompt → (모델 응답 재현: kdh-extract-raw.json) → normalizeGraph + deriveEdges. fixtures/build.mjs 로 다시 만든다. story-graph.html?graph=fixtures/extracted-graph.json 으로 열어 확인한다.",
+ "_note": "kdh-synopsis.txt → extractGraphPrompt → (모델 응답 재현: kdh-extract-raw.json) → normalizeGraph + deriveEdges. app-walkthrough/data/build.mjs 로 다시 만듭니다. /story-graph.html?graph=/app-walkthrough/data/extracted-graph.json 으로 열어 확인합니다.",
  "nodes": [
   {
    "id": "rumi",

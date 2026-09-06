@@ -21,9 +21,9 @@ const {
 } = require('aws-cdk-lib')
 
 const HERE = __dirname
-const DEMO = path.join(HERE, '..', '..', 'demo')
+const APP = path.join(HERE, '..', '..', 'app')
 const GRAPH_FN = path.join(HERE, '..', 'graph')
-const KEYVISUAL = path.join(HERE, '..', '..', 'key-visual')
+const WALKTHROUGH = path.join(HERE, '..', '..', 'app-walkthrough')
 const read = (...p) => fs.readFileSync(path.join(HERE, '..', ...p), 'utf8')
 
 const GPU_TYPE = 'g6e.2xlarge'
@@ -454,61 +454,54 @@ class StoryboardStack extends Stack {
     ].join('\n')
 
     /*
-     * 버킷 배치가 세 제약을 동시에 만족해야 한다.
-     *   - 기존 앱은 루트에서 열린다               → demo/* 를 루트에 둔다
-     *   - key-visual/index.html 은 <script src="/aws-config.js">  → config 는 루트
-     *   - key-visual/keyvisual.js 는 '../demo/core.js' 를 import  → /demo/* 도 필요
-     * 마지막 것 때문에 demo 를 루트에만 두면 /demo/core.js 가 403 이 되어
-     * 브라우저에서 모듈 로드가 실패한다. 그래서 demo 를 루트와 /demo/ 양쪽에 올린다.
+     * 버킷 배치는 저장소의 두 폴더를 그대로 옮긴 것입니다.
+     *   app/*             → 버킷 루트. 네 화면이 다 여기 있습니다
+     *   app-walkthrough/* → /app-walkthrough/. 예시가 읽는 목데이터입니다
      * 최종 구조:
-     *   /aws-config.js  /index.html(홈)  /board.html  /core.js …
-     *   /demo/core.js …  /key-visual/index.html
+     *   /aws-config.js  /index.html(홈)  /board.html  /story-graph.html
+     *   /key-visual.html  /core.js …  /app-walkthrough/data/graph.json …
      *
-     * 아래 defaultRootObject 는 루트 '/' 에만 적용된다 — 하위 디렉터리에는 적용되지
-     * 않으므로 '/key-visual/' 은 403 이다. 그래서 탭 주소는 파일 이름까지 적는다
-     * (demo/nav-tabs.js 의 NAV_TABS).
+     * 한때 키 비주얼만 자기 폴더에 따로 있었고, 그 화면이 옆 폴더의 공용 모듈을
+     * import 해서 같은 파일을 버킷의 두 자리에 올려야 했습니다(배포가 셋이었습니다).
+     * 화면을 app/ 한 폴더로 모으면서 그 사본이 필요 없어졌습니다.
+     *
+     * 아래 defaultRootObject 는 루트 '/' 에만 적용됩니다 — 하위 디렉터리에는 적용되지
+     * 않으므로 디렉터리로 끝나는 주소는 403 입니다. 그래서 탭 주소는 파일 이름까지
+     * 적습니다 (app/nav-tabs.js 의 NAV_TABS).
      */
     const webDeploy = new s3deploy.BucketDeployment(this, 'Web', {
       destinationBucket: site,
       sources: [
-        s3deploy.Source.asset(DEMO, { exclude: ['aws-config.js', '.DS_Store', 'test.html'] }),
+        s3deploy.Source.asset(APP, { exclude: ['aws-config.js', '.DS_Store', 'test.html'] }),
         s3deploy.Source.data('aws-config.js', config),
       ],
-      // 이 배포는 접두사가 없어서 버킷 전체를 소스와 맞춘다 — 즉 기본 prune 이
-      // 다른 배포가 만든 폴더를 통째로 지운다. 두 배포의 실행 순서는 보장되지
-      // 않으므로 이 예외가 없으면 배포마다 폴더가 있다 없다 한다.
-      exclude: ['key-visual/*', 'demo/*'],
+      // 이 배포는 접두사가 없어서 버킷 전체를 소스와 맞춥니다 — 즉 기본 prune 이
+      // 다른 배포가 만든 폴더를 통째로 지웁니다. 두 배포의 실행 순서는 보장되지
+      // 않으므로 이 예외가 없으면 배포마다 폴더가 있다 없다 합니다.
+      exclude: ['app-walkthrough/*'],
       distribution: cdn,
       distributionPaths: ['/*'],
     })
 
-    // key-visual 의 '../demo/*' import 를 받아주는 사본. 루트의 것과 같은 파일이지만
-    // destinationKeyPrefix 는 배포 단위로만 지정할 수 있어서 한 배포에 루트와
-    // 하위 폴더를 함께 담을 수 없다 — 그래서 배포를 나눈다.
-    const webDemo = new s3deploy.BucketDeployment(this, 'WebDemo', {
+    /*
+     * 예시가 읽는 목데이터. destinationKeyPrefix 는 배포 단위로만 지정할 수 있어서
+     * 한 배포에 루트와 하위 폴더를 함께 담을 수 없습니다 — 그래서 배포를 나눕니다.
+     *
+     * screens/ 는 올리지 않습니다. 화면 스크린샷과 목업은 README 가 보는 문서용이고
+     * 브라우저가 읽지 않습니다.
+     */
+    const webWalkthrough = new s3deploy.BucketDeployment(this, 'WebWalkthrough', {
       destinationBucket: site,
-      destinationKeyPrefix: 'demo',
-      sources: [
-        s3deploy.Source.asset(DEMO, { exclude: ['aws-config.js', '.DS_Store', 'test.html'] }),
-      ],
+      destinationKeyPrefix: 'app-walkthrough',
+      sources: [s3deploy.Source.asset(WALKTHROUGH, {
+        exclude: ['.DS_Store', 'screens/*'],
+      })],
       distribution: cdn,
-      distributionPaths: ['/demo/*'],
+      distributionPaths: ['/app-walkthrough/*'],
     })
-    webDemo.node.addDependency(webDeploy)
-
-    // key-visual 은 별도 BucketDeployment 다. destinationKeyPrefix 는 배포 단위로만
-    // 지정할 수 있어서 한 배포에 루트와 하위 폴더를 섞을 수 없다.
-    const webKv = new s3deploy.BucketDeployment(this, 'WebKeyVisual', {
-      destinationBucket: site,
-      destinationKeyPrefix: 'key-visual',
-      // .drawio 원본과 목업 PNG 는 배포에 넣지 않는다 — 문서용 파일이다.
-      sources: [s3deploy.Source.asset(KEYVISUAL, { exclude: ['.DS_Store', '*.drawio', '*.drawio.png'] })],
-      distribution: cdn,
-      distributionPaths: ['/key-visual/*'],
-    })
-    // 같은 버킷에 쓰는 두 배포를 동시에 돌리지 않는다. 순서를 고정해 두면
-    // 위의 exclude 와 합쳐 어느 쪽도 상대의 파일을 지우지 않는다.
-    webKv.node.addDependency(webDemo)
+    // 같은 버킷에 쓰는 두 배포를 동시에 돌리지 않습니다. 순서를 고정해 두면
+    // 위의 exclude 와 합쳐 어느 쪽도 상대의 파일을 지우지 않습니다.
+    webWalkthrough.node.addDependency(webDeploy)
 
     new CfnOutput(this, 'Url', { value: `https://${cdn.distributionDomainName}` })
     new CfnOutput(this, 'GraphqlUrl', { value: api.graphqlUrl })

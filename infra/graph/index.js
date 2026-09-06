@@ -288,7 +288,7 @@ async function updateGraph(g, payload) {
 // Converse API 를 SDK 로 부르는 것뿐이라 요청·응답 모양이 바뀌지 않는다.
 
 // 프론트엔드가 spec.model 로 고르는 이름 → Bedrock 모델 id.
-// 이름은 화면(demo/story-graph.html 의 #modelSel)과 짝이 맞아야 한다.
+// 이름은 화면(app/story-graph.html 의 #modelSel)과 짝이 맞아야 한다.
 //
 // 배포 리전이 ap-northeast-2(서울)라서 전역(global.anthropic.…) 추론 프로필을 쓴다.
 // 서울은 이 모델들의 In-Region 도 Geo 도 지원하지 않는다 — 전역 프로필만 붙는다.

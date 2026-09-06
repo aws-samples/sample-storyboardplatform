@@ -35,7 +35,7 @@
   } = await import(`./story.js?t=${Date.now()}`)
   const { edgeLabel, graphDelta, EDGE_LABELS_KR } = await import(`./graph-view.js?t=${Date.now()}`)
   const { parseField, runPlanJob, PLAN_TIMEOUT_MS } = await import(`./net.js?t=${Date.now()}`)
-  const { NAV_TABS, navTab, navHref, isSoonTab, navTabFromSearch, soonMarkup, mountNav,
+  const { NAV_TABS, navTab, navHref, navTabFromSearch, mountNav,
   } = await import(`./nav-tabs.js?t=${Date.now()}`)
   const { MARK, markOp, toEntry, entries, group, when, paintList,
   } = await import(`./history.js?t=${Date.now()}`)
@@ -1224,65 +1224,57 @@
   })())
 
   // ── nav-tabs.js: 상단 기능 탭 ──────────────────────────────────────────────
-  // 세 화면(board.html · story-graph.html · key-visual/)이 이 한 벌을 나눠 쓴다.
-  // 탭이 늘거나 이동 주소가 어긋나면 여기서 걸린다.
+  // 네 화면(board.html · story-graph.html · key-visual.html)이 이 한 벌을 나눠 씁니다.
+  // 탭이 늘거나 이동 주소가 어긋나면 여기서 걸립니다.
   /*
    * 순서는 이야기가 만들어지는 순서다 — 시놉시스에서 시작해 보드에서 끝난다.
    * 보드가 가장 오래된 화면이라 처음에는 맨 앞이었는데, 만들어진 순서와 쓰는 순서가
-   * 달라 사용자가 거꾸로 읽었다. 홈(demo/home.js)이 이 배열을 그대로 번호로 매기므로
+   * 달라 사용자가 거꾸로 읽었다. 홈(app/home.js)이 이 배열을 그대로 번호로 매기므로
    * 여기 순서가 곧 화면에 보이는 순서다.
    */
-  ok('탭은 다섯이고 이야기 순서대로다 — 디벨롭이 처음, 보드가 마지막',
-    NAV_TABS.map((t) => t.id).join(',') === 'develop,script,translate,keyvisual,board')
+  ok('탭은 넷이고 이야기 순서대로다 — 디벨롭이 처음, 보드가 마지막',
+    NAV_TABS.map((t) => t.id).join(',') === 'develop,script,keyvisual,board')
   ok('탭마다 이름과 한 줄 설명이 있다', NAV_TABS.every((t) => t.label && t.desc))
-  ok('보드까지 네 탭은 갈 곳이 있고, 대본 번역만 준비 중이다', (() => {
-    const go = NAV_TABS.filter((t) => t.href).map((t) => t.id).join(',')
-    const later = NAV_TABS.filter((t) => t.soon).map((t) => t.id).join(',')
-    return go === 'develop,script,keyvisual,board' && later === 'translate'
-  })())
+  /*
+   * 네 탭 모두 갈 곳이 있다. 한때 '대본 번역'이 화면 없이 안내만 띄우는 다섯 번째
+   * 탭으로 있었는데, 없는 기능을 목록에 올려 두면 읽는 사람이 그것까지 이 앱의 일부로
+   * 센다. 그래서 탭과 안내 판을 함께 걷어냈다 — 갈 곳 없는 탭이 다시 생기지 않게 본다.
+   */
+  ok('네 탭 모두 갈 곳이 있다 — 준비 중 자리는 남지 않았다',
+    NAV_TABS.every((t) => t.href && !t.soon))
   ok('대본화는 story-graph 의 안쪽 대본화 탭으로 데려간다',
     navTab('script').href === '/story-graph.html?tab=script')
   ok('디벨롭은 파라미터 없이 story-graph 로 간다', navTab('develop').href === '/story-graph.html')
   /*
-   * 주소는 전부 루트 기준 절대경로다. 이 바가 세 깊이에서 그려지기 때문이다 —
-   * 버킷 루트, /demo/, /key-visual/. 상대경로로 두면 키비주얼에서 누를 때
-   * /key-visual/story-graph.html 을 찾아 403 이 난다. 실제로 그랬다.
+   * 주소는 전부 루트 기준 절대경로입니다. 네 화면이 app/ 한 폴더에 있어 지금은
+   * 상대경로로도 풀리지만, 한때 키 비주얼만 따로 떨어진 폴더에 있어서 상대경로가
+   * 그 폴더 안쪽으로 풀려 403 이 났습니다. 실제로 그랬습니다.
    */
   ok('모든 주소가 루트 기준이다 — 어느 깊이에서 그려도 같은 곳으로 간다',
     NAV_TABS.filter((t) => t.href).every((t) => t.href.startsWith('/')))
   /*
    * 그리고 디렉터리가 아니라 파일 이름까지 적는다. CloudFront 의 defaultRootObject 는
-   * 루트 '/' 에만 적용되고 하위 디렉터리에는 적용되지 않아서 '/key-visual/' 은 403 이다.
-   * 로컬 서버는 예전에 디렉터리 index 를 찾아줘서 이 버그를 가렸다 — 지금은 배포처럼
-   * 403 을 돌려준다(infra/scripts/serve-local.mjs).
+   * 루트 '/' 에만 적용되고 하위 디렉터리에는 적용되지 않아서 디렉터리로 끝나는 주소는
+   * 403 이다. 로컬 서버는 예전에 디렉터리 index 를 찾아줘서 이 버그를 가렸다 — 지금은
+   * 배포처럼 403 을 돌려준다(infra/scripts/serve-local.mjs).
    */
-  ok('키비주얼 주소는 디렉터리가 아니라 파일까지 적는다 — 배포에서 디렉터리는 403 이다',
-    navTab('keyvisual').href === '/key-visual/index.html')
+  ok('모든 주소가 디렉터리가 아니라 파일까지 적는다 — 배포에서 디렉터리는 403 이다',
+    NAV_TABS.every((t) => /\.html(\?|$)/.test(t.href)))
+  ok('키비주얼도 이제 app/ 안의 한 화면이다', navTab('keyvisual').href === '/key-visual.html')
   ok('보드는 홈이 아니라 자기 파일로 간다 — 루트는 홈이다',
     navTab('board').href === '/board.html')
-  ok('준비 중은 대본 번역뿐이다',
-    isSoonTab('translate') && !isSoonTab('keyvisual') && !isSoonTab('board'))
   /*
-   * 화면이 없는 탭도 링크로 그려질 수 있다 — 키 비주얼처럼 그 탭을 handled 에 넣지
-   * 않는 화면에서다. href 가 없으니 그대로 <a> 로 만들면 주소가 undefined 가 되어
-   * /key-visual/undefined 같은 곳으로 간다. navHref 가 보드로 돌려보내고, 보드가
-   * ?tab= 을 읽어 준비 중 안내를 띄운다.
+   * href 가 없는 id 가 들어오면 그대로 <a> 로 만들 때 주소가 undefined 가 되어
+   * /undefined 같은 곳으로 간다. 실제로 그랬다. navHref 가 홈으로 돌린다.
    */
-  ok('갈 곳이 있는 탭은 자기 주소를 쓴다', navHref('keyvisual') === '/key-visual/index.html'
+  ok('갈 곳이 있는 탭은 자기 주소를 쓴다', navHref('keyvisual') === '/key-visual.html'
     && navHref('script') === '/story-graph.html?tab=script')
-  ok('준비 중 탭은 보드로 보내고 보드가 안내를 띄운다',
-    navHref('translate') === '/board.html?tab=translate')
-  ok('보드는 그 주소로 안내 탭을 켠다', navTabFromSearch('?tab=translate', 'board') === 'translate')
+  ok('모르는 id 는 홈으로 돌린다 — undefined 주소가 나가지 않는다', navHref('없는것') === '/')
   ok('?tab=script 는 대본화로 읽는다', navTabFromSearch('?tab=script', 'develop') === 'script')
   ok('모르는 tab 값은 기본 탭으로 떨어진다', navTabFromSearch('?tab=없는것', 'develop') === 'develop')
   ok('파라미터가 없으면 기본 탭', navTabFromSearch('', 'board') === 'board'
     && navTabFromSearch(undefined, 'board') === 'board')
   ok('? 없이 넘겨도 읽는다', navTabFromSearch('tab=keyvisual', 'board') === 'keyvisual')
-  ok('준비 중 안내에 문구가 다 들어 있다', (() => {
-    const html = soonMarkup('translate')
-    return html.includes('준비 중입니다') && html.includes('이 기능은 곧 추가됩니다')
-      && html.includes('대본 번역')
-  })())
 
   ok('탭 바는 내가 처리할 탭만 버튼으로, 나머지는 링크로 그린다', (() => {
     const mount = document.createElement('div')
@@ -1290,7 +1282,7 @@
     const picked = []
     const nav = mountNav({
       mount, active: 'develop',
-      handled: ['develop', 'script', 'translate', 'keyvisual'],
+      handled: ['develop', 'script', 'keyvisual'],
       onSelect: (id) => picked.push(id),
     })
     const at = (id) => mount.querySelector(`[data-nav="${id}"]`)
@@ -1310,7 +1302,7 @@
 
   /*
    * 탭 바가 그려지는 순서도 배열 순서와 같아야 한다. 홈이 같은 배열로 번호를 매기므로
-   * 둘이 어긋나면 홈에서는 1번인 것이 바에서는 5번째에 있게 된다.
+   * 둘이 어긋나면 홈에서는 1번인 것이 바에서는 마지막에 있게 된다.
    */
   ok('탭 바에 그려지는 순서가 배열 순서와 같다', (() => {
     const mount = document.createElement('div')
@@ -1318,13 +1310,13 @@
     mountNav({ mount, active: 'develop', handled: ['develop'] })
     const drawn = Array.from(mount.querySelectorAll('[data-nav]')).map((e) => e.dataset.nav).join(',')
     mount.remove()
-    return drawn === 'develop,script,translate,keyvisual,board'
+    return drawn === 'develop,script,keyvisual,board'
   })())
 
   /*
    * 홈이 생긴 뒤로 이 바는 얇은 모양이 기본이고 홈으로 가는 길을 함께 둔다.
-   * 얇은 모양에서는 설명 줄이 감춰지므로 title 에 남는지도 본다 — 다섯 탭의 이름만으로는
-   * '대본화'와 '대본 번역'이 잘 구별되지 않는다.
+   * 얇은 모양에서는 설명 줄이 감춰지므로 title 에 남는지도 본다 — 탭 이름만으로는
+   * '스토리 디벨롭'과 '대본화'가 잘 구별되지 않는다.
    */
   ok('기본이 얇은 모양이고 홈으로 가는 길이 있다', (() => {
     const mount = document.createElement('div')
@@ -2615,7 +2607,7 @@
       && d.edges.includes('a|conceals|s1') && d.removed.some((e) => e.p === 'loves')
   })())
 
-  // ── mock/graph.json 과의 호환: 추출 결과를 그대로 뷰어에 넣을 수 있는가 ──────
+  // ── app-walkthrough/data/graph.json 과의 호환: 추출 결과를 그대로 뷰어에 넣을 수 있는가 ──────
   const grab = async (p) => {
     const r = await fetch(`${p}?t=${Date.now()}`)
     if (!r.ok) throw new Error(`${p} ${r.status}`)
@@ -2623,8 +2615,8 @@
   }
   try {
     const [canon, rawExtract, built, seeds, stories] = await Promise.all([
-      grab('mock/graph.json'), grab('fixtures/kdh-extract-raw.json'), grab('fixtures/extracted-graph.json'),
-      grab('mock/seeds.json'), grab('mock/stories.json'),
+      grab('/app-walkthrough/data/graph.json'), grab('/app-walkthrough/data/kdh-extract-raw.json'), grab('/app-walkthrough/data/extracted-graph.json'),
+      grab('/app-walkthrough/data/seeds.json'), grab('/app-walkthrough/data/stories.json'),
     ])
 
     ok('canon 의 kind 가 모두 어휘 안에 있다', canon.nodes.every((n) => GRAPH_SCHEMA.nodeKinds.includes(n.kind)))
@@ -2662,7 +2654,7 @@
     ok('파생 엣지는 모두 규칙 이름을 달고 있다',
       derived.length === 4 && derived.every((e) => !!e.props.derived_by),
       derived.map((e) => e.props.derived_by).join(' '))
-    ok('빌드해 둔 fixtures/extracted-graph.json 이 지금 결과와 같다',
+    ok('빌드해 둔 app-walkthrough/data/extracted-graph.json 이 지금 결과와 같다',
       JSON.stringify({ nodes: built.nodes, edges: built.edges }) === JSON.stringify(extracted))
 
     // story-graph.html 의 loadMock() 이 하는 검사 그대로
@@ -2707,7 +2699,7 @@
 
     const liveSeeds = findSeeds(store)
     ok('탐지기가 씨앗을 4개 이상 찾는다', liveSeeds.length >= 4, String(liveSeeds.length))
-    ok('씨앗 모양이 mock/seeds.json 과 같다', (() => {
+    ok('씨앗 모양이 app-walkthrough/data/seeds.json 과 같다', (() => {
       const want = Object.keys(seeds[0]).sort().join(',')
       return liveSeeds.every((s) => Object.keys(s).sort().join(',') === want)
     })(), Object.keys(liveSeeds[0]).sort().join(','))
@@ -2725,12 +2717,12 @@
       const got = liveSeeds.filter((s) => s.probe === 'dangling_consequence')
       return got.some((s) => s.focus.includes('honmoon_crack')) && got.some((s) => s.focus.includes('jinu_deal'))
     })())
-    ok('가장 높은 씨앗은 mock/seeds.json 과 같은 점수대다',
+    ok('가장 높은 씨앗은 app-walkthrough/data/seeds.json 과 같은 점수대다',
       liveSeeds[0].score >= 1.2 && liveSeeds[0].score <= 2, String(liveSeeds[0].score))
     ok('목 씨앗도 같은 모양이다',
       seeds.every((s) => typeof s.probe === 'string' && typeof s.score === 'number' && Array.isArray(s.focus)))
 
-    ok('mock/stories.json 이 normalizeStory 를 그대로 통과한다', (() => {
+    ok('app-walkthrough/data/stories.json 이 normalizeStory 를 그대로 통과한다', (() => {
       const got = stories.map((st) => normalizeStory(st))
       return got.every((st) => st.warnings.length === 0 && st.branches.length === 3
         && st.branches.every((b) => b.beats.length >= 3 && Object.keys(b.outcome).length > 0
@@ -2752,7 +2744,7 @@
       return ctx.includes('[씨앗]') && ctx.includes('[구조적 결함]') && ctx.length < 4000
     })())
 
-    // ── canon + mock/stories.json 의 역기입을 실제로 얹어 본다 ────────────────
+    // ── canon + app-walkthrough/data/stories.json 의 역기입을 실제로 얹어 본다 ────────────────
     const mockStories = stories.map((st) => normalizeStory(st))
     const fresh = () => createGraphStore(canon)
     const seedSig = (list) => list.map((s) => `${s.probe}:${s.focus.join('+')}`).sort().join(',')
@@ -2813,7 +2805,7 @@
     })())
 
   } catch (err) {
-    ok(`mock/fixtures 를 읽지 못했다 — HTTP 로 열어야 한다 (${err.message})`, false)
+    ok(`목데이터 를 읽지 못했다 — HTTP 로 열어야 한다 (${err.message})`, false)
   }
 
   out.insertAdjacentHTML('beforeend',

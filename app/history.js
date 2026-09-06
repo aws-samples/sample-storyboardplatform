@@ -8,7 +8,7 @@
  *   키비주얼  panel.add(keyVisual) · panel.version       원래부터 남기던 것
  *   디벨롭    step.mark                                  이 파일이 새로 정한 것
  *
- * 새 종류를 만들지 않고 step.mark 하나만 더한 이유는, 로그를 읽는 쪽(demo/app.js 의
+ * 새 종류를 만들지 않고 step.mark 하나만 더한 이유는, 로그를 읽는 쪽(app/board.js 의
  * applyOp)이 모르는 kind 를 만나도 그냥 지나가게 되어 있어서입니다. 즉 디벨롭이
  * 남긴 줄이 보드의 판을 흔들지 않습니다. 반대로 이 파일은 모든 kind 를 사람이 읽는
  * 한 줄로 옮깁니다 — 그래서 보드에서 한 일도 홈에서 같이 보입니다.

@@ -2,46 +2,48 @@
  * 상단 탭 네비게이션. 세 화면이 같은 탭 바를 나눠 씁니다.
  *
  * 스타일까지 이 파일이 들고 있습니다. 화면마다 테마가 조금씩 달라도 탭 바만은 한 벌로
- * 보여야 해서, 색을 각 화면 변수에 맡기지 않고 여기서 공통 토큰(demo/theme.css 의
+ * 보여야 해서, 색을 각 화면 변수에 맡기지 않고 여기서 공통 토큰(app/theme.css 의
  * --sb-*)을 직접 읽습니다. 그 파일이 없으면 뒤의 기본값으로 떨어집니다.
  *
  * 화면마다 자기가 처리하는 탭(handled)이 다릅니다.
- *   board.html       board 는 지금 화면, translate 는 준비 중 안내
- *   story-graph.html develop·script 는 지금 화면(안쪽 탭만 갈아탑니다), translate 는 안내
- *   key-visual/      keyvisual 이 지금 화면, translate 는 링크로 보드에 맡깁니다
+ *   board.html       board 가 지금 화면입니다
+ *   story-graph.html develop·script 가 지금 화면입니다(안쪽 탭만 갈아탑니다)
+ *   key-visual.html  keyvisual 이 지금 화면입니다
  * 나머지 탭은 링크라서 그냥 눌러 이동합니다 — 새 탭이 아니라 같은 탭입니다.
  *
- * 홈(/)이 생긴 뒤로 이 바는 얇은 모양(compact)이 기본입니다. 다섯 단계를 설명까지
+ * 홈(/)이 생긴 뒤로 이 바는 얇은 모양(compact)이 기본입니다. 네 단계를 설명까지
  * 붙여 보여주는 일은 홈이 맡고, 각 화면의 이 바는 "지금 어디에 있고 어디로 갈 수
  * 있는지"만 알려주면 됩니다. 설명 줄은 title 로 옮겨 두었습니다 — 지우지 않은 이유는
- * 다섯 탭의 이름만으로는 '대본화'와 '대본 번역'이 잘 구별되지 않기 때문입니다.
+ * 탭 이름만으로는 '스토리 디벨롭'과 '대본화'가 잘 구별되지 않기 때문입니다.
  */
 
 /*
- * 탭 다섯. desc 는 이름 밑에 붙는 한 줄 설명이다.
+ * 탭 넷. desc 는 이름 밑에 붙는 한 줄 설명입니다.
  *
- * href 가 있으면 갈 곳이 있는 탭, soon 이면 아직 화면이 없어 "준비 중" 안내만 뜨는 탭입니다.
+ * 네 탭 모두 갈 곳이 있습니다. 한때 '대본 번역'이 화면 없이 "준비 중" 안내만 띄우는
+ * 다섯 번째 탭으로 있었는데, 없는 기능을 목록에 올려 두면 읽는 사람이 그것까지 이 앱의
+ * 일부로 세게 됩니다. 그래서 탭과 안내 판을 함께 걷어냈습니다 — 단계를 다시 늘릴 때는
+ * 화면이 생긴 뒤에 이 배열에 한 줄 더하면 됩니다.
  *
- * 순서는 이야기가 만들어지는 순서입니다. 시놉시스에서 시작해 대본이 되고, 번역을 거쳐
+ * 순서는 이야기가 만들어지는 순서입니다. 시놉시스에서 시작해 대본이 되고,
  * 그림이 나오고, 마지막에 그것들이 보드에 얹힙니다. 그래서 디벨롭이 맨 앞이고
  * 스토리보드가 맨 뒤입니다 — 보드가 가장 오래된 화면이라 처음에는 맨 앞에 있었는데,
  * 만들어진 순서와 쓰는 순서가 달라 사용자가 거꾸로 읽게 됐습니다.
  *
- * href 는 모두 루트 기준 절대경로입니다. 이 탭 바가 세 깊이에서 그려지기 때문입니다 —
- * 버킷 루트(/), /demo/, /key-visual/ 입니다(infra/lib/storyboard-stack.js 의
- * Web · WebDemo · WebKeyVisual 세 배포). 상대경로로 두면 키 비주얼에서 누를 때
- * /key-visual/story-graph.html 을 찾아 403 이 납니다. 실제로 그랬습니다.
+ * href 는 모두 루트 기준 절대경로이고 파일 이름까지 적습니다. 네 화면이 한 폴더
+ * (app/)에 나란히 있으므로 지금은 상대경로로도 풀립니다만, 절대경로로 두는 편이
+ * 안전합니다. 한때 키 비주얼만 자기 폴더에 따로 있어서 상대경로가 그 폴더 안쪽
+ * (…/story-graph.html)으로 풀려 403 이 났습니다. 실제로 그랬습니다.
  *
- * 그리고 '/key-visual/' 이 아니라 '/key-visual/index.html' 입니다. CloudFront 의
- * defaultRootObject 는 루트 '/' 에만 적용되고 하위 디렉터리에는 적용되지 않습니다.
- * '/key-visual/' 로 두면 403 이 납니다 — 이것도 실제로 그랬습니다. 로컬 개발 서버는
- * 디렉터리를 보면 index.html 을 스스로 찾아주기 때문에 로컬에서는 잡히지 않습니다.
+ * 그리고 디렉터리가 아니라 파일 이름입니다. CloudFront 의 defaultRootObject 는
+ * 루트 '/' 에만 적용되고 하위 디렉터리에는 적용되지 않아서, 디렉터리로 끝나는 주소는
+ * 403 이 납니다 — 이것도 실제로 그랬습니다. 로컬 개발 서버도 배포와 같게
+ * 403 을 돌려줍니다(infra/scripts/serve-local.mjs).
  */
 export const NAV_TABS = [
   { id: 'develop', label: '스토리 디벨롭', desc: '시놉시스 → 대본', href: '/story-graph.html' },
   { id: 'script', label: '대본화', desc: '기존 이야기 → 그래프', href: '/story-graph.html?tab=script' },
-  { id: 'translate', label: '대본 번역', desc: '원본 유지 번역', soon: true },
-  { id: 'keyvisual', label: '키비주얼', desc: '대본 → 씬별 그림', href: '/key-visual/index.html' },
+  { id: 'keyvisual', label: '키비주얼', desc: '대본 → 씬별 그림', href: '/key-visual.html' },
   { id: 'board', label: '스토리보드', desc: '컷 · 그룹 · 콘티 · 승인', href: '/board.html' },
 ]
 
@@ -50,18 +52,14 @@ export const navTab = (id) => NAV_TABS.find((t) => t.id === id) || null
 /*
  * 링크로 그릴 때 쓸 주소.
  *
- * href 가 없는 탭(아직 화면이 없는 것)도 어딘가는 가리켜야 합니다. 그 화면을 직접
- * 처리하지 않는 곳에서는 보드로 보내고, 보드가 ?tab= 을 읽어 "준비 중" 안내를 띄웁니다
- * (demo/app.js 의 openNav). 이 갈래가 없으면 href 가 undefined 인 <a> 가 되어
- * 눌렀을 때 /key-visual/undefined 같은 곳으로 가 404 가 납니다.
+ * 지금은 네 탭 모두 href 가 있어 이 함수는 그것을 그대로 돌려줍니다. 모르는 id 가
+ * 들어오면 홈으로 보냅니다 — 이 갈래가 없으면 href 가 undefined 인 <a> 가 되어
+ * 눌렀을 때 /undefined 같은 곳으로 가 404 가 납니다. 실제로 그랬습니다.
  */
-export const navHref = (id) => navTab(id)?.href || `/board.html?tab=${encodeURIComponent(id)}`
-
-/** 아직 화면이 없는 탭. 누르면 "준비 중입니다" 안내를 보여준다 */
-export const isSoonTab = (id) => !!navTab(id)?.soon
+export const navHref = (id) => navTab(id)?.href || '/'
 
 /**
- * ?tab= 으로 들어온 탭 이름. 모르는 값이면 그 화면의 기본 탭으로 떨어진다.
+ * ?tab= 으로 들어온 탭 이름. 모르는 값이면 그 화면의 기본 탭으로 떨어집니다.
  * @param {string} search - location.search
  * @param {string} fallback - 기본 탭 id
  */
@@ -125,24 +123,10 @@ const CSS = `
   font-size: 12.5px; border-left: 1px solid var(--sb-line, #e4e7ec);
 }
 .navhome:hover { color: var(--sb-accent, #1a56db); }
-
-.soonpage[hidden] { display: none !important; }
-.soonpage {
-  flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: 8px;
-  padding: 48px 24px; background: var(--sb-fill, #f8f9fb); text-align: center;
-}
-.soonpage__eyebrow {
-  font-size: 11.5px; letter-spacing: .14em; color: var(--sb-ink-3, #767f8c); text-transform: uppercase;
-}
-.soonpage__title {
-  font-size: 28px; font-weight: 700; letter-spacing: -.02em; color: var(--sb-ink-2, #5b6472);
-}
-.soonpage__sub { font-size: 13.5px; color: var(--sb-ink-3, #767f8c); }
 `
 
 let styled = false
-/** 탭 바 스타일을 한 번만 꽂는다 */
+/** 탭 바 스타일을 한 번만 꽂습니다 */
 function injectCss(doc) {
   if (styled) return
   styled = true
@@ -150,17 +134,6 @@ function injectCss(doc) {
   el.id = 'navTabsCss'
   el.textContent = CSS
   doc.head.appendChild(el)
-}
-
-/**
- * "준비 중입니다" 안내 한 판. 두 화면이 같은 문구를 쓴다.
- * @param {string} id - 눌린 탭 id
- */
-export function soonMarkup(id) {
-  const t = navTab(id)
-  return `<div class="soonpage__eyebrow">${esc(t ? t.label : '')}</div>
-    <div class="soonpage__title">준비 중입니다</div>
-    <div class="soonpage__sub">이 기능은 곧 추가됩니다</div>`
 }
 
 /**

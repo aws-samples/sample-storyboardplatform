@@ -285,7 +285,7 @@ class GraphStore {
   }
 
   /**
-   * 전체 그래프를 mock/graph.json 모양으로 내보낸다. 명시 엣지가 먼저 온다.
+   * 전체 그래프를 app-walkthrough/data/graph.json 모양으로 내보낸다. 명시 엣지가 먼저 온다.
    * @returns {{nodes: Array, edges: Array}}
    */
   toJSON() {
@@ -413,7 +413,7 @@ function make(src, normalize, net, projectId) {
  * net 을 넘기면 Neptune 을 사실로 두는 저장소가 나온다. 메서드 이름·인자·반환
  * 모양은 인메모리 판과 같고, save()·reload()·flush() 만 더 있다.
  *
- * @param {Object} graphJson - {nodes, edges}. mock/graph.json 과 같은 모양
+ * @param {Object} graphJson - {nodes, edges}. app-walkthrough/data/graph.json 과 같은 모양
  * @param {Object} [opts]
  * @param {boolean} [opts.normalize=true] normalizeGraph 를 한 번 거칠지.
  *        이미 정규화된 데이터면 결과가 같고 경고만 빈 배열로 나온다

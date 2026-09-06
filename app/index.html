@@ -10,12 +10,12 @@
   고르게 합니다.
 
   전에는 이 자리(/)가 스토리보드였습니다. 그런데 스토리보드는 이야기가 다 만들어진
-  뒤에 쓰는 화면입니다. 로그인하자마자 마지막 단계에 떨어지니 앞의 네 단계가 있는 줄
+  뒤에 쓰는 화면입니다. 로그인하자마자 마지막 단계에 떨어지니 앞의 세 단계가 있는 줄
   모르고, 상단 탭 바만으로는 무엇부터 해야 하는지 읽히지 않았습니다. 그래서 보드를
   /board.html 로 옮기고 이 자리에 순서를 보여주는 화면을 두었습니다.
 
   로그인 문이 여기 있습니다. 세션은 sessionStorage 나 localStorage 에 담기고
-  (demo/auth.js 의 KEY = 'sb.auth') 같은 오리진의 다른 화면이 그것을 그대로 읽으므로,
+  (app/auth.js 의 KEY = 'sb.auth') 같은 오리진의 다른 화면이 그것을 그대로 읽으므로,
   여기서 한 번 로그인하면 보드·디벨롭·키비주얼이 다시 묻지 않습니다. 각 화면은 자기
   로그인 문을 그대로 갖고 있어서 주소로 바로 들어가도 막히지 않습니다.
 -->
@@ -103,23 +103,11 @@
   .step__arrow { margin-left: auto; flex: none; color: var(--sb-line-2); font-size: 15px }
   .step__go:hover .step__arrow { color: var(--sb-accent) }
 
-  /* 아직 화면이 없는 단계. 누를 수 없다는 게 눌러 보기 전에 보여야 합니다 */
-  .step--soon .step__go { cursor: default; background: var(--sb-fill); border-style: dashed }
-  .step--soon .step__go:hover {
-    transform: none; box-shadow: none; border-color: var(--sb-line);
-  }
-  .step--soon .step__label, .step--soon .step__desc { color: var(--sb-ink-3) }
-  .step__soon {
-    margin-left: auto; flex: none; font-size: 10.5px; letter-spacing: .06em;
-    color: var(--sb-ink-3); background: var(--sb-bg);
-    border: 1px solid var(--sb-line); border-radius: 999px; padding: 3px 9px;
-  }
-
   .foot { margin-top: 26px; font-size: 12px; line-height: 1.7; color: var(--sb-ink-3) }
   .foot a { color: var(--sb-accent-ink) }
 
   /*
-   * 지나간 일. 목록 자체의 모양(.hist*)은 demo/history.js 가 넣습니다 — 홈과 보드와
+   * 지나간 일. 목록 자체의 모양(.hist*)은 app/history.js 가 넣습니다 — 홈과 보드와
    * 키비주얼이 같은 목록을 보여주므로 화면마다 베껴 두지 않습니다. 여기 있는 것은
    * 그 목록을 이 화면에 앉히는 것과 머리줄뿐입니다.
    */
@@ -144,7 +132,7 @@
   .act__note { margin: 10px 0 0; font-size: 11.5px; line-height: 1.7; color: var(--sb-ink-3) }
   .act[hidden] { display: none }
 
-  /* 처음 온 사람에게 보이는 판. 모양은 demo/onboard.js 가 넣습니다 */
+  /* 처음 온 사람에게 보이는 판. 모양은 app/onboard.js 가 넣습니다 */
   .onbslot { margin-top: 34px }
   .onbslot[hidden] { display: none }
 

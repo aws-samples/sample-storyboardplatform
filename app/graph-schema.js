@@ -1,14 +1,14 @@
 
 // 관계 그래프의 어휘와 파생 규칙.
 //
-// 여기서 다루는 것은 mock/graph.json 과 똑같은 모양의 관계 그래프다.
+// 여기서 다루는 것은 app-walkthrough/data/graph.json 과 똑같은 모양의 관계 그래프다.
 //   노드  {id, kind, name, props}
 //   엣지  {s, p, o, asserted, derived?, props}
 // 스키마 선언·공리·추론기가 있는 진짜 온톨로지는 별도 Python PoC(issue #1) 쪽이고,
 // 이 파일은 그 대신 스토리 씨앗을 찾는 데 필요한 만큼만 패턴으로 훑는다.
 
 /**
- * 엣지 술어(p) 어휘. mock/graph.json 과 mock/stories.json 의 역기입 엣지에서
+ * 엣지 술어(p) 어휘. app-walkthrough/data/graph.json 과 app-walkthrough/data/stories.json 의 역기입 엣지에서
  * 실제로 쓰이는 값들이다. 여기 없는 술어는 normalizeGraph 가 떨어뜨린다.
  * dir: 'out' 은 단방향, 'sym' 은 양방향으로 읽는 관계.
  */
@@ -59,7 +59,7 @@ const RELS = {
 }
 
 /**
- * 노드 종류. Object 는 mock/stories.json 의 역기입에서 쓰이므로 함께 허용한다.
+ * 노드 종류. Object 는 app-walkthrough/data/stories.json 의 역기입에서 쓰이므로 함께 허용한다.
  */
 const KINDS = {
   Character: '인물. 이름으로 불리는 사람·존재',
@@ -148,7 +148,7 @@ export function deriveEdges(nodes, edges) {
   const out = []
   const seen = new Set()
 
-  // rule: 규칙 이름, tag: mock/graph.json 의 derived 값과 같은 계열 이름
+  // rule: 규칙 이름, tag: app-walkthrough/data/graph.json 의 derived 값과 같은 계열 이름
   const add = (s, p, o, rule, tag, tension, extra = {}) => {
     if (!s || !o || s === o) return
     const e = { s, p, o }

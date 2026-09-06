@@ -14,7 +14,7 @@ import { SEED_ART } from './seed-art.js'
 import { connect } from './net.js'
 import { configured, idToken, session, logout } from './auth.js'
 import { showLogin } from './login.js'
-import { mountNav, soonMarkup, isSoonTab, navTabFromSearch } from './nav-tabs.js'
+import { mountNav } from './nav-tabs.js'
 import * as coach from './coach.js'
 import { emptyPanel, play as playExample, playing } from './onboard.js'
 import { entries, group, paintList } from './history.js'
@@ -3155,29 +3155,9 @@ byId('print').addEventListener('click', () => window.print())
 
 // ── 상단 기능 탭 ─────────────────────────────────────────────────────────────
 // 스토리보드는 이 화면이고, 스토리 디벨롭·대본화는 story-graph.html, 키비주얼은
-// /key-visual/ 로 넘어간다(모두 링크). 대본 번역만 아직 화면이 없어서 보드 자리에
-// 안내를 띄운다 — 그래서 handled 에 board 와 translate 만 남는다. keyvisual 을
-// 여기 넣으면 버튼이 되어 눌러도 이동하지 않고 빈 안내만 뜬다.
-{
-  const soon = byId('soon')
-  const work = document.querySelector('.work')
-  const openNav = (id) => {
-    const later = isSoonTab(id)
-    setHtml(soon, later ? soonMarkup(id) : '')
-    soon.hidden = !later
-    work.hidden = later
-  }
-  // ?tab= 은 아직 화면이 없는 탭에만 쓴다. 나머지는 이 화면의 기본인 스토리보드다
-  const asked = navTabFromSearch(location.search, 'board')
-  const first = isSoonTab(asked) ? asked : 'board'
-  mountNav({
-    mount: byId('navMount'),
-    active: first,
-    handled: ['board', 'translate'],
-    onSelect: openNav,
-  })
-  openNav(first)
-}
+// key-visual.html 로 넘어갑니다(모두 링크). 그래서 handled 에는 board 하나만 남습니다.
+// keyvisual 을 여기 넣으면 버튼이 되어 눌러도 이동하지 않습니다.
+mountNav({ mount: byId('navMount'), active: 'board', handled: ['board'] })
 
 let picking = false
 

@@ -387,7 +387,7 @@ const tensionOf = (v) => {
 }
 
 /**
- * 모델이 뽑아온 그래프 JSON을 검사하고 mock/graph.json 모양으로 맞춘다.
+ * 모델이 뽑아온 그래프 JSON을 검사하고 app-walkthrough/data/graph.json 모양으로 맞춘다.
  * 여기를 통과한 것만 판에 올린다. 잘못된 입력이 보드 상태를 더럽히면 안 된다.
  *
  * 하는 일
@@ -634,15 +634,15 @@ const wbEdges = (list, warnings, label) => {
 }
 
 /**
- * 모델이 만든 분기 스토리를 검사하고 mock/stories.json 모양으로 맞춘다.
+ * 모델이 만든 분기 스토리를 검사하고 app-walkthrough/data/stories.json 모양으로 맞춘다.
  * normalizeGraph 와 같은 자리에서 같은 일을 한다: 뷰어에 올릴 수 있는 것만 통과시키고,
  * 버린 것은 warnings 로 남겨 화면에 띄운다.
  *
- * 받아 주는 별칭 (지시서 스키마 ↔ mock/stories.json 스키마)
+ * 받아 주는 별칭 (지시서 스키마 ↔ app-walkthrough/data/stories.json 스키마)
  *   label ← title / tone ← subtitle / premise ← summary / outcome ← consequence
  *   writeback.nodes ← add_nodes / writeback.edges ← add_edges / writeback.remove_edges ← remove
  *
- * beats 는 문자열(mock/stories.json)과 {scene, action, secs, cast} 객체를 모두 받는다.
+ * beats 는 문자열(app-walkthrough/data/stories.json)과 {scene, action, secs, cast} 객체를 모두 받는다.
  * 객체로 온 것은 구조를 지켜 준다 — 다음 단계에서 컷으로 펼칠 때 쓴다.
  *
  * @param {Object} raw - 모델이 준 {title, logline, pivot, branches}

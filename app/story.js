@@ -146,7 +146,7 @@ const knownLines = (known) => {
 
 /**
  * 대본·시놉시스 텍스트에서 관계 그래프를 뽑는 프롬프트.
- * 출력 모양은 mock/graph.json 과 같아야 한다. 그래야 뷰어가 그대로 읽는다.
+ * 출력 모양은 app-walkthrough/data/graph.json 과 같아야 한다. 그래야 뷰어가 그대로 읽는다.
  *
  * @param {string} text - 대본 전문 또는 시놉시스 (한국어)
  * @param {Object} [ctx]
@@ -348,7 +348,7 @@ export async function summarizeForExtraction(net, source, ctx = {}) {
 }
 
 /**
- * 텍스트에서 그래프를 뽑아 mock/graph.json 과 같은 모양으로 돌려준다.
+ * 텍스트에서 그래프를 뽑아 app-walkthrough/data/graph.json 과 같은 모양으로 돌려준다.
  * 뽑은 것(asserted)에 deriveEdges 의 파생 엣지를 붙여서 준다.
  *
  * 텍스트가 SUMMARY_MIN 자 이상이면 두 단계로 돈다 — 먼저 요약해서 줄이고, 그
@@ -443,7 +443,7 @@ export function commitGraph(canon, next) {
 }
 
 // ── 씨앗 → 분기 스토리 ────────────────────────────────────────────────────────
-// 컨텍스트 팩(씨앗 주변 서브그래프를 텍스트로 편 것) → 분기 프롬프트 → mock/stories.json
+// 컨텍스트 팩(씨앗 주변 서브그래프를 텍스트로 편 것) → 분기 프롬프트 → app-walkthrough/data/stories.json
 // 모양의 결과. 자유 입력은 같은 자리에 기획자의 방향만 얹는다.
 
 /** 컨텍스트 팩에 넣는 노드 상한. 씨앗 주변만 보면 되니 전체를 넣지 않는다 */
@@ -627,7 +627,7 @@ const branchRules = (existingGraph) => {
 
 /**
  * 씨앗 하나로 분기 3개를 만드는 프롬프트. outlinePrompt/cutsPrompt 와 같은 호출 계약이다.
- * 출력 JSON 은 mock/stories.json 의 스토리 하나와 같은 모양이다.
+ * 출력 JSON 은 app-walkthrough/data/stories.json 의 스토리 하나와 같은 모양이다.
  *
  * @param {Object|null} seed - 씨앗
  * @param {string} contextPack - contextPackPrompt 의 반환값
@@ -731,10 +731,10 @@ function finishStory(raw, seed, store, { local = false } = {}) {
  * @param {Object|null} seed - findSeeds 가 준 씨앗
  * @param {Object} store - GraphStore
  * @param {Object} [opts]
- * @param {Array} [opts.pool] 로컬 폴백에 쓸 스토리 묶음 (mock/stories.json)
+ * @param {Array} [opts.pool] 로컬 폴백에 쓸 스토리 묶음 (app-walkthrough/data/stories.json)
  * @param {Function} [opts.onTry] 시도마다 (몇 번째, 전체) 를 받는다 — 화면에 진행을 남길 때 쓴다
  * @param {string} [opts.model] 쓸 모델 ('haiku-4.5' | 'sonnet-5' | 'opus-4.8')
- * @returns {Promise<Object>} mock/stories.json 의 스토리 하나와 같은 모양 + {warnings, local}
+ * @returns {Promise<Object>} app-walkthrough/data/stories.json 의 스토리 하나와 같은 모양 + {warnings, local}
  */
 export async function planBranches(net, seed, store, opts = {}) {
   if (!net?.plan) return localBranches(seed, store, opts.pool)
@@ -1069,7 +1069,7 @@ function dummyStory(seed, store, direction) {
  *
  * @param {Object|null} seed - 씨앗
  * @param {Object} store - GraphStore
- * @param {Array} [pool] - mock/stories.json 처럼 {probe, focus, branches} 를 가진 스토리 묶음
+ * @param {Array} [pool] - app-walkthrough/data/stories.json 처럼 {probe, focus, branches} 를 가진 스토리 묶음
  * @param {string} [direction] - 자유 입력 방향. 있으면 목데이터를 쓰지 않는다
  * @returns {Object} planBranches 와 같은 모양 (local: true)
  */
@@ -1141,7 +1141,7 @@ const writebackLines = (writeback) => {
  * 나온 spec 은 planCuts 가 그대로 읽고, prompt 에 분기 내용이 다 들어가 있어서
  * 급하면 기존 outlinePrompt 에 넣어도 뜻이 통한다.
  *
- * @param {Object} branch - planBranches 가 준 분기 하나 (mock/stories.json 의 branch 스키마)
+ * @param {Object} branch - planBranches 가 준 분기 하나 (app-walkthrough/data/stories.json 의 branch 스키마)
  * @param {Object} [options]
  * @param {'next'|'spin'} [options.mode='next'] 새 회차인지 스핀오프인지. 'new' 는 쓰지 않는다
  * @param {string} [options.genre] 장르. 없으면 GENRES[0]
@@ -1315,7 +1315,7 @@ const DERIVED_ONLY = new Set(GRAPH_SCHEMA.derivedRels)
 
 /**
  * 역기입의 세 목록을 꺼낸다.
- * mock/stories.json 스키마({nodes, edges, remove_edges})와 지시서 스키마
+ * app-walkthrough/data/stories.json 스키마({nodes, edges, remove_edges})와 지시서 스키마
  * ({add_nodes, add_edges, remove_edges})를 둘 다 받는다.
  */
 function wbParts(writeback) {
