@@ -39,7 +39,8 @@
   } = await import(`./nav-tabs.js?t=${Date.now()}`)
   const { MARK, markOp, toEntry, entries, group, when, paintList,
   } = await import(`./history.js?t=${Date.now()}`)
-  const { emptyPanel, play, playing, stop: stopPlay } = await import(`./onboard.js?t=${Date.now()}`)
+  const { emptyPanel, guide, guiding, guideAt, stop: stopGuide,
+  } = await import(`./onboard.js?t=${Date.now()}`)
   const coach = await import(`./coach.js?t=${Date.now()}`)
 
   const out = document.getElementById('out')
@@ -1597,7 +1598,7 @@
   ok('목록의 CSS 는 한 번만 넣는다', document.querySelectorAll('#histCss').length === 1)
   ok('mount 가 없어도 던지지 않는다', (() => { paintList(null, []); return true })())
 
-  /* ══ onboard.js: 빈 화면 안내와 예시 재생기 ══════════════════════════════ */
+  /* ══ onboard.js: 빈 화면 안내와 예시 길잡이 ══════════════════════════════ */
 
   ok('빈 화면 안내에 큰 줄과 설명이 들어간다', (() => {
     const p = emptyPanel({ eyebrow: '스토리 디벨롭', lines: ['한 줄', '두 줄'], onExample: () => {} })
@@ -1635,74 +1636,163 @@
     emptyPanel({ onExample: () => {}, warn: '예시 내용도 서버에 남습니다.' })
       .querySelector('.onb__warn').textContent.includes('서버에 남습니다'))
 
-  ok('재생기는 띠를 세우고 첫 단계를 적는다', await (async () => {
-    const ran = []
-    const h = play({ steps: [
-      { say: '예시 시놉시스를 넣습니다', sub: '케데헌', ms: 1, run: () => ran.push(1) },
-      { say: '그래프를 뽑습니다', ms: 1, run: () => ran.push(2) },
+  /*
+   * 길잡이는 타이머로 넘어가지 않는다. 그래서 검사도 시간을 재지 않고 「눌렀는가」만 본다 —
+   * 예전 검사는 ms 를 기다렸다가 넘어갔는지를 봤고, 그건 지금은 있어서는 안 되는 동작이다.
+   *
+   * 짚을 자리를 만들어 두고 검사한다. 자리를 못 찾는 경우도 따로 본다.
+   */
+  const gStage = document.createElement('div')
+  gStage.innerHTML = '<button data-coach="gone">한 번째</button><button data-coach="gtwo">두 번째</button>'
+  document.body.appendChild(gStage)
+  const gSpot = (k) => document.querySelector(`[data-coach="${k}"]`)
+
+  ok('길잡이는 띠를 세우고 첫 단계를 적고 그 자리에 테를 두른다', (() => {
+    const h = guide({ steps: [
+      { say: '예시 시놉시스를 넣습니다', sub: '케데헌', spot: 'gone' },
+      { say: '그래프를 뽑습니다', spot: 'gtwo' },
     ] })
     const bar = document.querySelector('.onbbar')
     const shape = !!bar && bar.getAttribute('role') === 'status'
       && bar.querySelector('.onbbar__n').textContent === '1 / 2'
       && bar.querySelector('.onbbar__say b').textContent === '예시 시놉시스를 넣습니다'
       && bar.querySelector('.onbbar__say small').textContent === '케데헌'
-    const on = playing()
-    await new Promise((r) => setTimeout(r, 500))
-    const done = !playing() && !document.querySelector('.onbbar') && ran.join() === '1,2'
-    h?.stop?.()
-    return shape && on && done
+    const lit = gSpot('gone').classList.contains('onb-spot') && !gSpot('gtwo').classList.contains('onb-spot')
+    const on = guiding() && guideAt() === 0
+    stopGuide()
+    return shape && lit && on
   })())
-  ok('두 번 겹쳐 재생하지 않는다', await (async () => {
-    play({ steps: [{ say: 'A', ms: 40 }] })
-    const second = play({ steps: [{ say: 'B', ms: 40 }] })
+  /*
+   * 저 혼자 넘어가지 않는다는 것을 검사한다. 이 한 줄이 자동 재생으로 되돌아가는 것을 막는다 —
+   * 기다려도 단계가 돌지 않아야 하고, 사람이 누를 때만 돌아야 한다.
+   */
+  ok('기다려도 저 혼자 넘어가지 않는다', await (async () => {
+    const ran = []
+    guide({ steps: [{ say: 'A', spot: 'gone', run: () => ran.push(1) }, { say: 'B', spot: 'gtwo' }] })
+    await new Promise((r) => setTimeout(r, 120))
+    const still = guiding() && guideAt() === 0 && !ran.length
+    stopGuide()
+    return still
+  })())
+  /* 짚은 자리를 누르면 그 단계가 돌고 다음 자리로 옮겨간다. 이게 이 파일의 본 동작이다 */
+  ok('짚은 자리를 누르면 그 단계가 돌고 다음 자리로 옮겨간다', await (async () => {
+    const ran = []
+    guide({ steps: [
+      { say: 'A', spot: 'gone', run: () => ran.push(1) },
+      { say: 'B', spot: 'gtwo', run: () => ran.push(2) },
+    ] })
+    gSpot('gone').click()
+    await new Promise((r) => setTimeout(r, 0))
+    const moved = ran.join() === '1' && guideAt() === 1
+      && gSpot('gtwo').classList.contains('onb-spot')
+      && !gSpot('gone').classList.contains('onb-spot')
+    stopGuide()
+    return moved
+  })())
+  /*
+   * 짚은 자리의 원래 동작은 돌지 않아야 한다. 이 자리들은 실제로 Bedrock·GPU 를 부르는
+   * 버튼이라서, 예시 클릭이 그 핸들러에 닿으면 안내 중에 왕복이 시작된다.
+   */
+  ok('짚은 자리의 원래 동작은 돌지 않는다', await (async () => {
+    const hit = []
+    const b = gSpot('gone')
+    b.onclick = () => hit.push('real')
+    guide({ steps: [{ say: 'A', spot: 'gone', run: () => hit.push('step') }] })
+    b.click()
+    await new Promise((r) => setTimeout(r, 0))
+    b.onclick = null
+    return hit.join() === 'step'
+  })())
+  /* 짚은 자리가 아닌 곳을 눌러도 단계가 돌지 않는다 — 잘못 누른 것으로 넘어가면 안 된다 */
+  ok('짚지 않은 자리를 눌러도 넘어가지 않는다', await (async () => {
+    const ran = []
+    guide({ steps: [{ say: 'A', spot: 'gone', run: () => ran.push(1) }, { say: 'B' }] })
+    gSpot('gtwo').click()
+    await new Promise((r) => setTimeout(r, 0))
+    const still = !ran.length && guideAt() === 0
+    stopGuide()
+    return still
+  })())
+  /* 띠의 버튼도 같은 길이다. 자리를 못 찾는 단계는 이 버튼만으로 넘어간다 */
+  ok('띠의 버튼으로도 그 단계를 실행한다', await (async () => {
+    const ran = []
+    guide({ steps: [{ say: 'A', run: () => ran.push(1) }, { say: 'B', spot: 'gtwo' }] })
+    const label = document.querySelector('.onbbar__btn').textContent
+    document.querySelector('.onbbar__btn').click()
+    await new Promise((r) => setTimeout(r, 0))
+    const moved = ran.join() === '1' && guideAt() === 1
+    stopGuide()
+    return label === '다음' && moved
+  })())
+  /* spot 을 CSS 선택자로도 준다 — data-coach 를 못 붙이는 자리가 있다 */
+  ok('짚을 자리를 CSS 선택자로도 준다', (() => {
+    guide({ steps: [{ say: 'A', spot: '[data-coach="gtwo"]' }] })
+    const lit = gSpot('gtwo').classList.contains('onb-spot')
+    stopGuide()
+    return lit
+  })())
+  /* 마지막 단계를 실행하면 스스로 끝난다. onDone 은 그 길도 지나야 한다 */
+  ok('마지막 단계를 실행하면 끝나고 테도 걷힌다', await (async () => {
+    let done = false
+    guide({ steps: [{ say: '끝', spot: 'gone' }], onDone: () => { done = true } })
+    gSpot('gone').click()
+    await new Promise((r) => setTimeout(r, 0))
+    return done && !guiding() && !document.querySelector('.onbbar')
+      && !gSpot('gone').classList.contains('onb-spot')
+  })())
+  ok('두 번 겹쳐 안내하지 않는다', (() => {
+    guide({ steps: [{ say: 'A', spot: 'gone' }] })
+    const second = guide({ steps: [{ say: 'B' }] })
     const one = document.querySelectorAll('.onbbar').length === 1
-    stopPlay()
-    return second === null && one && !playing()
+    stopGuide()
+    return second === null && one && !guiding()
   })())
   ok('단계가 없으면 띠를 세우지 않고 바로 끝낸다', (() => {
     let done = false
-    const h = play({ steps: [], onDone: () => { done = true } })
-    return h === null && done && !document.querySelector('.onbbar') && !playing()
+    const h = guide({ steps: [], onDone: () => { done = true } })
+    return h === null && done && !document.querySelector('.onbbar') && !guiding()
   })())
   /*
-   * 멈출 수 없는 자동 재생은 안내가 아니라 방해다. 그리고 끝까지 돌아도, 건너뛰어도
+   * 그만둘 수 없는 안내는 안내가 아니라 방해다. 그리고 끝까지 가도, 중간에 그만둬도
    * onDone 을 한 번은 지나야 한다 — 화면이 그걸로 안내 판을 다시 그린다.
    */
-  ok('「예시 끝내기」로 중간에 그만두면 남은 단계는 돌지 않는다', await (async () => {
+  ok('「예시 끝내기」로 그만두면 남은 단계는 돌지 않는다', await (async () => {
     const ran = []
     let done = false
-    play({
-      steps: [{ say: 'A', ms: 5000, run: () => ran.push(1) }, { say: 'B', ms: 10, run: () => ran.push(2) }],
+    guide({
+      steps: [{ say: 'A', spot: 'gone', run: () => ran.push(1) }, { say: 'B', run: () => ran.push(2) }],
       onDone: () => { done = true },
     })
-    await new Promise((r) => setTimeout(r, 30))
     document.querySelector('.onbbar__btn--go').click()
-    await new Promise((r) => setTimeout(r, 60))
-    return done && ran.join() === '1' && !playing() && !document.querySelector('.onbbar')
+    await new Promise((r) => setTimeout(r, 0))
+    return done && !ran.length && !guiding() && !document.querySelector('.onbbar')
+      && !gSpot('gone').classList.contains('onb-spot')
   })())
-  ok('「잠시 멈춤」은 눌린 상태와 이름이 함께 바뀐다', await (async () => {
-    play({ steps: [{ say: 'A', ms: 4000 }] })
-    const b = document.querySelector('.onbbar__btn')
-    b.click()
-    const paused = b.textContent === '이어서' && b.getAttribute('aria-pressed') === 'true'
-    b.click()
-    const resumed = b.textContent === '잠시 멈춤' && b.getAttribute('aria-pressed') === 'false'
-    stopPlay()
-    await new Promise((r) => setTimeout(r, 20))
-    return paused && resumed
-  })())
-  /* 한 단계가 걸려도 재생이 그 자리에 멈춰 서면 안 된다 — 다음 단계로 넘어간다 */
-  ok('단계 하나가 걸려도 나머지는 계속 돈다', await (async () => {
+  /* 한 단계가 걸려도 안내가 그 자리에 멈춰 서면 안 된다 — 다음 단계로 넘어간다 */
+  ok('단계 하나가 걸려도 다음으로 넘어간다', await (async () => {
     const ran = []
-    play({ steps: [
-      { say: 'A', ms: 1, run: () => { throw new Error('일부러') } },
-      { say: 'B', ms: 1, run: () => ran.push(2) },
+    guide({ steps: [
+      { say: 'A', spot: 'gone', run: () => { throw new Error('일부러') } },
+      { say: 'B', spot: 'gtwo', run: () => ran.push(2) },
     ] })
-    await new Promise((r) => setTimeout(r, 400))
-    return ran.join() === '2' && !playing()
+    gSpot('gone').click()
+    await new Promise((r) => setTimeout(r, 0))
+    const moved = guideAt() === 1
+    gSpot('gtwo').click()
+    await new Promise((r) => setTimeout(r, 0))
+    return moved && ran.join() === '2' && !guiding()
   })())
-  ok('돌지 않을 때 stop 을 불러도 던지지 않는다', (() => { stopPlay(); return !playing() })())
-  ok('재생기 CSS 도 한 번만 넣는다', document.querySelectorAll('#onboardCss').length === 1)
+  /* 자리를 못 찾아도 안내가 서야 한다. 없는 자리에 테를 두르느니 띠로만 넘기는 편이 낫다 */
+  ok('짚을 자리를 못 찾아도 안내는 선다', (() => {
+    guide({ steps: [{ say: 'A', spot: '없는자리' }] })
+    const up = guiding() && !!document.querySelector('.onbbar')
+    stopGuide()
+    return up
+  })())
+  ok('돌지 않을 때 stop 을 불러도 던지지 않는다', (() => { stopGuide(); return !guiding() })())
+  ok('안내가 없을 때 guideAt 은 -1 이다', guideAt() === -1)
+  ok('길잡이 CSS 도 한 번만 넣는다', document.querySelectorAll('#onboardCss').length === 1)
+  gStage.remove()
 
   /* ══ coach.js: 막 위로 올려 가리키는 층 ═══════════════════════════════════ */
 
@@ -1841,7 +1931,36 @@
     return document.querySelectorAll('#coachCss').length === 1
   })())
   ok('돌지 않을 때 stop 을 불러도 던지지 않는다', (() => { coach.stop(false); return true })())
+  /*
+   * 꼬리표(tags)는 앵커 위에 떠서 그것이 무엇인지 한 마디로 적는다. 앵커가 없으면
+   * 꼬리표도 붙이지 않아야 한다 — 가리킬 것이 없는 자리에 글자만 뜨면 화면 왼쪽 위에
+   * 이유 없는 말풍선이 하나 앉는다.
+   */
+  ok('꼬리표는 앵커가 있는 것만 붙인다', await (async () => {
+    coach.start({
+      cards: [{ head: 'x', body: 'y', spot: ['one'],
+        tags: [{ on: 'one', text: '있는 자리' }, { on: 'nope', text: '없는 자리' }] }],
+      key: 'sb.test.coach',
+    })
+    await new Promise((r) => setTimeout(r, 40))    // 꼬리표도 draw() 안에서 붙는다 — rAF 를 지난다
+    const tags = [...document.querySelectorAll('.coach__tag')].map((n) => n.textContent)
+    coach.stop(false)
+    return tags.length === 1 && tags[0] === '있는 자리'
+  })())
   cStage.remove()
+
+  /*
+   * 네 화면의 코치마크에 쓰지 않는 말 — 빠르다 · 무한히 확장된다 · 제작 기간이 줄어든다.
+   * 화면에서는 여러 장이 몇 분 걸리고 한 장은 실패하고 장비 한 대가 순서대로 그린다.
+   * 카드가 그렇게 말하면 화면이 그 말을 곧 뒤집는다.
+   */
+  for (const [name, url] of [['키 비주얼', './key-visual.js'], ['스토리보드', './board.js'],
+    ['홈', './home.js'], ['스토리 디벨롭', './story-graph.html']]) {
+    const src = await (await fetch(url)).text()
+    const m = src.match(/const \w+_CARDS = \[([\s\S]*?)\n\]/)
+    const words = ['빠르', '무한', '제작 기간', '단축'].filter((w) => m && m[1].includes(w))
+    ok(`${name} 코치마크에 금칙어가 없다`, !!m && !words.length, words.join(', '))
+  }
 
   // ── net.js: AWSJSON 필드 풀기 ─────────────────────────────────────────────
   // 배포된 리졸버들은 JSON.stringify 한 문자열을 AWSJSON 으로 내보내고 AppSync 가 한 번 더

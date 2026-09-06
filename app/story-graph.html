@@ -518,7 +518,7 @@
 import { createGraphStore, loadGraphStore } from './graph-engine.js'
 import { findSeeds, PROBES } from './graph-probes.js'
 import {
-  planGraph, planBranches, planFreeBranches, scriptToText,
+  planGraph, planBranches, planFreeBranches, localBranches, scriptToText,
   branchToSpec, planBranchOutline, planCuts,
   applyWriteback, validateWritebackBeforeApply,
   planScript, scriptBlob, scriptFileName, SCRIPT_FORMATS,
@@ -530,7 +530,7 @@ import { configured, session, login, setNewPassword, logout } from './auth.js'
 import { DEMO_USERS } from './login.js'
 import { mountNav, navTabFromSearch } from './nav-tabs.js'
 import { entries, group, markOp, paintList } from './history.js'
-import { emptyPanel, play as playExample, playing } from './onboard.js'
+import { emptyPanel, guide as guideExample, guiding } from './onboard.js'
 import * as coach from './coach.js'
 
 const $ = (id) => document.getElementById(id)
@@ -900,15 +900,25 @@ const openTab = (name) => {
 /** 지금 보고 있는 스토리의 캐시 키. 씨앗을 안 골랐으면 자유 입력 자리다 */
 const curKey = () => (CUR.seed >= 0 ? String(CUR.seed) : 'free')
 
-async function pickSeed(i) {
+/**
+ * 씨앗 하나를 골라 분기를 만듭니다.
+ *
+ * @param {number} i - 씨앗 번호
+ * @param {boolean} [local] - true 면 Bedrock 을 부르지 않고 미리 받아 둔 목데이터(POOL)로만
+ *   분기를 세웁니다. 예시 안내가 이 길로 옵니다 — 안내 중에 10~30초짜리 왕복을 끼워 넣으면
+ *   배우는 시간이 아니라 기다리는 시간이 됩니다.
+ */
+async function pickSeed(i, local = false) {
   CUR = { seed: i, branch: 0 }
   EXPAND = null
   renderSeeds()
   openTab('story')
   highlight(SEEDS[i].focus || [])
   if (STORIES.has(String(i))) return renderStory()
-  await generate((onTry) => planBranches(NET, SEEDS[i], STORE, { pool: POOL, onTry, model: MODEL() }),
-    String(i), '분기를 만들고 있습니다')
+  await generate((onTry) => (local
+    ? localBranches(SEEDS[i], STORE, POOL)
+    : planBranches(NET, SEEDS[i], STORE, { pool: POOL, onTry, model: MODEL() })),
+  String(i), '분기를 만들고 있습니다')
   // 씨앗 자체에는 id 가 없다 — seedKey 로 가리킨다. 이어서 하려면 그 씨앗을 다시 찾아야 한다
   const got = STORIES.get(String(i))
   if (got?.branches?.length) {
@@ -1560,36 +1570,42 @@ function paintWelcome() {
     lines: [
       '판이 비어 있습니다. 대본이나 시놉시스를 넣으면 인물·장소·사건이 그래프가 됩니다.',
       '그 그래프에서 탐지기 12종이 이야기 씨앗을 찾고, 씨앗 하나가 분기 → 개요 → 컷 → 대본으로 펼쳐집니다.',
-      '어떻게 도는지 먼저 보시려면 예시를 재생해 보세요. 케데헌 그래프로 그 순서를 그대로 밟습니다.',
+      '어떻게 도는지 먼저 보시려면 예시를 눌러 보세요. 케데헌 그래프로 그 순서를 한 단계씩 밟습니다.',
     ],
     exampleLabel: '예시 보기',
     onExample: () => runExample(),
     ownLabel: '직접 시작하기',
     onOwn: () => { $('scriptIn')?.focus(); openCoach() },
     warn: NET
-      ? '추출과 생성은 Bedrock 을 부릅니다 — 한 번에 10~30초씩 걸리고, 여기 남는 기록은 같은 보드를 보는 사람에게도 보입니다.'
-      : '로컬 모드입니다 — 추출은 Bedrock 이 필요해 막혀 있고, 분기는 목데이터로 대체됩니다. 예시는 그대로 볼 수 있습니다.',
+      ? '직접 하실 때의 추출과 생성은 Bedrock 을 부릅니다 — 한 번에 10~30초씩 걸리고, 여기 남는 기록은 같은 보드를 보는 사람에게도 보입니다. '
+        + '예시는 미리 받아 둔 데이터만 쓰므로 기다리지 않습니다.'
+      : '로컬 모드입니다 — 직접 하는 추출은 Bedrock 이 필요해 막혀 있습니다. 예시는 미리 받아 둔 데이터만 쓰므로 그대로 볼 수 있습니다.',
   }))
   slot.hidden = false
   slot.classList.toggle('onbslot--wide', !!$('inputCard').hidden)
 }
 
-/** 판에 노드가 있으면 안내를 걷는다. build 와 예시 재생이 같은 자리를 지난다 */
+/** 판에 노드가 있으면 안내를 걷습니다. build 와 예시 안내가 같은 자리를 지납니다 */
 function syncWelcome() {
   const slot = $('onbSlot')
   if (!slot) return
   const empty = !STORE || !STORE.stats().nodes
-  if (empty && !playing()) paintWelcome()
+  if (empty && !guiding()) paintWelcome()
   else slot.hidden = true
 }
 
 /**
- * 예시 재생. 목데이터를 한 번에 쏟지 않고 사람이 손으로 할 순서를 그대로 밟는다 —
- * 대본을 넣고, 그래프를 얹고, 씨앗을 보고, 첫 씨앗의 분기를 만든다. 다 본 뒤에
- * 직접 할 때 같은 자리를 누르게 되는 것이 목적이다.
+ * 예시 안내. 목데이터를 한 번에 쏟지 않고 사람이 손으로 할 순서를 그대로 밟게 합니다 —
+ * 대본을 넣고, 그래프를 얹고, 씨앗을 보고, 첫 씨앗의 분기를 만듭니다. 단계마다 누를
+ * 자리를 짚어 주고 그 자리를 눌러야 넘어갑니다. 다 본 사람은 이미 그 버튼들을 눌러
+ * 본 사람입니다.
  *
- * 분기 생성까지만 간다. 개요·컷·대본은 Bedrock 왕복이 세 번 더 붙어 몇 분이 되고,
- * 그때부터는 보는 것이 아니라 기다리는 것이다. 그 뒤는 직접 누르게 둔다.
+ * 어느 단계도 Bedrock 을 부르지 않습니다. 그래프는 미리 뽑아 둔 것(boot 이 읽는
+ * app-walkthrough/data/)을 얹고, 분기는 pickSeed(0, true) 로 목데이터(POOL)에서
+ * 세웁니다. 예전에는 여기서 planBranches 가 돌아 한 단계에 10~30초가 걸렸는데,
+ * 안내 중의 그 시간은 배우는 시간이 아니라 기다리는 시간입니다.
+ *
+ * 분기까지만 갑니다. 개요·컷·대본은 그 뒤에 직접 누르게 둡니다.
  */
 function runExample() {
   const slot = $('onbSlot')
@@ -1601,7 +1617,7 @@ function runExample() {
     {
       say: '예시 시놉시스를 넣습니다',
       sub: '케이팝 데몬 헌터스 — 세 사람이 노래로 결계를 붙잡고 있는 이야기입니다',
-      ms: 2300,
+      spot: '#scriptIn', go: '이 단계 실행',
       run: async () => {
         try {
           const res = await fetch('/app-walkthrough/data/kdh-synopsis.txt', { cache: 'no-store' })
@@ -1617,9 +1633,9 @@ function runExample() {
     {
       say: '대본에서 그래프를 뽑습니다',
       sub: NET
-        ? '직접 할 때는 [그래프 추출] 이 Bedrock 으로 이 일을 합니다. 예시는 미리 뽑아 둔 결과를 얹습니다'
+        ? '직접 하실 때는 이 버튼이 Bedrock 으로 이 일을 합니다. 예시는 미리 뽑아 둔 결과를 얹으므로 기다리지 않습니다'
         : '로컬 모드에서는 추출이 막혀 있어 미리 뽑아 둔 결과를 얹습니다',
-      ms: 2600,
+      spot: 'extract', go: '이 단계 실행',
       run: async () => {
         await boot()
         if (STORE) mark(`예시 그래프를 얹었습니다 — 노드 ${STORE.stats().nodes}개`)
@@ -1628,23 +1644,23 @@ function runExample() {
     {
       say: '탐지기 12종이 이야기 씨앗을 찾습니다',
       sub: '숨긴 비밀 · 삼각관계 · 체호프의 총 … 인물 사이에 걸린 것을 그래프에서 읽어 냅니다',
-      ms: 2600,
+      spot: 'tabs', go: '이 단계 실행',
       run: () => { openTab('seeds') },
     },
     {
       say: '씨앗 하나에서 분기를 만듭니다',
-      sub: NET ? '고른 모델이 이 씨앗을 세 갈래로 펼칩니다' : '로컬 모드라 목데이터 분기로 대체됩니다',
-      ms: 2000,
-      run: () => (SEEDS.length ? pickSeed(0) : null),
+      sub: '직접 하실 때는 이 버튼이 모델을 부릅니다. 예시는 미리 받아 둔 분기를 그 자리에 세웁니다',
+      spot: '[data-seed="0"]', go: '이 단계 실행',
+      run: () => (SEEDS.length ? pickSeed(0, true) : null),
     },
     {
       say: '여기까지가 예시입니다',
       sub: '분기를 골라 [이 분기로 대본 생성] 을 누르면 개요 → 컷 → 대본으로 이어집니다. 이제 직접 해 보세요',
-      ms: 3000,
+      spot: 'histbox', go: '끝내기',
     },
   ]
 
-  playExample({
+  guideExample({
     steps,
     onDone: () => {
       PLAYING_EXAMPLE = false
@@ -1697,7 +1713,8 @@ const COACH_KEY = 'sb.dev.coach.v1'
 const atTab = () => document.querySelector('.tabs .tab.active')?.dataset.tab || 'seeds'
 
 function openCoach() {
-  if (playing()) return
+  // 예시 안내 중에는 막을 덮지 않습니다. 짚은 자리를 사람이 실제로 눌러야 합니다
+  if (guiding()) return
   // 안내가 탭을 옮겨 놓고 끝난다. 열려 있던 탭으로 되돌려 준다
   const was = atTab()
   coach.start({

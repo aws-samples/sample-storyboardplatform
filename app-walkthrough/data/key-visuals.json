@@ -1,0 +1,75 @@
+{
+  "_note": "예시 안내가 쓰는 키 비주얼 프롬프트입니다. app/key-visual.js 의 SAMPLE 대본을 toScenes 로 나눈 씬 7개(S01~S07)에 맞춰 미리 받아 두었습니다. 모양은 net.plan() 응답과 같아서 normalizeVisuals 가 그대로 검사합니다 — 예시가 실제 경로와 다른 형식을 쓰면 형식이 어긋났을 때를 예시로는 못 잡습니다.",
+  "visuals": [
+    {
+      "scene": "S01",
+      "place": "극장 분장실",
+      "time": "밤",
+      "weather": "",
+      "cast": ["수린"],
+      "beat": "지우던 분장 위에서 손이 멈추는 순간",
+      "framing": "medium, 거울과 인물을 함께 넣고 문틈의 빛을 끝에 남긴다",
+      "prompt": "backstage dressing room at night, a performer seated before a lit mirror, hand paused mid-motion holding a cloth, warm bulb row above the glass, cool corridor light seeping through a gap in the door behind, shallow depth, medium shot"
+    },
+    {
+      "scene": "S02",
+      "place": "본무대",
+      "time": "밤",
+      "weather": "",
+      "cast": [],
+      "beat": "웅성거림이 잦아들고 조명이 한 점으로 좁혀지는 순간",
+      "framing": "wide, 무대 전체와 좁혀지는 광원을 함께 넣는다",
+      "prompt": "empty main stage at night seen from the wings, a single spotlight narrowing to one point on bare boards, dark auditorium beyond, dust suspended in the beam, wide shot, high contrast"
+    },
+    {
+      "scene": "S03",
+      "place": "객석",
+      "time": "밤",
+      "weather": "",
+      "cast": ["무영"],
+      "beat": "빈 좌석 가운데 한 사람만 앉아 있는 순간",
+      "framing": "wide, 좌석의 반복과 그 가운데의 한 사람",
+      "prompt": "vast empty theatre seating at night, rows of folded velvet seats receding, one figure seated alone at the exact centre, faint stage glow from the front, symmetrical wide shot"
+    },
+    {
+      "scene": "S04",
+      "place": "분장실 앞 복도",
+      "time": "새벽",
+      "weather": "",
+      "cast": [],
+      "beat": "반쯤 열린 문에서 찬 빛이 바닥으로 흘러나오는 순간",
+      "framing": "medium wide, 복도의 소실점과 문에서 나온 빛의 띠",
+      "prompt": "narrow backstage corridor before dawn, a door left half open, a band of cold pale light spilling across the floor, worn linoleum and pipework along the ceiling, vanishing point down the hall, medium wide shot"
+    },
+    {
+      "scene": "S05",
+      "place": "극장 옥상",
+      "time": "새벽",
+      "weather": "",
+      "cast": ["수린", "무영"],
+      "beat": "두 사람이 난간에 나란히 서서 아래를 보는 순간",
+      "framing": "wide, 두 사람을 실루엣으로 두고 도시의 하늘을 넓게",
+      "prompt": "rooftop of an old theatre at dawn, two figures standing side by side at a rusted railing looking down, city rooftops and rising haze behind them, silhouettes against a pale sky, wide shot"
+    },
+    {
+      "scene": "S06",
+      "place": "지하 연습실",
+      "time": "낮",
+      "weather": "",
+      "cast": [],
+      "beat": "빛줄기 속의 먼지가 거울 벽에 겹쳐 보이는 순간",
+      "framing": "medium, 거울 벽과 그 앞의 빈 바닥",
+      "prompt": "underground rehearsal room in daytime, full mirrored wall reflecting an empty marley floor, a single shaft of light from a high basement window, dust drifting through the beam, medium shot"
+    },
+    {
+      "scene": "S07",
+      "place": "극장 앞 거리",
+      "time": "낮",
+      "weather": "",
+      "cast": [],
+      "beat": "반쯤 찢긴 포스터 앞을 사람들이 지나가는 순간",
+      "framing": "medium, 포스터를 가운데에 두고 지나가는 사람은 흐리게",
+      "prompt": "street in front of a theatre in daylight, a half torn poster on a wall board at centre frame, passers-by blurred in motion across the foreground, overcast flat light, medium shot"
+    }
+  ]
+}

@@ -16,7 +16,7 @@ import { configured, idToken, session, logout } from './auth.js'
 import { showLogin } from './login.js'
 import { mountNav } from './nav-tabs.js'
 import * as coach from './coach.js'
-import { emptyPanel, play as playExample, playing } from './onboard.js'
+import { emptyPanel, guide as guideExample, guiding } from './onboard.js'
 import { entries, group, paintList } from './history.js'
 
 const ROSTER = [
@@ -1528,7 +1528,7 @@ function welcomePanel() {
     head: '처음 오셨나요?',
     lines: [
       '컷을 만들고, 그림을 붙이고, 리뷰를 받아 승인까지 가는 화면입니다.',
-      '예시를 누르면 15초 브랜드 필름 한 편이 만들어지는 과정이 차례로 돌아갑니다.',
+      '예시를 누르면 15초 브랜드 필름 한 편이 만들어지는 과정을 한 단계씩 눌러 보게 됩니다.',
       '직접 시작하면 왼쪽에 시나리오를 넣고 컷으로 분해하는 것부터입니다.',
     ],
     onExample: () => runExample(),
@@ -1543,9 +1543,21 @@ function welcomePanel() {
 
 let exampleRun = null
 
+/*
+ * 단계마다 짚을 자리. seedBuild 의 표시(marks)와 같은 순서입니다.
+ *
+ * 여기 적힌 자리는 모두 board.html 에 처음부터 있는 것들입니다 — render() 가 다시 그려도
+ * 사라지지 않아야 테가 남습니다. 자리를 못 찾으면 onboard 가 테 없이 넘어갑니다.
+ */
+const EXAMPLE_SPOTS = ['scenario', '#newChar', '#breakdown', 'board']
+
 /**
- * 예시를 영상처럼 돌립니다. op 를 한 번에 밀어 넣지 않고 seedBuild 의 표시(marks)
- * 단위로 나눠 넣어, 시나리오 → 인물 → 컷 → 리뷰 순서가 화면에서 보이게 합니다.
+ * 예시를 클릭에 맞춰 안내합니다. op 를 한 번에 밀어 넣지 않고 seedBuild 의 표시(marks)
+ * 단위로 나눠 넣어, 시나리오 → 인물 → 컷 → 리뷰 순서를 사람이 한 번씩 눌러 보게 합니다.
+ *
+ * 부르는 곳이 세 군데(빈 화면의 버튼·코치마크·직접)라 눌린 자리의 원래 동작은 onboard 가
+ * 막습니다. 예를 들어 「컷으로 분해」를 짚었을 때 눌러도 진짜 분해가 도는 게 아니라 아래
+ * run 이 돕니다 — 예시가 실제 대본을 건드리지 않게 하려는 것입니다.
  */
 function runExample() {
   if (exampleRun) return
@@ -1555,7 +1567,7 @@ function runExample() {
     const from = m.at
     const to = marks[i + 1]?.at ?? ops.length
     return {
-      say: m.say, sub: m.sub, ms: 2100,
+      say: m.say, sub: m.sub, spot: EXAMPLE_SPOTS[i], go: '이 단계 실행',
       run: () => {
         for (const op of ops.slice(from, to)) push(op)
         if (!selectedId) { pickView() }
@@ -1564,11 +1576,12 @@ function runExample() {
     }
   })
   steps.push({
-    say: '여기까지가 예시입니다', ms: 2600,
+    say: '여기까지가 예시입니다',
     sub: '이제 컷을 눌러 오른쪽에서 고치거나, 관리 화면에서 보드를 비우고 직접 시작할 수 있습니다',
+    spot: 'histbox', go: '끝내기',
     run: () => { pickView(); render() },
   })
-  exampleRun = playExample({
+  exampleRun = guideExample({
     steps,
     onDone: () => {
       exampleRun = null
@@ -1612,7 +1625,8 @@ const BOARD_CARDS = [
 const COACH_KEY = 'sb.board.coach.v1'
 
 function openCoach() {
-  if (playing()) return   // 예시가 도는 중에는 막을 덮지 않는다. 화면을 봐야 한다
+  // 예시 안내 중에는 막을 덮지 않습니다. 짚은 자리를 사람이 실제로 눌러야 합니다
+  if (guiding()) return
   coach.start({ cards: BOARD_CARDS, key: COACH_KEY, title: '스토리보드', onDone: render })
 }
 

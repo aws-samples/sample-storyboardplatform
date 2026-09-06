@@ -17,7 +17,8 @@ import { connect } from './net.js'
 import { showLogin } from './login.js'
 import { mountNav } from './nav-tabs.js'
 import * as coach from './coach.js'
-import { emptyPanel, play as playExample, playing } from './onboard.js'
+import { emptyPanel, guide as guideExample, guiding } from './onboard.js'
+import { makeArt } from './art.js'
 import { entries, group, markOp, paintList } from './history.js'
 
 const cfg = window.SB_CONFIG || {}
@@ -217,6 +218,69 @@ function parseJson(text) {
   }
 }
 
+/*
+ * 예시 안내가 쓰는 프롬프트. 미리 받아 둔 것을 읽어 옵니다.
+ *
+ * 응답 모양이 net.plan() 과 같아서 normalizeVisuals 를 그대로 지납니다 — 예시가 실제
+ * 경로와 다른 형식을 쓰면 형식 검사가 예시에서는 한 번도 돌지 않게 됩니다.
+ *
+ * 한 번 읽으면 들고 있습니다. 안내를 두 번 눌러도 다시 받지 않습니다.
+ */
+let SAMPLE_VISUALS = null
+
+async function sampleVisuals() {
+  if (SAMPLE_VISUALS) return SAMPLE_VISUALS
+  const res = await fetch('/app-walkthrough/data/key-visuals.json', { cache: 'no-store' })
+  if (!res.ok) throw new Error(`예시 프롬프트를 읽지 못했습니다 (${res.status})`)
+  SAMPLE_VISUALS = await res.json()
+  return SAMPLE_VISUALS
+}
+
+/** 미리 받아 둔 프롬프트를 씬에 올립니다. 왕복이 없으므로 기다리는 시간이 없습니다 */
+async function fillPromptsFromSample() {
+  const map = normalizeVisuals(await sampleVisuals(), S.scenes.map((s) => s.id))
+  let got = 0
+  for (const s of S.scenes) {
+    const v = map.get(s.id)
+    if (!v) continue
+    Object.assign(s, {
+      prompt: v.prompt,
+      place: v.place || s.place,
+      time: v.time || s.time,
+      weather: v.weather,
+      beat: v.beat,
+      framing: v.framing,
+      cast: v.cast,
+    })
+    got++
+  }
+  wire('g', `예시  ${got}/${S.scenes.length}개 프롬프트 (왕복 없음)`)
+  note(`예시 프롬프트 ${got}개를 올렸습니다`)
+  mark(`예시 프롬프트 ${got}개를 올렸습니다`, { example: true })
+  paint()
+  return got
+}
+
+/**
+ * 예시 그림 한 장. 브라우저가 그립니다 — 생성 서버를 부르지 않습니다.
+ *
+ * 진짜 그림처럼 보이게 하려는 것이 아니라, 그림이 자리에 들어오면 화면이 어떻게
+ * 되는지 보여주려는 것입니다. 그래서 'sketch' 로 그려 「SKETCH」가 찍히고, 큐와 상세는
+ * 예시임을 그대로 적습니다 (j.example). 진짜 생성은 예시를 마친 뒤 직접 누를 때 돕니다.
+ */
+function drawSample(s) {
+  const j = job(s.id)
+  const art = { seed: Number(String(s.id).replace(/\D/g, '')) || 1, mode: 'sketch', prompt: s.prompt }
+  j.status = 'done'
+  j.example = true
+  j.art = art
+  j.url = makeArt(art)
+  j.ms = null
+  j.seed = null
+  j.modelLabel = null
+  paintQueue(); paintBoard()
+}
+
 async function writePrompts() {
   if (!canPlan()) { paint(); return }
   S.busy = 'prompt'; paint()
@@ -307,7 +371,8 @@ async function preload() {
 /** 한 씬 한 장. 실패는 그 씬에만 남는다. */
 async function genOne(s) {
   const j = job(s.id)
-  j.status = 'running'; j.tries++; delete j.err; delete j.code
+  // 예시 그림이 있던 자리라면 그 표시를 지운다. 진짜가 들어오면 예시가 아니다
+  j.status = 'running'; j.tries++; delete j.err; delete j.code; delete j.example; delete j.art
   paintQueue(); paintBoard()
   const t0 = performance.now()
   wire('u', `POST /gen  { scene: "${s.id}", model: "${S.model || '기본'}" }`)
@@ -393,6 +458,17 @@ async function runBatch(ids) {
 
 /* ══ 보드에 붙이기 — publishOp ════════════════════ */
 
+/*
+ * 그림 한 장을 op 에 담을 모양으로. 두 갈래입니다.
+ *
+ *   진짜 생성  src 에 S3 주소가 들어갑니다. 그 주소는 짧습니다.
+ *   예시       art 에 그리는 법만 넣습니다 (app/art.js 의 makeArt 인자). 보는 쪽이
+ *              srcOf 로 그 자리에서 다시 그립니다 — app/board.js 의 예시 데이터와 같은
+ *              방식입니다. 예시 그림은 data: URL 이라 그대로 넣으면 op 하나가 수십 KB 가
+ *              되어 DynamoDB 에 그 덩어리가 쌓입니다.
+ */
+const artFields = (j) => (j.example ? { art: j.art } : { src: j.url })
+
 /** 키 비주얼 한 장을 씬 패널 한 개로 만든다. 컷 패널과 같은 모양이라 같은 방식으로 복제된다. */
 export function opsForBoard(scenes, jobs, actor, newId = uid) {
   const ops = []
@@ -414,7 +490,7 @@ export function opsForBoard(scenes, jobs, actor, newId = uid) {
         status: 'draft', assignee: null, generating: false, current: 0,
         keyVisual: true,
         versions: [{
-          n: 1, src: j.url, source: 'ai', author: actor, ts: now(),
+          n: 1, ...artFields(j), source: 'ai', author: actor, ts: now(),
           prompt: s.prompt,
           gen: { model: j.modelLabel || null, seed: j.seed ?? null, ms: j.ms ?? null, ref: 'none', strength: null },
         }],
@@ -431,7 +507,7 @@ function pushVersion(s, j) {
     id: uid(), ts: now(), actor: S.me?.id || 'local',
     kind: 'panel.version', panelId: j.panelId, scene: s.id,
     version: {
-      n: j.ver, src: j.url, source: 'ai', author: S.me?.id || 'local', ts: now(),
+      n: j.ver, ...artFields(j), source: 'ai', author: S.me?.id || 'local', ts: now(),
       prompt: s.prompt,
       gen: { model: j.modelLabel || null, seed: j.seed ?? null, ms: j.ms ?? null, ref: 'none', strength: null },
     },
@@ -567,7 +643,8 @@ function paintQueue() {
     else mid.append(el('span', 'q__p', s.prompt.slice(0, 74)))
     r.append(mid)
     r.append(el('span', 'q__t',
-      j.status === 'done' ? `${(j.ms / 1000).toFixed(1)}s`
+      // 예시 그림에는 걸린 시간이 없다. 0.0s 라고 적으면 진짜를 그린 것으로 읽힌다
+      j.status === 'done' ? (j.example ? '예시' : `${(j.ms / 1000).toFixed(1)}s`)
         : j.status === 'running' ? '그리는 중'
           : j.status === 'queued' ? '대기'
             : j.status === 'failed' ? '실패' : '—'))
@@ -673,6 +750,7 @@ function step1() {
   const row = el('div', 'row')
   const go = el('button', 'btn btn--go', '씬으로 나누기')
   go.type = 'button'
+  go.dataset.coach = 'split'    // 예시 안내가 짚는 자리입니다
   go.onclick = () => {
     S.scenes = toScenes(S.script)
     S.jobs = {}
@@ -780,6 +858,7 @@ function step2() {
   const go = el('button', 'btn btn--go btn--wide',
     `키 비주얼 생성하기 · ${S.scenes.filter((s) => s.prompt).length}개`)
   go.type = 'button'
+  go.dataset.coach = 'gen'      // 예시 안내가 짚는 자리입니다
   go.disabled = !S.scenes.some((s) => s.prompt)
   go.onclick = () => { S.step = 3; paint(); runBatch() }
   b.append(go)
@@ -944,7 +1023,9 @@ function step4() {
     if (s.beat) add('비트', s.beat)
     if (s.framing) add('프레이밍', s.framing)
     add('상태', j.status === 'done'
-      ? `${(j.ms / 1000).toFixed(1)}s · seed ${j.seed} · ${j.modelLabel || ''}`
+      ? (j.example
+        ? '예시 그림 — 생성 서버를 부르지 않았습니다. 「이 씬만 다시 생성」이 진짜로 그립니다'
+        : `${(j.ms / 1000).toFixed(1)}s · seed ${j.seed} · ${j.modelLabel || ''}`)
       : j.status === 'failed' ? `${j.code || ''} ${j.err}` : '아직 없음')
     d.append(dl)
     const again = el('button', 'btn btn--line btn--wide', '이 씬만 다시 생성')
@@ -989,7 +1070,7 @@ function welcomePanel() {
     head: '처음 오셨나요?',
     lines: [
       '대본을 씬으로 나누고, 씬마다 대표 그림 한 장을 만드는 화면입니다.',
-      '예시를 누르면 대본 넣기 → 씬 나누기 → 프롬프트 → 생성까지 차례로 돌아갑니다.',
+      '예시를 누르면 대본 넣기 → 씬 나누기 → 프롬프트 → 생성까지 네 단계를 직접 눌러 보게 됩니다.',
       '직접 하시려면 왼쪽 칸에 대본을 붙여넣는 것부터입니다.',
     ],
     onExample: () => runExample(),
@@ -997,33 +1078,44 @@ function welcomePanel() {
       $('.script')?.focus()
       openCoach()
     },
-    warn: canGen()
-      ? '예시도 실제로 생성 서버를 씁니다 — 그림이 나오는 데 장당 10초 남짓 걸리고 한 장은 실패할 수 있습니다. '
-        + '보드에 붙이기 전까지는 이 화면 밖으로 나가지 않습니다.'
-      : 'aws-config.js 가 비어 있어 그림은 나오지 않습니다. 예시는 대본을 나누고 프롬프트 칸까지만 채웁니다.',
+    warn: '예시는 미리 받아 둔 데이터만 씁니다 — 문장 모델도 생성 서버도 부르지 않으므로 '
+      + '기다리는 시간이 없고, 그림은 「예시」로 표시된 대신 그림입니다. '
+      + '진짜 그림은 예시를 마친 뒤 「이 씬만 다시 생성」을 누를 때 나옵니다.',
   })
 }
 
 let exampleRun = null
 
 /**
- * 예시를 영상처럼 돌립니다. 사람이 손으로 밟는 순서를 그대로 밟습니다 — 다 본 뒤에
- * 직접 할 때 같은 자리를 누르게 되기 때문입니다.
+ * 예시를 클릭에 맞춰 안내합니다. 사람이 손으로 밟는 순서를 그대로, 그 자리를 실제로
+ * 눌러 가며 밟습니다 — 다 본 사람은 이미 그 버튼들을 눌러 본 사람입니다.
  *
- * 마지막 두 단계(프롬프트·생성)는 서버가 있을 때만 넣습니다. 로컬에서는 눌러도
- * 아무 일이 없는데 「생성합니다」라고 적어 두면 그 자리에서 안내가 거짓이 됩니다.
+ * 네 단계 모두 미리 받아 둔 데이터만 씁니다. 어느 단계도 문장 모델(net.plan)이나 생성
+ * 서버(/gen)를 부르지 않습니다.
+ *
+ * 예전에는 프롬프트 단계가 writePrompts() 로 Bedrock 을, 생성 단계가 runBatch() 로 GPU 를
+ * 불렀습니다. 두 왕복을 합치면 한 번 보는 데 20~40초가 붙고, 한 장은 실패할 수도 있어서
+ * 처음 온 사람이 안내 중에 오류 문구를 먼저 보게 됐습니다. 그래서 예시는 프롬프트를
+ * app-walkthrough/data/key-visuals.json 에서 읽고 그림은 브라우저가 그립니다. 로컬 모드와
+ * 배포 모드가 같은 예시를 보게 된 것도 그 결과입니다 — 갈래를 둘로 나눌 필요가 없어졌습니다.
+ *
+ * 대신 예시 그림은 예시라고 적습니다(job 의 example). 진짜 생성은 예시를 마친 뒤 직접
+ * 「이 씬만 다시 생성」을 누를 때 돕니다.
  */
 function runExample() {
   if (exampleRun) return
+  const blocks = SAMPLE.split(/\n[ \t]*\n/).filter((x) => x.trim()).length
   const steps = [
     {
-      say: '예시 대본을 넣습니다', ms: 1500,
-      sub: '9개 블록 · 극장 하나를 배경으로 한 짧은 대본입니다',
+      say: '예시 대본을 넣습니다', go: '이 단계 실행',
+      sub: `${blocks}개 블록 · 극장 하나를 배경으로 한 짧은 대본입니다`,
+      spot: 'script',
       run: () => { S.script = SAMPLE; S.step = 1; paint() },
     },
     {
-      say: '대본을 씬으로 나눕니다', ms: 2200,
+      say: '대본을 씬으로 나눕니다', go: '이 단계 실행',
       sub: '빈 줄로 블록을 자르고, 슬러그가 같은 인접 블록은 한 씬으로 합칩니다',
+      spot: 'split',
       run: () => {
         S.scenes = toScenes(S.script)
         S.jobs = {}
@@ -1033,43 +1125,33 @@ function runExample() {
         mark(`예시 대본을 씬 ${S.scenes.length}개로 나눴습니다`, { example: true })
       },
     },
-  ]
-
-  if (canPlan()) {
-    steps.push({
-      say: '씬마다 이미지 프롬프트를 받습니다', ms: 1200,
-      sub: '문장 모델이 한 번에 씁니다. 각 줄은 손으로 고칠 수 있습니다',
-      // 끝날 때까지 기다린다. 프롬프트가 없으면 다음 단계에 보낼 것이 없다
-      run: () => writePrompts(),
-    })
-  } else {
-    steps.push({
-      say: '프롬프트는 직접 써야 합니다', ms: 2600,
-      sub: '보드에 연결되지 않아 문장 모델이 없습니다. 배포한 주소에서 열면 여기까지 자동으로 채워집니다',
-      run: () => { S.step = 2; paint() },
-    })
-  }
-
-  if (canGen() && mayGen()) {
-    steps.push({
-      say: '첫 씬 한 장만 그려 봅니다', ms: 1200,
-      sub: '전체는 「전체 다시 생성」으로 돌립니다 — 장당 10초 남짓이라 예시에서는 한 장만 봅니다',
-      run: async () => {
+    {
+      say: '씬마다 이미지 프롬프트를 올립니다', go: '이 단계 실행',
+      sub: '직접 하실 때는 문장 모델이 이 칸을 채웁니다. 예시는 미리 받아 둔 것을 올리므로 기다리지 않습니다',
+      spot: 'prompts',
+      run: () => fillPromptsFromSample(),
+    },
+    {
+      say: '씬마다 그림 한 장을 세웁니다', go: '이 단계 실행',
+      sub: '직접 하실 때는 이 버튼이 생성 서버를 부릅니다 — 장당 10초 남짓입니다. 예시 그림은 그 자리에 바로 들어갑니다',
+      spot: 'gen',
+      run: () => {
         S.step = 3
         paint()
-        const first = S.scenes.find((s) => s.prompt)
-        if (first) await runBatch([first.id])
+        for (const s of S.scenes) if (s.prompt) drawSample(s)
+        mark(`예시 그림 ${doneJobs().length}장을 세웠습니다`, { example: true })
+        paint()
       },
-    })
-  }
+    },
+    {
+      say: '여기까지가 예시입니다', go: '끝내기',
+      sub: '이제 대본을 바꿔 다시 나누거나, 「이 씬만 다시 생성」으로 진짜 그림을 받아 보드에 붙일 수 있습니다',
+      spot: 'histbox',
+      run: () => paint(),
+    },
+  ]
 
-  steps.push({
-    say: '여기까지가 예시입니다', ms: 2800,
-    sub: '이제 대본을 바꿔 다시 나누거나, 전체를 생성해 보드에 붙일 수 있습니다',
-    run: () => paint(),
-  })
-
-  exampleRun = playExample({
+  exampleRun = guideExample({
     steps,
     onDone: () => {
       exampleRun = null
@@ -1128,7 +1210,8 @@ const KV_CARDS = [
 const COACH_KEY = 'sb.kv.coach.v1'
 
 function openCoach() {
-  if (playing()) return   // 예시가 도는 중에는 막을 덮지 않는다. 화면을 봐야 한다
+  // 예시 안내 중에는 막을 덮지 않습니다. 짚은 자리를 사람이 실제로 눌러야 합니다
+  if (guiding()) return
   coach.start({
     cards: KV_CARDS,
     key: COACH_KEY,

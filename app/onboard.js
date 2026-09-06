@@ -1,5 +1,5 @@
 /*
- * 온보딩 — 빈 화면 안내와 「예시 보기」 재생기.
+ * 온보딩 — 빈 화면 안내와 「예시 보기」 길잡이.
  *
  * 두 가지를 맡습니다.
  *
@@ -7,22 +7,27 @@
  *      「처음 오셨나요?」와 두 갈래를 보여줍니다 — 예시를 보거나, 직접 시작하거나.
  *      비어 있지 않으면 이 판을 부르지 않고 화면이 자기 목록을 그립니다.
  *
- *   2) 예시 재생기(play). 대본과 내용을 한 번에 쏟아 넣지 않고 단계를 하나씩
- *      실행하면서 지금 무엇을 하는 중인지 아래 띠에 적습니다. 사람이 손으로 할
- *      순서를 그대로 밟기 때문에, 다 본 뒤에 직접 할 때 같은 자리를 누르게 됩니다.
+ *   2) 예시 길잡이(guide). 누를 자리를 짚어 주고, 사람이 그 자리를 누르면 그 단계가
+ *      실행됩니다. 눌러야 다음으로 갑니다.
  *
- * 재생 중에는 멈추거나 건너뛸 수 있습니다. 멈출 수 없는 자동 재생은 안내가 아니라
- * 방해입니다. 그리고 되돌리기가 없다는 사실을 띠에 적어 둡니다 — 예시 내용은 서버에
- * 남고 같은 보드를 보는 사람에게도 보입니다(app/board.js 의 push 가 net.sendOp 를
- * 부릅니다). 그것을 모른 채 누르게 두지 않습니다.
+ * 예전에는 이것이 타이머로 알아서 넘어가는 재생기였습니다. 그 방식에는 두 가지 문제가
+ * 있었습니다. 화면이 저 혼자 움직이니 사람은 읽는 속도를 자기가 정할 수 없었고, 다 본
+ * 뒤에도 어디를 눌러 그렇게 되었는지는 배우지 못했습니다. 지금은 손이 직접 그 자리를
+ * 지나갑니다 — 예시를 마친 사람은 이미 그 버튼을 눌러 본 사람입니다.
  *
- * 움직임을 줄이겠다고 한 사람에게는 기다리는 시간을 짧게 잡습니다. 단계를 건너뛰지는
- * 않습니다 — 그러면 무엇이 일어났는지 볼 수 없습니다.
+ * 그래서 이 파일에는 타이머가 없습니다. 기다리는 시간도, 「잠시 멈춤」도 없습니다 —
+ * 멈춰 있는 것이 기본이고 사람이 누를 때만 움직이므로 멈출 것이 없습니다. 움직임을
+ * 줄이겠다고 한 사람에게 따로 맞출 것도 없어집니다.
+ *
+ * 단계가 부르는 일은 미리 받아 둔 예시 데이터(app-walkthrough/data/)로만 채웁니다.
+ * 예시에서 Bedrock 이나 생성 서버를 부르지 않습니다 — 한 번에 10~30초씩 걸리는 왕복을
+ * 안내 중에 끼워 넣으면 배우는 시간이 아니라 기다리는 시간이 됩니다. 실제 모델은 예시를
+ * 마친 뒤 직접 누를 때 돕니다.
+ *
+ * 되돌리기가 없다는 사실은 말풍선에 적어 둡니다 — 예시 내용은 서버에 남고 같은 보드를
+ * 보는 사람에게도 보입니다(app/board.js 의 push 가 net.sendOp 를 부릅니다). 그것을 모른
+ * 채 누르게 두지 않습니다.
  */
-
-const REDUCED = (() => {
-  try { return matchMedia('(prefers-reduced-motion: reduce)').matches } catch { return false }
-})()
 
 const CSS = `
 /* ── 빈 화면 안내 ─────────────────────────────── */
@@ -55,9 +60,9 @@ const CSS = `
   margin: 0; font-size: 11.5px; line-height: 1.6; color: var(--sb-ink-3, #767f8c);
 }
 
-/* ── 재생 띠 ──────────────────────────────────── */
-/* 코치마크 막(z-index 90~97)보다 위에 둔다. 재생 중에 코치마크가 뜨더라도
-   멈추는 버튼에는 늘 닿을 수 있어야 한다. */
+/* ── 길잡이 띠 ────────────────────────────────── */
+/* 코치마크 막(z-index 90~97)보다 위에 둔다. 안내 중에 코치마크가 뜨더라도
+   끝내는 버튼에는 늘 닿을 수 있어야 한다. */
 .onbbar {
   position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
   z-index: 99; display: grid; grid-template-columns: auto 1fr auto auto; gap: 12px;
@@ -79,15 +84,34 @@ const CSS = `
   border: 1px solid rgba(255, 255, 255, .28); background: none; color: #fff;
   cursor: pointer; white-space: nowrap;
 }
-.onbbar__btn:hover { background: rgba(255, 255, 255, .14); }
+.onbbar__btn:hover:not(:disabled) { background: rgba(255, 255, 255, .14); }
+.onbbar__btn:disabled { opacity: .45; cursor: default; }
 .onbbar__btn--go { background: #fff; color: var(--sb-ink, #111318); border-color: #fff; font-weight: 600; }
 .onbbar__rail {
   position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
   border-radius: 0 0 var(--sb-r-lg, 10px) var(--sb-r-lg, 10px); overflow: hidden;
   background: rgba(255, 255, 255, .16);
 }
+/* 진행 눈금이 재는 것은 시간이 아니라 몇 번째 단계인지다 — 기다림이 없어졌으므로 */
 .onbbar__fill { height: 100%; width: 0; background: var(--sb-accent, #1a56db); transition: width .18s linear; }
 @media (prefers-reduced-motion: reduce) { .onbbar__fill { transition: none; } }
+
+/* ── 누를 자리 ────────────────────────────────── */
+/*
+ * 코치마크(.coach-lit)와 달리 막을 덮지 않는다. 여기서는 사람이 그 자리를 실제로
+ * 눌러야 하므로 화면 전체를 어둡게 하지 않고 그 자리에만 테를 두른다.
+ * 테는 box-shadow 로 그린다 — outline 이나 border 는 자리를 밀어 화면이 흔들린다.
+ */
+.onb-spot {
+  position: relative; z-index: 2;
+  box-shadow: 0 0 0 3px var(--sb-accent, #1a56db), 0 0 0 9px rgba(26, 86, 219, .18);
+  border-radius: var(--sb-r, 6px);
+  animation: onbPulse 1.6s ease-in-out infinite;
+}
+@keyframes onbPulse {
+  50% { box-shadow: 0 0 0 3px var(--sb-accent, #1a56db), 0 0 0 14px rgba(26, 86, 219, .06); }
+}
+@media (prefers-reduced-motion: reduce) { .onb-spot { animation: none; } }
 `
 
 let styled = false
@@ -155,37 +179,37 @@ export function emptyPanel({
   return box
 }
 
-/* ══ 예시 재생기 ═══════════════════════════════════ */
+/* ══ 예시 길잡이 ═══════════════════════════════════ */
 
 let live = null
 
-/** 지금 예시가 돌고 있는지. 화면이 다시 그려질 때 띠를 덮어쓰지 않게 보는 데 쓴다 */
-export const playing = () => !!live
+/** 지금 예시가 돌고 있는지. 화면이 다시 그려질 때 띠를 덮어쓰지 않게 보는 데 씁니다 */
+export const guiding = () => !!live
+
+/** 지금 몇 번째 단계인지. 0부터입니다. 돌지 않으면 -1 입니다 */
+export const guideAt = () => (live ? live.i : -1)
 
 /*
- * 기다린다. 멈춰 두면 남은 시간이 줄지 않는다.
+ * 선택자 하나를 찾습니다. 못 찾으면 null 입니다.
  *
- * 재는 방식이 setTimeout(ms) 한 번이 아니라 60ms 씩 쪼갠 것인 이유는 「잠시 멈춤」
- * 때문입니다. 한 번에 걸어 두면 멈춰도 그 타이머는 그대로 흘러갑니다.
- *
- * 그만두면 바로 깨어나야 하는데, stop() 이 타이머를 지우고 나면 beat 가 다시 돌지
- * 않아 이 약속이 영구히 매달립니다 — 그래서 깨우는 손잡이(wake)를 live 에 걸어 둡니다.
+ * try 로 감싸는 이유 — 아래 spotOf 가 이름을 먼저 data-coach 선택자에 끼워 봅니다.
+ * 그 이름이 이미 선택자면(예: '[data-seed="0"]') `[data-coach="[data-seed="0"]"]` 이라는
+ * 잘못된 선택자가 되고, querySelector 는 그때 null 을 주지 않고 던집니다. 던지면
+ * showStep 에서 안내가 그 자리에 서 버립니다.
  */
-function tick(ms) {
-  return new Promise((res) => {
-    let left = REDUCED ? Math.min(ms, 360) : ms
-    let last = performance.now()
-    live.wake = res
-    const beat = () => {
-      const t = performance.now()
-      if (!live || live.stopped) return res()
-      if (!live.paused) left -= t - last
-      last = t
-      if (left <= 0) return res()
-      live.timer = setTimeout(beat, 60)
-    }
-    live.timer = setTimeout(beat, 60)
-  })
+function q(sel) {
+  try { return document.querySelector(sel) } catch { return null }
+}
+
+/** 짚을 자리를 찾습니다. data-coach 이름이거나 CSS 선택자입니다 */
+function spotOf(step) {
+  if (!step?.spot) return null
+  return q(`[data-coach="${step.spot}"]`) || q(step.spot)
+}
+
+function unspot() {
+  live?.lit?.classList.remove('onb-spot')
+  if (live) live.lit = null
 }
 
 function paintBar() {
@@ -195,24 +219,76 @@ function paintBar() {
   live.say.textContent = ''
   live.say.append(mk('b', null, s?.say || ''))
   if (s?.sub) live.say.append(mk('small', null, s.sub))
-  live.pause.textContent = live.paused ? '이어서' : '잠시 멈춤'
-  live.pause.setAttribute('aria-pressed', String(live.paused))
-  live.fill.style.width = `${Math.round(((live.i + 1) / live.steps.length) * 100)}%`
+  live.go.textContent = s?.go || (live.lit ? '이 단계 실행' : '다음')
+  live.go.disabled = !!live.busy
+  live.fill.style.width = `${Math.round((live.i / live.steps.length) * 100)}%`
 }
 
 /**
- * 예시를 단계별로 재생합니다.
+ * 한 단계를 화면에 올립니다. 실행하지는 않습니다 — 누를 자리를 짚고 기다립니다.
  *
- * 각 단계는 { say, sub?, ms?, run? } 입니다. run 은 화면을 실제로 바꾸는 함수이고
- * (동기·비동기 둘 다) say 는 지금 무엇을 하는 중인지 띠에 적는 한 줄입니다.
+ * 자리를 못 찾으면 테만 없이 그대로 갑니다. 없는 자리를 짚느니 띠의 버튼으로 넘기게
+ * 두는 편이 낫습니다 — 빈 곳에 테를 두르면 안내가 먼저 신뢰를 잃습니다.
+ */
+function showStep() {
+  if (!live) return
+  unspot()
+  const s = live.steps[live.i]
+  const el = spotOf(s)
+  if (el) {
+    live.lit = el
+    el.classList.add('onb-spot')
+    el.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+  } else if (s?.spot) {
+    console.warn('[onboard] 짚을 자리를 못 찾았습니다 —', s.spot)
+  }
+  paintBar()
+}
+
+/**
+ * 지금 단계를 실행하고 다음으로 넘깁니다. 짚은 자리를 눌러도, 띠의 버튼을 눌러도
+ * 여기 한 곳을 지납니다.
+ *
+ * run 이 비동기인 동안 버튼을 잠급니다. 안 잠그면 두 번 눌러 같은 단계가 두 번 돕니다.
+ */
+async function fire() {
+  if (!live || live.busy) return
+  const s = live.steps[live.i]
+  live.busy = true
+  paintBar()
+  try {
+    await s?.run?.()
+  } catch (e) {
+    console.warn('[onboard] 예시 단계에서 걸렸습니다', e)
+  }
+  if (!live) return
+  live.busy = false
+  if (live.i >= live.steps.length - 1) { stop(); return }
+  live.i += 1
+  showStep()
+}
+
+/**
+ * 예시를 클릭에 맞춰 안내합니다. 타이머가 없습니다 — 사람이 누를 때만 넘어갑니다.
+ *
+ * 각 단계는 { say, sub?, spot?, go?, run? } 입니다.
+ *   say   띠에 적히는 한 줄. 지금 무엇을 하는지
+ *   sub   그 아래 작은 줄
+ *   spot  누를 자리. data-coach 이름이거나 CSS 선택자. 없으면 띠의 버튼으로만 넘어갑니다
+ *   go    띠 버튼의 글자. 기본은 자리가 있으면 「이 단계 실행」, 없으면 「다음」
+ *   run   실제로 화면을 바꾸는 함수. 동기·비동기 둘 다 됩니다
+ *
+ * 짚은 자리를 누르면 그 자리의 원래 동작은 막고 run 을 대신 실행합니다. 예시가 실수로
+ * 진짜 모델 호출에 닿지 않게 하려는 것입니다 — 무슨 일이 일어나는지는 run 한 곳만
+ * 읽으면 됩니다. 자리에 커서를 두어야 하는 단계(대본 칸 같은 것)는 run 에서 focus 를
+ * 부릅니다.
  *
  * @param {object} o
  * @param {Array} o.steps
- * @param {string} o.warn - 띠 왼쪽 아래에 남길 한 줄. 되돌릴 수 없다는 사실 같은 것
- * @param {() => void} o.onDone - 다 돌았거나 그만둔 뒤. 건너뛰기로 끝나도 부른다
+ * @param {() => void} o.onDone - 다 돌았거나 그만둔 뒤. 끝내기로 끝나도 부릅니다
  * @returns {{stop: () => void}|null} 이미 돌고 있으면 null
  */
-export function play({ steps = [], onDone } = {}) {
+export function guide({ steps = [], onDone } = {}) {
   if (live) return null
   if (!steps.length) { onDone?.(); return null }
   injectCss(document)
@@ -222,50 +298,55 @@ export function play({ steps = [], onDone } = {}) {
   bar.setAttribute('aria-live', 'polite')
   const n = mk('span', 'onbbar__n')
   const say = mk('div', 'onbbar__say')
-  const pause = mk('button', 'onbbar__btn', '잠시 멈춤')
-  pause.type = 'button'
-  const skip = mk('button', 'onbbar__btn onbbar__btn--go', '예시 끝내기')
-  skip.type = 'button'
+  const go = mk('button', 'onbbar__btn', '다음')
+  go.type = 'button'
+  const end = mk('button', 'onbbar__btn onbbar__btn--go', '예시 끝내기')
+  end.type = 'button'
   const rail = mk('div', 'onbbar__rail')
   const fill = mk('div', 'onbbar__fill')
   rail.append(fill)
-  bar.append(n, say, pause, skip, rail)
+  bar.append(n, say, go, end, rail)
   document.body.append(bar)
 
-  live = {
-    i: 0, steps, bar, n, say, pause, fill,
-    paused: false, stopped: false, timer: null, wake: null, onDone,
+  live = { i: 0, steps, bar, n, say, go, fill, lit: null, busy: false, onDone }
+  go.onclick = () => fire()
+  end.onclick = () => stop()
+
+  /*
+   * 짚은 자리의 클릭을 document 의 캡처 단계에서 받습니다. 캡처는 target 보다 먼저
+   * 지나가므로 여기서 멈추면 그 자리의 원래 핸들러가 돌지 않습니다.
+   * 띠 안에서 난 클릭은 이 길을 타지 않습니다 — 위의 onclick 이 따로 받습니다.
+   */
+  live.onClick = (e) => {
+    if (!live?.lit || live.bar.contains(e.target)) return
+    if (!live.lit.contains(e.target) && live.lit !== e.target) return
+    e.preventDefault()
+    e.stopPropagation()
+    fire()
   }
-  pause.onclick = () => { live.paused = !live.paused; paintBar() }
-  skip.onclick = () => stop()
+  // 키보드로 짚은 자리에 닿은 사람도 같은 길을 씁니다. 띠의 버튼이 또 하나의 길입니다
+  live.onKey = (e) => {
+    if (!live?.lit || e.key !== 'Enter') return
+    if (!live.lit.contains(e.target) && live.lit !== e.target) return
+    e.preventDefault()
+    e.stopPropagation()
+    fire()
+  }
+  addEventListener('click', live.onClick, true)
+  addEventListener('keydown', live.onKey, true)
 
-  ;(async () => {
-    for (let i = 0; i < steps.length; i++) {
-      if (!live || live.stopped) break
-      live.i = i
-      paintBar()
-      try {
-        await steps[i].run?.()
-      } catch (e) {
-        console.warn('[onboard] 예시 단계에서 걸렸다', e)
-      }
-      if (!live || live.stopped) break
-      await tick(steps[i].ms ?? 1700)
-    }
-    stop()
-  })()
-
+  showStep()
   return { stop }
 }
 
-/** 재생을 끝낸다. 끝까지 돌아도, 건너뛰어도 여기 한 곳을 지난다 */
+/** 안내를 끝냅니다. 끝까지 가도, 중간에 끝내도 여기 한 곳을 지납니다 */
 export function stop() {
   if (!live) return
-  clearTimeout(live.timer)
-  live.stopped = true
+  unspot()
+  removeEventListener('click', live.onClick, true)
+  removeEventListener('keydown', live.onKey, true)
   live.bar.remove()
-  const { onDone, wake } = live
+  const { onDone } = live
   live = null
-  wake?.()      // 기다리던 tick 을 깨워 돌던 for 문이 빠져나가게 한다
   onDone?.()
 }
