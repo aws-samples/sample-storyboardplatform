@@ -286,41 +286,16 @@ aside{
 #feed time{display:block;font:400 10.5px var(--m);color:var(--ink-3);margin-top:1px}
 .feed__none{color:var(--ink-3);font-size:12px;grid-template-columns:1fr!important}
 
-/* ── 코치마크 ─────────────────────────── */
-.coach{position:fixed;inset:0;z-index:90}
-.coach__veil{position:absolute;inset:0;background:rgba(15,20,30,.52)}
-/* 가리킬 것만 막 위로 올린다. 막에 구멍을 겹쳐 뚫으면 겹친 자리가 두 번 어두워진다. */
-.coach-lit{
-  position:relative;z-index:95;background:#fff;
-  box-shadow:0 0 0 3px var(--blue),0 8px 26px rgba(15,20,30,.28);
-}
-.card.coach-lit{border-radius:10px}
-.tab.coach-lit{border-radius:var(--r)}
-.tag.coach-lit{border-radius:4px}
-.coach__tag{
-  position:absolute;z-index:96;font:600 11px/1 var(--f);color:#fff;background:var(--blue);
-  padding:5px 9px;border-radius:4px;white-space:nowrap;pointer-events:none;
-}
-.coach__b{
-  position:absolute;z-index:97;background:#fff;border-radius:10px;padding:16px;
-  box-shadow:0 12px 34px rgba(15,20,30,.3);display:grid;gap:9px;
-}
-.coach__crumb{display:flex;align-items:baseline;gap:8px;font-size:11px;color:var(--ink-3)}
-.coach__n{margin-left:auto;font:500 11px var(--m);color:var(--blue)}
-.coach__h{font-size:16px;font-weight:700;letter-spacing:-.02em;line-height:1.35}
-.coach__p{font-size:13px;color:var(--ink-2);line-height:1.6}
-.coach__p+.coach__p{margin-top:-6px}
-.coach__dots{display:flex;gap:5px;margin-top:2px}
-.dot{width:6px;height:6px;border-radius:50%;background:var(--line);font-style:normal}
-.dot--on{background:var(--blue);width:16px;border-radius:3px}
-.coach__row{display:flex;align-items:center;gap:8px;margin-top:3px}
-.coach__skip{font-size:12.5px;color:var(--ink-3)}
-.coach__skip:hover{color:var(--ink-2);text-decoration:underline}
-.coach__next{
-  margin-left:auto;background:var(--blue);color:#fff;padding:8px 16px;
-  border-radius:var(--r);font-weight:600;font-size:13px;
-}
-.coach__next:hover{background:var(--sb-accent-ink)}
+/* ── 지나간 일 ────────────────────────────
+   목록 자체의 모양(.hist*)은 demo/history.js 가 넣는다. 여기 있는 것은 이 화면의
+   옆 기둥에 맞추는 것뿐이다. */
+.side__h{display:flex;align-items:center;gap:8px}
+.histmine{margin-left:auto;padding:3px 8px;font-size:11px;text-transform:none;letter-spacing:0}
+.histmine[aria-pressed=true]{color:var(--blue);border-color:var(--blue);background:var(--blue-w)}
+
+/* 코치마크 CSS 는 demo/coach.js 가 넣는다. 예전에는 이 파일에 40줄이 있었는데,
+   같은 규칙이 보드와 홈에도 필요해지면서 엔진 쪽으로 옮겼다 — 베껴 두면 한 곳만
+   고쳐도 나머지가 어긋난다. nav-tabs.js · history.js 도 같은 방식이다. */
 
 /* ── 로그인 ───────────────────────────────
    demo/login.js 를 그대로 재사용하지만 스타일은 여기서 새로 쓴다.
@@ -403,6 +378,17 @@ aside{
     <div>
       <p class="side__h">보드에 남은 것</p>
       <ul id="feed"></ul>
+    </div>
+    <!--
+      지나간 일. 목록의 모양과 CSS 는 demo/history.js 가 넣는다 — 보드와 홈이 같은
+      목록을 쓰기 때문에 화면마다 베껴 두지 않는다.
+    -->
+    <div data-coach="histbox">
+      <p class="side__h">지나간 일
+        <button class="ghost histmine" id="histMine" type="button"
+                aria-pressed="false" title="내가 등록한 것만 봅니다">내 것만</button>
+      </p>
+      <div id="hist"></div>
     </div>
   </aside>
 </div>

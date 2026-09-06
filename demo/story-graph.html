@@ -161,6 +161,15 @@
   }
   .canvas-msg b { color: var(--acc-ink); }
 
+  /*
+   * 처음 온 사람에게 뜨는 판. 모양은 demo/onboard.js 가 넣고(.onb*) 여기서는 자리만
+   * 잡는다. 판 가운데가 아니라 대본 카드 오른쪽에 둔다 — 가운데에 놓으면 카드를 덮고,
+   * 「직접 시작하기」가 가리키는 대본 칸이 그 아래에 가려진다. 카드를 접으면
+   * (대본 입력 접기) 그 자리까지 넓게 쓴다.
+   */
+  .onbslot { position: absolute; z-index: 6; left: 430px; top: 22px; }
+  .onbslot--wide { left: 22px; }
+
   .kv { display: grid; grid-template-columns: 62px 1fr; gap: 5px 12px; font-size: 14.5px; }
   .kv .k { color: var(--ink3); font-weight: 600; }
   .kv .v { color: var(--ink); word-break: break-all; }
@@ -299,6 +308,20 @@
   .free-box { background: var(--bg-soft); border: 1.5px dashed var(--line); border-radius: 16px; padding: 17px; margin-top: 20px; }
   .free-box h4 { font-size: 15.5px; font-weight: 800; color: var(--ink); margin-bottom: 9px; }
 
+  /* ── 지나간 일 ────────────────────────────────────────────────────────────
+     목록 자체의 모양(.hist*)은 demo/history.js 가 넣는다 — 홈·보드·키비주얼이 같은
+     목록을 쓰기 때문에 화면마다 베껴 두지 않는다. 여기 있는 것은 머리줄과 꼬리말이다. */
+  .hist-head {
+    display: flex; align-items: center; gap: 9px; margin-bottom: 12px;
+    font-size: 12.5px; font-weight: 800; color: var(--ink3);
+    text-transform: uppercase; letter-spacing: .08em;
+  }
+  .hist-head .btn { margin-left: auto; text-transform: none; letter-spacing: 0; }
+  .hist-head .btn[aria-pressed="true"] {
+    border-color: var(--sb-accent-line); color: var(--acc-ink); background: var(--acc-soft);
+  }
+  .hist-note { margin-top: 12px; font-size: 12.5px; color: var(--ink3); line-height: 1.75; }
+
   .placeholder { text-align: center; color: var(--ink3); padding: 30px 18px; font-size: 15px; line-height: 1.95; }
   .placeholder b { color: var(--acc-ink); }
   .load-error { padding: 26px; color: var(--bad); font-size: 15px; line-height: 1.9; }
@@ -390,6 +413,7 @@
     <div class="grow"></div>
     <span class="who" id="whoAmI" hidden></span>
     <button class="btn btn--line btn--mini" id="logoutBtn" hidden>로그아웃</button>
+    <button class="btn btn--line btn--mini" id="coachBtn">안내 다시 보기</button>
     <button class="btn btn--line btn--mini" id="inputToggle">대본 입력 접기</button>
   </div>
 
@@ -400,7 +424,10 @@
     <div id="network"></div>
     <div class="canvas-msg" id="canvasMsg" hidden></div>
 
-    <section class="card card--input" id="inputCard">
+    <!-- 처음 온 사람에게 뜨는 판. 그래프가 비어 있을 때만 보인다 (onboard.js 의 emptyPanel) -->
+    <div class="onbslot" id="onbSlot" hidden></div>
+
+    <section class="card card--input" id="inputCard" data-coach="input">
       <h3>대본 · 시놉시스</h3>
 
       <!-- 고른 모델은 이 화면의 모든 생성에 쓰인다. 값은 plan 리졸버의 MODELS 키다 -->
@@ -418,8 +445,8 @@
         placeholder="시놉시스나 대본을 붙여 넣거나 .txt / .fdx 파일을 이 카드로 끌어다 놓습니다.
 예: 새벽에 문 여는 동네 빵집. 주인은 첫 손님이 오기까지..."></textarea>
       <div class="card__row">
-        <button class="btn" id="extractBtn">그래프 추출</button>
-        <button class="btn btn--line" id="mockBtn">목데이터로 되돌리기</button>
+        <button class="btn" id="extractBtn" data-coach="extract">그래프 추출</button>
+        <button class="btn btn--line" id="mockBtn">예시 대본으로 보기</button>
       </div>
       <div class="hint" id="inputHint">최소 8자 이상. 추출은 Bedrock 연결이 필요합니다.</div>
     </section>
@@ -434,16 +461,17 @@
   </div>
 
   <div class="sidebar">
-    <div class="stats-bar">
+    <div class="stats-bar" data-coach="stats">
       <div class="stat"><div class="n" id="s-nodes">-</div><div class="l">노드</div></div>
       <div class="stat"><div class="n" id="s-asserted">-</div><div class="l">명시 엣지</div></div>
       <div class="stat"><div class="n" id="s-derived">-</div><div class="l">추론</div></div>
       <div class="stat"><div class="n" id="s-seeds">-</div><div class="l">씨앗</div></div>
     </div>
-    <div class="tabs">
+    <div class="tabs" data-coach="tabs">
       <div class="tab active" data-tab="seeds">씨앗</div>
       <div class="tab" data-tab="story">스토리</div>
       <div class="tab" data-tab="script">대본화</div>
+      <div class="tab" data-tab="hist">지나간 일</div>
     </div>
     <div id="panel-seeds" class="panel active">
       <div class="panel-scroll" id="seedsList"></div>
@@ -453,6 +481,21 @@
     </div>
     <div id="panel-script" class="panel">
       <div class="panel-scroll" id="scriptPanel"></div>
+    </div>
+    <!--
+      지나간 일. 누가 · 어떤 단계에서 · 뭘 · 언제 했는지. 이 화면이 따로 쌓는 것이
+      아니라 보드의 op 로그 한 곳을 읽는다 — 그래서 다른 사람이 키비주얼에서 한 일도
+      여기 보인다. 옮기는 일은 demo/history.js 가 한다.
+    -->
+    <div id="panel-hist" class="panel">
+      <div class="panel-scroll" data-coach="histbox">
+        <div class="hist-head">지나간 일
+          <button class="btn btn--line btn--mini" id="histMine" type="button"
+                  aria-pressed="false" title="내가 등록한 것만 봅니다">내 것만</button>
+        </div>
+        <div id="hist"></div>
+        <p class="hist-note">줄을 누르면 그 자리에서 이어서 합니다 — 회차는 대본화 탭이 열립니다.</p>
+      </div>
     </div>
   </div>
 
@@ -483,11 +526,14 @@ import {
   planScript, scriptBlob, scriptFileName, SCRIPT_FORMATS,
   GENRES, TONES, LENGTHS, CUTCOUNTS,
 } from './story.js'
-import { planClient, graphClient } from './net.js'
+import { planClient, graphClient, opsClient } from './net.js'
 import { createGraphView, graphDelta, KIND_COLOR, KIND_LABEL } from './graph-view.js'
 import { configured, session, login, setNewPassword, logout } from './auth.js'
 import { DEMO_USERS } from './login.js'
 import { mountNav, soonMarkup, isSoonTab, navTabFromSearch } from './nav-tabs.js'
+import { entries, group, markOp, paintList } from './history.js'
+import { emptyPanel, play as playExample, playing } from './onboard.js'
+import * as coach from './coach.js'
 
 const $ = (id) => document.getElementById(id)
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) =>
@@ -554,6 +600,102 @@ let SCRIPT = { ep: 0, format: 'drama', text: '', busy: false, err: '' }
 let NEW_SEEDS = new Set() // 역기입 뒤에 새로 나온 씨앗의 키. 카드에 NEW 뱃지를 붙인다
 let NAV = null           // 상단 기능 탭. mountNav 가 만든다
 let LAST_DEV_TAB = 'seeds' // 상단 [스토리 디벨롭] 으로 돌아왔을 때 열어 줄 안쪽 탭
+let JOURNAL = []         // 지나간 일. op 를 접기 전 원본이라 누가 언제 했는지가 남는다
+let HIST_MINE = false    // 「내 것만」
+let PLAYING_EXAMPLE = false // 예시 재생 중. 그 사이의 기록에 example 표시를 붙인다
+
+/*
+ * 로그 클라이언트. 소켓을 열지 않고 읽기·쓰기만 한다 (net.js 의 opsClient).
+ * 이 화면은 실시간 협업 화면이 아니고, 한 번 읽어 목록을 그리면 된다.
+ */
+const OPS = opsClient()
+
+// ── 지나간 일 ────────────────────────────────────────────────────────────────
+// 이 화면에서 한 일을 보드와 같은 로그에 남긴다. kind 는 step.mark 하나뿐이고
+// (demo/history.js) 보드의 applyOp 는 모르는 kind 를 그냥 지나가므로 판을 흔들지 않는다.
+
+/**
+ * 한 일 한 줄을 로그에 남긴다.
+ *
+ * @param {string} what - 완결된 한 줄. "노드 14개를 뽑았습니다"
+ * @param {object} [o]
+ * @param {string} [o.step] - 'develop' (기본) 또는 'script'
+ * @param {string} [o.ref] - 이어서 할 자리. 씨앗 키나 회차 번호
+ * @param {string} [o.refKind] - ref 가 무엇인지. 'seed' | 'ep'. 패널이 아니므로 보드로 보내지 않는다
+ */
+function mark(what, { step = 'develop', ref = null, refKind = null } = {}) {
+  const me = session()
+  const op = markOp({
+    step, actor: me?.id || 'local', what, ref, refKind, example: PLAYING_EXAMPLE,
+  })
+  JOURNAL.push(op)
+  // 기록은 이 화면의 본 일이 아니다. 못 남겨도 화면은 그대로 간다
+  try { OPS?.sendOp?.(op)?.catch?.(() => {}) } catch { /* 로컬 모드 */ }
+  paintHist()
+}
+
+/** actor id → {name}. 명부(member.set)에 있는 사람과 데모 계정을 합쳐 쓴다 */
+function nameMap(list) {
+  const m = new Map(DEMO_USERS.map((u) => [u.id, { name: u.name, role: u.role }]))
+  for (const op of list) {
+    if (op?.kind === 'member.set' && op.member?.id) m.set(op.member.id, op.member)
+  }
+  return m
+}
+
+function paintHist() {
+  const mount = $('hist')
+  if (!mount) return
+  const me = session()
+  const who = nameMap(JOURNAL)
+  const list = group(entries(JOURNAL, {
+    who: (id) => who.get(id) || null,
+    actor: HIST_MINE ? me?.id || 'local' : null,
+    limit: 120,
+  })).slice(0, 30)
+  $('histMine').setAttribute('aria-pressed', String(HIST_MINE))
+  say(NOTE) // 갈 수 없는 줄을 눌러 남은 말을 여기서 되돌린다
+  paintList(mount, list, {
+    showStep: true,
+    none: HIST_MINE ? '내가 등록한 것이 아직 없습니다.' : '아직 지나간 일이 없습니다.',
+    onPick: pickHist,
+  })
+}
+
+/**
+ * 목록에서 한 줄을 골라 이어서 하는 자리.
+ *
+ * 갈 수 있는 것만 간다 — 이 화면이 아는 것은 씨앗과 회차다. 패널 id (보드나 키비주얼이
+ * 남긴 것) 를 여기서 열 방법은 없으므로 그때는 보드로 보낸다.
+ */
+function pickHist(e) {
+  if (e.refKind === 'ep') {
+    const i = Number(e.ref)
+    if (Number.isFinite(i) && EPISODES[i]) {
+      SCRIPT = { ...SCRIPT, ep: i, text: '', err: '' }
+      openTab('script')
+      return
+    }
+    // 새로고침하면 회차는 남지 않는다. 없는 것을 여는 대신 그 사실을 말한다
+    return say('그 회차는 이 화면에 남아 있지 않습니다. 씨앗에서 다시 펼쳐 주세요.')
+  }
+  if (e.refKind === 'seed') {
+    const i = SEEDS.findIndex((s) => seedKey(s) === e.ref)
+    if (i < 0) return say('그 씨앗은 지금 판에 없습니다. 그래프가 바뀌었을 수 있습니다.')
+    pickSeed(i)
+    return
+  }
+  if (e.refKind === 'panel') { location.href = `/board.html#cut=${encodeURIComponent(e.ref)}` }
+}
+
+/** 지나간 일 목록 아래의 기본 한 줄 */
+const NOTE = '줄을 누르면 그 자리에서 이어서 합니다 — 회차는 대본화 탭이 열립니다.'
+
+/** 그 한 줄을 바꾼다. 갈 수 없는 곳을 눌렀을 때 이유를 여기 남긴다 */
+function say(msg) {
+  const note = document.querySelector('#panel-hist .hist-note')
+  if (note) note.textContent = msg
+}
 
 // ── 데이터 읽기 ───────────────────────────────────────────────────────────────
 async function loadJson(path) {
@@ -605,6 +747,7 @@ function build(store, { keepSeeds = null } = {}) {
   EPISODES = []
   SCRIPT = { ep: 0, format: SCRIPT.format, text: '', busy: false, err: '' }
   renderStats()
+  syncWelcome() // renderNetwork 보다 먼저다 — 판 가운데 안내를 띄울지가 이 결과에 달렸다
   renderNetwork()
   renderSeeds()
   renderScriptPanel()
@@ -635,9 +778,15 @@ const insets = () => ({ l: $('inputCard').hidden ? 24 : 428, t: 24, r: 24, b: 78
 function renderNetwork() {
   const g = STORE.toJSON()
   const msg = $('canvasMsg')
-  if (!g.nodes.length) {
+  /*
+   * 판 가운데의 안내. 비어 있고 「처음 오셨나요?」 판이 없을 때만 띄운다 — 둘 다 띄우면
+   * 같은 말이 두 번 겹치고, 안내 판이 이 글자 위에 앉는다. 예시를 다 보고 판을 지운
+   * 뒤처럼 안내 판이 없는 경우에 이 줄이 남는다.
+   */
+  if (!g.nodes.length && $('onbSlot')?.hidden !== false) {
     msg.hidden = false
-    msg.innerHTML = '그래프가 비어 있습니다.<br>왼쪽 카드에 대본을 넣고 <b>그래프 추출</b>을 누르거나,<br>목데이터로 되돌려 둘러보세요.'
+    msg.innerHTML = '그래프가 비어 있습니다.<br>왼쪽 카드에 대본을 넣고 <b>그래프 추출</b>을 누르거나,<br>'
+      + '<b>예시 대본으로 보기</b>로 흐름을 둘러보세요.'
   } else {
     msg.hidden = true
   }
@@ -767,6 +916,7 @@ const openTab = (name) => {
   hideSoon()
   NAV?.setActive(name === 'script' ? 'script' : 'develop')
   if (name === 'script') renderScriptPanel()
+  if (name === 'hist') paintHist()
 }
 
 /** 지금 보고 있는 스토리의 캐시 키. 씨앗을 안 골랐으면 자유 입력 자리다 */
@@ -781,6 +931,12 @@ async function pickSeed(i) {
   if (STORIES.has(String(i))) return renderStory()
   await generate((onTry) => planBranches(NET, SEEDS[i], STORE, { pool: POOL, onTry, model: MODEL() }),
     String(i), '분기를 만들고 있습니다')
+  // 씨앗 자체에는 id 가 없다 — seedKey 로 가리킨다. 이어서 하려면 그 씨앗을 다시 찾아야 한다
+  const got = STORIES.get(String(i))
+  if (got?.branches?.length) {
+    mark(`씨앗 「${SEEDS[i].title}」에서 분기 ${got.branches.length}개를 만들었습니다`,
+      { ref: seedKey(SEEDS[i]), refKind: 'seed' })
+  }
 }
 
 /** 로딩 줄 하나. 같은 자리 글자만 바꿔서 진행을 보여준다 */
@@ -1204,6 +1360,8 @@ async function runCuts() {
     if (!cuts.length) throw new Error('컷을 받지 못했습니다.')
     x.cuts = cuts
     x.step = 'cuts'
+    mark(`분기 「${x.branch.label}」를 컷 ${cuts.length}개로 펼쳤습니다`,
+      { ref: x.seed ? seedKey(x.seed) : null, refKind: x.seed ? 'seed' : null })
   } catch (err) {
     console.warn('[story-graph] 컷 확장 실패', err)
     x.err = `${err.message || '서버 연결에 실패했습니다.'} 다시 시도해 주세요.`
@@ -1225,9 +1383,13 @@ function stashEpisode() {
     chars: x.outline.chars,
     cuts: x.cuts,
   }
-  if (x.epIndex === null) { EPISODES.push(ep); x.epIndex = EPISODES.length - 1 }
+  const fresh = x.epIndex === null
+  if (fresh) { EPISODES.push(ep); x.epIndex = EPISODES.length - 1 }
   else EPISODES[x.epIndex] = ep
   SCRIPT = { ...SCRIPT, ep: x.epIndex, text: '', err: '' }
+  // 회차 번호로 가리킨다. 새로고침하면 사라지므로 pickHist 가 그 경우를 따로 말한다
+  mark(`회차 「${ep.title}」${fresh ? '를 만들었습니다' : '의 컷을 다시 만들었습니다'}`,
+    { ref: String(x.epIndex), refKind: 'ep' })
   return x.epIndex
 }
 
@@ -1255,6 +1417,8 @@ async function applyToBoard() {
   VIS?.markNew(x.delta)
   renderSeeds()
   renderExpand()
+  const a = x.applied.applied
+  mark(`역기입으로 노드 ${a.nodesAdded}개 · 엣지 ${a.edgesAdded}개가 붙고 ${a.edgesRemoved}개가 끊겼습니다`)
 
   // Neptune 모드에서는 여기서야 저장이 끝난다. 판은 이미 자랐으니 화면은 건드리지
   // 않고, 저장이 어긋난 것만 적용 기록에 덧붙여 다시 그린다
@@ -1328,6 +1492,8 @@ async function runScript() {
     SCRIPT.text = await planScript(NET, ep.cuts, {
       format: SCRIPT.format, title: ep.title, chars: ep.chars, model: MODEL(),
     })
+    mark(`「${ep.title}」를 ${SCRIPT_FORMATS[SCRIPT.format]?.label || SCRIPT.format} 대본으로 옮겼습니다`,
+      { step: 'script', ref: String(SCRIPT.ep), refKind: 'ep' })
   } catch (err) {
     console.warn('[story-graph] 대본화 실패', err)
     SCRIPT.err = `${err.message || '서버 연결에 실패했습니다.'} 다시 시도해 주세요.`
@@ -1382,6 +1548,7 @@ async function extract() {
     const g = await planGraph(NET, text, { model: MODEL() })
     build(newStore(g))
     $('srcBadge').textContent = `graph: 대본 추출 (노드 ${g.nodes.length})`
+    mark(`대본에서 노드 ${g.nodes.length}개 · 씨앗 ${SEEDS.length}개를 뽑았습니다`)
     const bad = [...(g.warnings || []), ...(g.conflicts || []).map((c) => `${c.level}: ${c.msg}`)]
     hint.className = bad.length ? 'warn' : 'hint'
     hint.innerHTML = bad.length
@@ -1394,6 +1561,177 @@ async function extract() {
   } finally {
     $('extractBtn').disabled = false
   }
+}
+
+// ── 온보딩 ───────────────────────────────────────────────────────────────────
+/*
+ * 이 화면은 처음에 비어 있다. 예전에는 start() 가 목데이터를 알아서 얹었고, 그래서
+ * 처음 온 사람은 자기가 만든 것도 아닌 케데헌 그래프 앞에 앉았다 — 무엇이 예시이고
+ * 무엇이 자기 것인지 가를 수 없었다. 이제 두 갈래를 먼저 묻는다.
+ *
+ *   예시 보기      loadMock 을 재생기에 태워 차근차근 얹는다 (아래 runExample)
+ *   직접 시작하기  대본 칸에 커서를 두고 코치마크를 연다
+ */
+function paintWelcome() {
+  const slot = $('onbSlot')
+  if (!slot) return
+  slot.textContent = ''
+  slot.append(emptyPanel({
+    eyebrow: '스토리 디벨롭',
+    head: '처음 오셨나요?',
+    lines: [
+      '판이 비어 있습니다. 대본이나 시놉시스를 넣으면 인물·장소·사건이 그래프가 됩니다.',
+      '그 그래프에서 탐지기 12종이 이야기 씨앗을 찾고, 씨앗 하나가 분기 → 개요 → 컷 → 대본으로 펼쳐집니다.',
+      '어떻게 도는지 먼저 보시려면 예시를 재생해 보세요. 케데헌 그래프로 그 순서를 그대로 밟습니다.',
+    ],
+    exampleLabel: '예시 보기',
+    onExample: () => runExample(),
+    ownLabel: '직접 시작하기',
+    onOwn: () => { $('scriptIn')?.focus(); openCoach() },
+    warn: NET
+      ? '추출과 생성은 Bedrock 을 부릅니다 — 한 번에 10~30초씩 걸리고, 여기 남는 기록은 같은 보드를 보는 사람에게도 보입니다.'
+      : '로컬 모드입니다 — 추출은 Bedrock 이 필요해 막혀 있고, 분기는 목데이터로 대체됩니다. 예시는 그대로 볼 수 있습니다.',
+  }))
+  slot.hidden = false
+  slot.classList.toggle('onbslot--wide', !!$('inputCard').hidden)
+}
+
+/** 판에 노드가 있으면 안내를 걷는다. build 와 예시 재생이 같은 자리를 지난다 */
+function syncWelcome() {
+  const slot = $('onbSlot')
+  if (!slot) return
+  const empty = !STORE || !STORE.stats().nodes
+  if (empty && !playing()) paintWelcome()
+  else slot.hidden = true
+}
+
+/**
+ * 예시 재생. 목데이터를 한 번에 쏟지 않고 사람이 손으로 할 순서를 그대로 밟는다 —
+ * 대본을 넣고, 그래프를 얹고, 씨앗을 보고, 첫 씨앗의 분기를 만든다. 다 본 뒤에
+ * 직접 할 때 같은 자리를 누르게 되는 것이 목적이다.
+ *
+ * 분기 생성까지만 간다. 개요·컷·대본은 Bedrock 왕복이 세 번 더 붙어 몇 분이 되고,
+ * 그때부터는 보는 것이 아니라 기다리는 것이다. 그 뒤는 직접 누르게 둔다.
+ */
+function runExample() {
+  const slot = $('onbSlot')
+  if (slot) slot.hidden = true
+  PLAYING_EXAMPLE = true
+  let synopsis = ''
+
+  const steps = [
+    {
+      say: '예시 시놉시스를 넣습니다',
+      sub: '케이팝 데몬 헌터스 — 세 사람이 노래로 결계를 붙잡고 있는 이야기입니다',
+      ms: 2300,
+      run: async () => {
+        try {
+          const res = await fetch('fixtures/kdh-synopsis.txt', { cache: 'no-store' })
+          synopsis = res.ok ? await res.text() : ''
+        } catch { synopsis = '' }
+        if (synopsis) {
+          $('scriptIn').value = synopsis
+          $('inputHint').className = 'hint'
+          $('inputHint').textContent = '예시 시놉시스를 넣었습니다. 직접 할 때는 여기에 붙여 넣습니다.'
+        }
+      },
+    },
+    {
+      say: '대본에서 그래프를 뽑습니다',
+      sub: NET
+        ? '직접 할 때는 [그래프 추출] 이 Bedrock 으로 이 일을 합니다. 예시는 미리 뽑아 둔 결과를 얹습니다'
+        : '로컬 모드에서는 추출이 막혀 있어 미리 뽑아 둔 결과를 얹습니다',
+      ms: 2600,
+      run: async () => {
+        await boot()
+        if (STORE) mark(`예시 그래프를 얹었습니다 — 노드 ${STORE.stats().nodes}개`)
+      },
+    },
+    {
+      say: '탐지기 12종이 이야기 씨앗을 찾습니다',
+      sub: '숨긴 비밀 · 삼각관계 · 체호프의 총 … 인물 사이에 걸린 것을 그래프에서 읽어 냅니다',
+      ms: 2600,
+      run: () => { openTab('seeds') },
+    },
+    {
+      say: '씨앗 하나에서 분기를 만듭니다',
+      sub: NET ? '고른 모델이 이 씨앗을 세 갈래로 펼칩니다' : '로컬 모드라 목데이터 분기로 대체됩니다',
+      ms: 2000,
+      run: () => (SEEDS.length ? pickSeed(0) : null),
+    },
+    {
+      say: '여기까지가 예시입니다',
+      sub: '분기를 골라 [이 분기로 대본 생성] 을 누르면 개요 → 컷 → 대본으로 이어집니다. 이제 직접 해 보세요',
+      ms: 3000,
+    },
+  ]
+
+  playExample({
+    steps,
+    onDone: () => {
+      PLAYING_EXAMPLE = false
+      syncWelcome()
+      paintHist()
+      openCoach()
+    },
+  })
+}
+
+/*
+ * 코치마크. 가리키는 것은 이 화면에 실제로 있는 것뿐이다 — 앵커가 없는 장은
+ * coach.js 가 조용히 건너뛴다. 그래서 판이 비어 있어도 같은 카드 묶음을 쓴다.
+ */
+const DEV_CARDS = [
+  {
+    head: '대본이 먼저다',
+    body: '여기에 시놉시스나 대본을 넣습니다. .txt · .fdx 파일을 카드에 끌어다 놓아도 됩니다.\n'
+      + '넣은 대본은 그래프를 뽑는 데만 쓰이고, 이 계정의 Bedrock 안에서 처리됩니다.',
+    spot: ['input'],
+  },
+  {
+    head: '그래프는 사실만 담는다',
+    body: '인물 · 장소 · 사건과 그 사이의 관계가 노드와 엣지가 됩니다.\n'
+      + '실선은 대본에 적힌 것, 점선은 규칙이 미뤄 낸 것입니다 — 두 개를 갈라 두는 이유는 '
+      + '미뤄 낸 것이 틀릴 수 있기 때문입니다.',
+    spot: ['stats'],
+  },
+  {
+    head: '씨앗 → 분기 → 컷 → 대본',
+    body: '옆 탭이 그 순서입니다. 씨앗을 고르면 스토리 탭에 분기가 서고, '
+      + '분기를 펼치면 개요와 컷이 나오고, 대본화 탭이 그것을 대본 텍스트로 옮깁니다.\n'
+      + '컷을 판에 붙이면 그래프가 자라고 씨앗이 다시 뽑힙니다 — 그게 이 화면의 고리입니다.',
+    spot: ['tabs'],
+    step: 'seeds',
+  },
+  {
+    head: '누가 뭘 했는지 남는다',
+    body: '이 화면에서 한 일이 보드와 같은 기록에 쌓입니다 — 그래서 홈에서도, 키비주얼에서도 같이 보입니다.\n'
+      + '줄을 누르면 그 자리에서 이어서 합니다. 「내 것만」으로 내가 등록한 것만 볼 수 있습니다.',
+    spot: ['histbox'],
+    step: 'hist',
+    next: '시작하기', skip: '다시 보지 않기',
+  },
+]
+
+const COACH_KEY = 'sb.dev.coach.v1'
+
+/** 지금 열려 있는 안쪽 탭. 코치마크가 앵커를 화면에 올리려고 이걸 본다 */
+const atTab = () => document.querySelector('.tabs .tab.active')?.dataset.tab || 'seeds'
+
+function openCoach() {
+  if (playing()) return
+  // 안내가 탭을 옮겨 놓고 끝난다. 열려 있던 탭으로 되돌려 준다
+  const was = atTab()
+  coach.start({
+    cards: DEV_CARDS, key: COACH_KEY, title: '스토리 디벨롭',
+    /*
+     * 안 열린 탭 속의 앵커는 화면에 없는 것과 같다 — 판이 display:none 이라 좌표가
+     * 0 이고, 막 위로 올려도 보이지 않는다. 그래서 그 장의 탭을 대신 열어 준다.
+     * 키비주얼이 단계를 옮기는 자리와 같은 손잡이다 (coach.js 의 host).
+     */
+    host: { atStep: atTab, goStep: (t) => openTab(t) },
+    onDone: () => { if (atTab() !== was) openTab(was) },
+  })
 }
 
 // ── 시동 ─────────────────────────────────────────────────────────────────────
@@ -1430,6 +1768,7 @@ $('inputToggle').onclick = () => {
   card.hidden = !card.hidden
   $('inputToggle').textContent = card.hidden ? '대본 입력 펼치기' : '대본 입력 접기'
   VIS?.setInsets(insets()) // 카드가 접히면 판이 그 자리까지 쓴다
+  $('onbSlot').classList.toggle('onbslot--wide', card.hidden) // 안내도 그 자리까지 당긴다
 }
 
 const drop = $('inputCard')
@@ -1483,25 +1822,31 @@ async function boot() {
     MOCK_SEEDS = d.seeds
     POOL = d.seeds.map((s, i) => ({ ...d.stories[i], probe: s.probe, focus: s.focus }))
     build(newStore(d.graph), { keepSeeds: SEED_SRC === 'mock' ? d.seeds : null })
+    $('srcBadge').textContent = `graph: ${GRAPH_SRC} (예시)`
   } catch (err) {
     fail(err)
   }
 }
 
 /**
- * 첫 로드. Neptune 에 남아 있는 그래프가 있으면 그것으로 시작한다 — 새로고침해도
- * 지난번에 자란 판이 그대로 나온다. 저장된 것이 없으면 목데이터로 채운다.
+ * 첫 로드.
+ *
+ * Neptune 에 남아 있는 그래프가 있으면 그것으로 시작한다 — 새로고침해도 지난번에
+ * 자란 판이 그대로 나온다. 저장된 것이 없으면 **비운 채로** 시작한다.
+ *
+ * 예전에는 여기서 목데이터를 얹었다. 그러면 처음 온 사람이 자기가 만들지 않은 케데헌
+ * 그래프 앞에 앉게 되고, 무엇이 예시이고 무엇이 자기 것인지 가를 수 없었다. 이제
+ * 빈 판에 「처음 오셨나요?」를 띄우고, 목데이터는 그 판의 [예시 보기] 가 부른다.
  */
 async function start() {
   let stored = null
   try {
     stored = await loadGraphStore({ net: GRAPH_NET })
   } catch (err) {
-    console.warn('[story-graph] Neptune 에서 그래프를 읽지 못했다 — 목데이터로 시작한다', err)
+    console.warn('[story-graph] Neptune 에서 그래프를 읽지 못했다 — 빈 판으로 시작한다', err)
   }
-  if (!stored || !stored.stats().nodes) return boot()
 
-  // 목 씨앗·스토리는 로컬 폴백용이라 저장된 판으로 시작할 때도 미리 읽어 둔다
+  // 목 씨앗·스토리는 로컬 폴백용이라 어느 쪽으로 시작하든 미리 읽어 둔다
   try {
     const d = await loadMock()
     MOCK_SEEDS = d.seeds
@@ -1509,8 +1854,28 @@ async function start() {
   } catch (err) {
     console.warn('[story-graph] 목 씨앗·스토리를 읽지 못했다 — 임시 분기로 돈다', err.message)
   }
+
+  if (!stored || !stored.stats().nodes) {
+    // 빈 저장소로 판을 세운다. STORE 가 null 이면 renderNetwork·renderSeeds 가 터진다
+    build(createGraphStore({ nodes: [], edges: [] }))
+    $('srcBadge').textContent = 'graph: 비어 있음'
+    return
+  }
   build(stored)
   $('srcBadge').textContent = `graph: Neptune (노드 ${stored.stats().nodes})`
+}
+
+/**
+ * 지나간 일을 읽어 온다. 화면을 세운 뒤에 부른다 — 로그를 못 읽어도 화면은 돌아야 한다.
+ * 목록은 최근 30줄만 그리므로 다 들고 있을 이유가 없어 뒤쪽 300건만 남긴다.
+ */
+async function loadHistory() {
+  const past = await OPS?.fetchOps?.().catch((err) => {
+    console.warn('[story-graph] 기록을 읽지 못했다', err.message)
+    return null
+  })
+  if (past?.length) JOURNAL.unshift(...past.slice(-300))
+  paintHist()
 }
 
 // ── 로그인 문 ────────────────────────────────────────────────────────────────
@@ -1639,14 +2004,26 @@ function showWho() {
   $('logoutBtn').onclick = () => { logout(); location.reload() }
 }
 
-$('mockBtn').onclick = boot
+// 목데이터는 이제 예시 재생기가 얹는다. 버튼 하나로 그냥 얹으면 무엇이 예시인지
+// 모른 채 판이 채워지고, 그게 지금까지의 문제였다
+$('mockBtn').onclick = runExample
+$('histMine').onclick = () => { HIST_MINE = !HIST_MINE; paintHist() }
+$('coachBtn').onclick = openCoach
 renderLegend()
 if (configured && !session()) {
   // 토큰이 없다 — 판을 시동하지 않고 문만 세운다 (호출이 401 로 떨어지지 않게)
   showGate()
 } else {
   showWho()
-  start()
+  start().then(() => {
+    loadHistory()
+    /*
+     * 판이 비어 있으면 코치마크를 열지 않는다 — 그때는 화면에 「처음 오셨나요?」 판이
+     * 있고 그 판이 두 갈래를 이미 말해 준다. 막을 덮어 그것을 가릴 이유가 없다.
+     * 예시를 보거나 직접 시작하면 그 뒤에 열린다.
+     */
+    if (!coach.seen(COACH_KEY) && STORE?.stats().nodes) openCoach()
+  })
 }
 </script>
 </body>

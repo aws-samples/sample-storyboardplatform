@@ -16,7 +16,9 @@ import { configured, idToken, session } from '../demo/auth.js'
 import { connect } from '../demo/net.js'
 import { showLogin } from '../demo/login.js'
 import { mountNav } from '../demo/nav-tabs.js'
-import * as coach from './coach.js'
+import * as coach from '../demo/coach.js'
+import { emptyPanel, play as playExample, playing } from '../demo/onboard.js'
+import { entries, group, markOp, paintList } from '../demo/history.js'
 
 const cfg = window.SB_CONFIG || {}
 const $ = (s, r = document) => r.querySelector(s)
@@ -45,6 +47,8 @@ const S = {
   peers: new Map(),     // actorId → { id, name, role, at, seen }
   feed: [],
   log: [],
+  journal: [],          // 보드 로그의 op 사본. 「지나간 일」이 이것만 읽는다
+  histMine: false,
 }
 
 // 서버가 내주는 크기는 두 가지뿐이다. server.py 의 SIZE 와 같아야 한다.
@@ -74,6 +78,24 @@ function note(text, who) {
   S.feed.unshift({ text, who: who || S.me, at: new Date().toTimeString().slice(0, 5) })
   if (S.feed.length > 30) S.feed.pop()
   paintFeed()
+}
+
+/*
+ * 「누가 뭘 했다」를 보드와 같은 로그에 남긴다.
+ *
+ * 이 화면이 하는 일 중 보드에 op 로 남는 것은 붙이기(panel.add)와 다시 그리기
+ * (panel.version)뿐이다. 대본을 나눈 것, 프롬프트를 받은 것, 몇 장을 그린 것은
+ * 여기서만 알고 있었고 그래서 홈이나 보드에서는 보이지 않았다. step.mark 로 남기면
+ * demo/history.js 가 그것을 한 줄로 옮긴다 — applyOp 는 모르는 kind 라 지나가므로
+ * 보드의 판은 흔들리지 않는다.
+ *
+ * 실패해도 삼킨다. 기록을 못 남긴 것이 이 화면의 본 일을 멈출 이유는 아니다.
+ */
+function mark(what, { ref = null, example = false } = {}) {
+  const op = markOp({ step: 'keyvisual', actor: S.me?.id || 'local', what, ref, example })
+  S.journal.push(op)
+  try { S.net?.sendOp?.(op) } catch (e) { wire('r', `기록을 남기지 못했다 — ${e.message}`) }
+  paintHist()
 }
 
 const say = (m) => { const r = $('#live'); if (r) r.textContent = m }
@@ -220,6 +242,7 @@ async function writePrompts() {
     const u = r.usage || {}
     wire('g', `200  ${got}/${S.scenes.length}개 · 토큰 ${u.inputTokens || '?'}→${u.outputTokens || '?'}`)
     note(`씬 ${got}개의 이미지 프롬프트를 생성했습니다`)
+    mark(`씬 ${got}개의 이미지 프롬프트를 받았습니다`)
     if (got < S.scenes.length) {
       S.warn = `${S.scenes.length - got}개는 형식이 어긋나 버렸습니다. 그 씬은 직접 써주세요.`
     }
@@ -364,6 +387,8 @@ async function runBatch(ids) {
   paint()
   const d = doneJobs().length, f = failedJobs().length
   say(`${d}장 완료${f ? `, ${f}장 실패` : ''}`)
+  // 장마다 남기지 않는다. 한 배치가 한 줄이다 — 8장을 8줄로 남기면 목록이 그것만으로 찬다
+  mark(`키 비주얼 ${d}장을 생성했습니다${f ? ` (${f}장 실패)` : ''}`)
 }
 
 /* ══ 보드에 붙이기 — publishOp ════════════════════ */
@@ -446,6 +471,7 @@ async function postToBoard() {
   for (const op of ops) {
     op.id = uid(); op.ts = now(); op.actor = S.me?.id || 'local'
     S.net.sendOp(op)
+    S.journal.push(op)
   }
   wire('u', `publishOp × ${ops.length}  보드에 씬 패널로 남긴다`)
   note(`키 비주얼 ${ops.length}장을 보드에 붙였습니다`)
@@ -654,6 +680,7 @@ function step1() {
     if (!S.scenes.length) { S.warn = '대본을 먼저 붙여넣어 주세요.'; paint(); return }
     S.warn = null
     note(`대본을 씬 ${S.scenes.length}개로 나눴습니다`)
+    mark(`대본을 씬 ${S.scenes.length}개로 나눴습니다`)
     S.step = 2
     paint()
     if (canPlan()) writePrompts()
@@ -663,6 +690,9 @@ function step1() {
   row.append(n)
   a.append(row)
   w.append(a)
+
+  // 아직 아무것도 없으면 「씬 후보 0」 이라는 빈 칸 대신 두 갈래를 보여준다
+  if (!S.script.trim() && !S.scenes.length) { w.append(welcomePanel()); return w }
 
   const b = card(`씬 후보 ${S.scenes.length}`, S.scenes.length ? '씬을 고르지 않습니다. 목록 전체가 다음 단계로 넘어갑니다.' : '나누기를 누르면 여기에 나옵니다.')
   if (S.scenes.length) {
@@ -944,10 +974,214 @@ function card(title, sub, coach) {
   return c
 }
 
+/* ══ 온보딩 ════════════════════════════════════════ */
+
+/**
+ * 비어 있을 때의 판. 예시 대본을 넣고 돌려 보거나, 직접 붙여넣고 시작합니다.
+ *
+ * 예전에는 boot() 이 SAMPLE 을 무조건 S.script 에 넣었습니다. 그러면 처음 온 사람이
+ * 자기가 넣지도 않은 대본을 보게 되고, 그것이 예시인지 남이 넣은 것인지 알 수
+ * 없었습니다. 이제 비어 있으면 비어 있는 대로 두고, 예시는 눌러서 넣습니다.
+ */
+function welcomePanel() {
+  return emptyPanel({
+    eyebrow: '키 비주얼',
+    head: '처음 오셨나요?',
+    lines: [
+      '대본을 씬으로 나누고, 씬마다 대표 그림 한 장을 만드는 화면입니다.',
+      '예시를 누르면 대본 넣기 → 씬 나누기 → 프롬프트 → 생성까지 차례로 돌아갑니다.',
+      '직접 하시려면 왼쪽 칸에 대본을 붙여넣는 것부터입니다.',
+    ],
+    onExample: () => runExample(),
+    onOwn: () => {
+      $('.script')?.focus()
+      openCoach()
+    },
+    warn: canGen()
+      ? '예시도 실제로 생성 서버를 씁니다 — 그림이 나오는 데 장당 10초 남짓 걸리고 한 장은 실패할 수 있습니다. '
+        + '보드에 붙이기 전까지는 이 화면 밖으로 나가지 않습니다.'
+      : 'aws-config.js 가 비어 있어 그림은 나오지 않습니다. 예시는 대본을 나누고 프롬프트 칸까지만 채웁니다.',
+  })
+}
+
+let exampleRun = null
+
+/**
+ * 예시를 영상처럼 돌립니다. 사람이 손으로 밟는 순서를 그대로 밟습니다 — 다 본 뒤에
+ * 직접 할 때 같은 자리를 누르게 되기 때문입니다.
+ *
+ * 마지막 두 단계(프롬프트·생성)는 서버가 있을 때만 넣습니다. 로컬에서는 눌러도
+ * 아무 일이 없는데 「생성합니다」라고 적어 두면 그 자리에서 안내가 거짓이 됩니다.
+ */
+function runExample() {
+  if (exampleRun) return
+  const steps = [
+    {
+      say: '예시 대본을 넣습니다', ms: 1500,
+      sub: '9개 블록 · 극장 하나를 배경으로 한 짧은 대본입니다',
+      run: () => { S.script = SAMPLE; S.step = 1; paint() },
+    },
+    {
+      say: '대본을 씬으로 나눕니다', ms: 2200,
+      sub: '빈 줄로 블록을 자르고, 슬러그가 같은 인접 블록은 한 씬으로 합칩니다',
+      run: () => {
+        S.scenes = toScenes(S.script)
+        S.jobs = {}
+        S.pick = S.scenes[0]?.id || null
+        S.step = 2
+        paint()
+        mark(`예시 대본을 씬 ${S.scenes.length}개로 나눴습니다`, { example: true })
+      },
+    },
+  ]
+
+  if (canPlan()) {
+    steps.push({
+      say: '씬마다 이미지 프롬프트를 받습니다', ms: 1200,
+      sub: '문장 모델이 한 번에 씁니다. 각 줄은 손으로 고칠 수 있습니다',
+      // 끝날 때까지 기다린다. 프롬프트가 없으면 다음 단계에 보낼 것이 없다
+      run: () => writePrompts(),
+    })
+  } else {
+    steps.push({
+      say: '프롬프트는 직접 써야 합니다', ms: 2600,
+      sub: '보드에 연결되지 않아 문장 모델이 없습니다. 배포한 주소에서 열면 여기까지 자동으로 채워집니다',
+      run: () => { S.step = 2; paint() },
+    })
+  }
+
+  if (canGen() && mayGen()) {
+    steps.push({
+      say: '첫 씬 한 장만 그려 봅니다', ms: 1200,
+      sub: '전체는 「전체 다시 생성」으로 돌립니다 — 장당 10초 남짓이라 예시에서는 한 장만 봅니다',
+      run: async () => {
+        S.step = 3
+        paint()
+        const first = S.scenes.find((s) => s.prompt)
+        if (first) await runBatch([first.id])
+      },
+    })
+  }
+
+  steps.push({
+    say: '여기까지가 예시입니다', ms: 2800,
+    sub: '이제 대본을 바꿔 다시 나누거나, 전체를 생성해 보드에 붙일 수 있습니다',
+    run: () => paint(),
+  })
+
+  exampleRun = playExample({
+    steps,
+    onDone: () => {
+      exampleRun = null
+      paint()
+      // 예시가 끝난 뒤에 짚는다. 순서가 반대면 가리킬 것이 아직 화면에 없다
+      openCoach()
+    },
+  })
+}
+
+/*
+ * 코치마크 넉 장. 지금 화면에 실제로 있는 것만 가리킨다 — 앵커가 없는 장은 coach.js 가
+ * 조용히 건너뛴다. step 은 그 앵커가 있는 단계라서, 코치마크가 화면을 그 단계로 옮긴다.
+ *
+ * 여기에 쓰지 않는 말 세 개: 빠르다 · 무한히 확장된다 · 제작 기간이 줄어든다.
+ * 화면에서 8장이 몇 분 걸리고 한 장은 실패하고 한 대가 순서대로 그린다.
+ */
+const KV_CARDS = [
+  {
+    step: 1,
+    head: '대본은 이 계정 안에 머문다',
+    body: '여기 붙인 대본은 우리 계정 안에서만 읽힙니다.\n그림 설명을 쓰는 모델도, 그림을 그리는 모델도\n같은 계정 안에 있습니다.',
+    spot: ['script'],
+    next: '다음', skip: '건너뛰기',
+  },
+  {
+    step: 3,
+    head: '만드는 동안만 장비가 켜진다',
+    body: '그래픽 장비는 업무 시간에만 켜져 있습니다.\n첫 장이 조금 늦는 것은 그때 모델을 올리기\n때문입니다. 밤과 주말에는 내려가 있습니다.',
+    spot: ['rig', 'queue'],
+    next: '다음', skip: '건너뛰기',
+  },
+  {
+    step: 3,
+    head: '생성 권한은 서버에서 확인한다',
+    body: '검수자에게 버튼을 숨기지 않습니다.\n요청이 도착하면 서버가 역할을 보고 거절합니다.\n화면을 우회해도 결과는 같습니다.',
+    spot: ['perm', 'whoami'],
+    next: '다음', skip: '건너뛰기',
+  },
+  {
+    step: 3,
+    head: '직접 들 것만 직접 든다',
+    body: '문장을 다루는 모델은 맡기고,\n그림 모델만 우리가 띄웁니다.\n두 종류가 같이 도는데 관리하는 것은 하나입니다.',
+    spot: ['tab2', 'rig'],
+    tags: [{ on: 'tab2', text: '문장 모델 · 맡긴다' }, { on: 'rig', text: '그림 모델 · 우리가 띄운다' }],
+    next: '다음', skip: '건너뛰기',
+  },
+  {
+    head: '지나간 일은 옆 기둥에 남는다',
+    body: '누가 어느 단계에서 무엇을 했는지 오른쪽에 모입니다.\n줄을 누르면 그 씬으로 갑니다 — 이어서 하는 자리입니다.\n보드와 같은 기록을 봅니다.',
+    spot: ['histbox'],
+    next: '시작하기', skip: '다시 보지 않기',
+  },
+]
+
+const COACH_KEY = 'sb.kv.coach.v1'
+
+function openCoach() {
+  if (playing()) return   // 예시가 도는 중에는 막을 덮지 않는다. 화면을 봐야 한다
+  coach.start({
+    cards: KV_CARDS,
+    key: COACH_KEY,
+    title: '키 비주얼',
+    host: {
+      atStep: () => S.step,
+      goStep: (n) => {
+        // 2·3·4 장은 뒤쪽 단계를 가리킨다. 아직 못 간 단계면 앵커를 보여줄 수 없으니
+        // 대본을 먼저 나눠서 화면을 만든다. 대본이 비어 있으면 나눌 것이 없어 그 장은
+        // 앵커가 없는 채로 남고, coach.js 가 조용히 건너뛴다.
+        if (n > 1 && !S.scenes.length) { S.scenes = toScenes(S.script); S.pick = S.scenes[0]?.id || null }
+        S.step = n
+        paint()
+      },
+    },
+  })
+}
+
+/* ══ 지나간 일 ═════════════════════════════════════ */
+
+/**
+ * 히스토리. 보드와 같은 로그를 읽습니다 — 이 화면이 따로 쌓는 것이 아닙니다.
+ * 「내 것만」으로 좁히면 내가 이 화면에서 등록한 목록이 되고, 줄을 누르면 그 씬으로
+ * 갑니다.
+ */
+function paintHist() {
+  const box = $('#hist')
+  if (!box) return
+  const list = group(entries(S.journal, {
+    who: (id) => (id === S.me?.id ? S.me : S.peers.get(id)) || null,
+    actor: S.histMine ? S.me?.id : null,
+    limit: 30,
+  }))
+  $('#histMine')?.setAttribute('aria-pressed', String(S.histMine))
+  paintList(box, list, {
+    showStep: true,
+    none: S.histMine ? '내가 등록한 것이 아직 없습니다.' : '아직 지나간 일이 없습니다.',
+    onPick: (e) => {
+      // ref 는 씬 id(S01) 이거나 보드 패널 id 다. 이 화면에 있는 씬만 골라 준다
+      const s = scene(e.ref) || S.scenes.find((x) => job(x.id).panelId === e.ref)
+      if (!s) { say('그 씬은 지금 이 화면에 없습니다.'); return }
+      S.pick = s.id
+      S.blk = s.blkIdx[0]
+      if (S.step < 3) S.step = job(s.id).status === 'done' ? 4 : 2
+      paint()
+    },
+  })
+}
+
 /* ══ 전체 ══════════════════════════════════════════ */
 
 function paint() {
-  paintNav(); paintPeers(); paintFeed()
+  paintNav(); paintPeers(); paintFeed(); paintHist()
   const m = $('#main')
   m.textContent = ''
   if (S.warn) {
@@ -1031,7 +1265,11 @@ async function boot() {
     S.me = s || await showLogin($('#gate'))
   }
   S.me = S.me || session() || { id: 'local', name: '로컬', role: 'planner' }
-  S.script = SAMPLE
+  /*
+   * 대본 칸은 비어 있는 채로 시작한다. 예전에는 여기서 S.script = SAMPLE 이었다 —
+   * 그러면 처음 온 사람이 자기가 넣지도 않은 대본 앞에서, 그것이 예시인지 남이 넣은
+   * 것인지 모른 채 「씬으로 나누기」를 누르게 된다. 예시는 「예시 보기」로 들어온다.
+   */
 
   // 보드에 붙기 전에 한 번 그린다. 연결이 오래 걸리거나 실패해도 화면은 이미 있고,
   // 실시간 기능만 나중에 붙는다. 아래 connect() 가 유일한 렌더 관문이면 안 된다.
@@ -1040,6 +1278,8 @@ async function boot() {
   try {
     S.net = await connect({
       onOp: (op) => {
+        // 남이 지금 한 일도 「지나간 일」에 들어간다. 내 것은 mark 와 postToBoard 가 이미 넣었다
+        if (op.actor !== S.me.id) { S.journal.push(op); paintHist() }
         if (op.actor === S.me.id) return
         const p = S.peers.get(op.actor)
         const who = { name: p?.name || op.actor, role: p?.role || 'artist' }
@@ -1071,25 +1311,30 @@ async function boot() {
     if (drop) paintPeers()
   }, 15_000)
 
+  /*
+   * 지나간 일은 보드와 같은 로그에서 읽는다. 이 화면이 따로 쌓는 것이 없으므로
+   * 다른 사람이 어제 무엇을 했는지도 여기서 보인다. 실패하면 빈 목록으로 둔다 —
+   * 기록을 못 읽은 것이 생성을 막을 이유는 아니다.
+   */
+  const past = await S.net?.fetchOps?.().catch((e) => {
+    wire('r', `기록을 읽지 못했다 — ${e.message}`)
+    return null
+  })
+  // 목록은 최근 30줄만 그린다. 오래된 것을 다 들고 있을 이유가 없다
+  if (past?.length) S.journal.unshift(...past.slice(-300))
+
   pollGpu()
   setInterval(pollGpu, 20_000)
   paint()
 
   $('#coachBtn').onclick = () => openCoach()
-  if (!coach.seen()) openCoach()
-}
-
-function openCoach() {
-  coach.start({
-    atStep: () => S.step,
-    goStep: (n) => {
-      // 2·3·4 장은 뒤쪽 단계를 가리킨다. 아직 못 간 단계면 앵커를 보여줄 수 없으니
-      // 대본을 먼저 나눠서 화면을 만든다.
-      if (n > 1 && !S.scenes.length) { S.scenes = toScenes(S.script); S.pick = S.scenes[0]?.id || null }
-      S.step = n
-      paint()
-    },
-  })
+  $('#histMine').onclick = () => { S.histMine = !S.histMine; paintHist() }
+  /*
+   * 처음 온 사람에게 코치마크를 연다. 단, 대본 칸이 비어 있으면 열지 않는다 — 그때는
+   * 화면에 「처음 오셨나요?」 판이 있고 그 판이 두 갈래를 이미 말해 준다. 막을 덮어
+   * 그것을 가릴 이유가 없다. 예시를 보거나 직접 시작하면 그 뒤에 열린다.
+   */
+  if (!coach.seen(COACH_KEY) && S.script.trim()) openCoach()
 }
 
 document.addEventListener('keydown', (e) => {

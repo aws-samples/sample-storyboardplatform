@@ -1,12 +1,12 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>core.js · graph-schema.js · graph-engine.js · graph-probes.js · story.js · graph-view.js 자체 검사</title>
+<title>core.js · graph-schema.js · graph-engine.js · graph-probes.js · story.js · graph-view.js · history.js · onboard.js · coach.js 자체 검사</title>
 <style>
   body { font: 14px/1.6 ui-monospace, Menlo, monospace; background: #16181C; color: #E8E4DA; padding: 32px; }
   .pass { color: #6FCF97 } .fail { color: #FF6B5E; font-weight: 700 }
   h1 { font-size: 16px; letter-spacing: .12em; text-transform: uppercase; color: #E3A93C }
 </style>
-<h1>core.js · graph-schema.js · graph-engine.js · graph-probes.js · story.js · graph-view.js 자체 검사</h1>
+<h1>core.js · graph-schema.js · graph-engine.js · graph-probes.js · story.js · graph-view.js · history.js · onboard.js · coach.js 자체 검사</h1>
 <pre id="out"></pre>
 <script type="module">
   const {
@@ -37,6 +37,10 @@
   const { parseField, runPlanJob, PLAN_TIMEOUT_MS } = await import(`./net.js?t=${Date.now()}`)
   const { NAV_TABS, navTab, navHref, isSoonTab, navTabFromSearch, soonMarkup, mountNav,
   } = await import(`./nav-tabs.js?t=${Date.now()}`)
+  const { MARK, markOp, toEntry, entries, group, when, paintList,
+  } = await import(`./history.js?t=${Date.now()}`)
+  const { emptyPanel, play, playing, stop: stopPlay } = await import(`./onboard.js?t=${Date.now()}`)
+  const coach = await import(`./coach.js?t=${Date.now()}`)
 
   const out = document.getElementById('out')
   let failed = 0
@@ -1342,6 +1346,510 @@
     mount.remove()
     return r
   })())
+
+  /* ══ history.js: op → 사람이 읽는 한 줄 ═══════════════════════════════════
+   *
+   * 이 파일에는 저장소가 없다. op 를 받아 줄로 옮기는 것만 한다 — 그래서 검사도
+   * 「이 op 를 넣으면 이런 줄이 나온다」 한 가지 모양이다.
+   */
+  ok('step.mark 은 applyOp 가 모르는 kind 라서 보드의 판을 흔들지 않는다', MARK === 'step.mark')
+  ok('markOp 은 kind · id · ts · actor 를 채운다', (() => {
+    const op = markOp({ step: 'develop', actor: 'u1', what: '노드 14개를 뽑았습니다' })
+    return op.kind === 'step.mark' && op.id.startsWith('mk-') && op.actor === 'u1'
+      && Number.isFinite(op.ts) && op.what === '노드 14개를 뽑았습니다'
+  })())
+  ok('ref 가 없으면 ref · refKind 를 아예 넣지 않는다', (() => {
+    const op = markOp({ step: 'develop', actor: 'u1', what: '했습니다' })
+    return !('ref' in op) && !('refKind' in op) && !('example' in op)
+  })())
+  ok('refKind 만 주고 ref 가 없으면 refKind 도 빠진다', (() => {
+    const op = markOp({ step: 'develop', actor: 'u1', what: '했습니다', refKind: 'panel' })
+    return !('ref' in op) && !('refKind' in op)
+  })())
+  ok('예시 재생이 남긴 줄에는 example 표시가 붙는다',
+    markOp({ step: 'develop', actor: 'u1', what: '했습니다', example: true }).example === true)
+  ok('what 은 200자에서 자른다 — 로그는 대본 보관소가 아니다',
+    markOp({ step: 'develop', actor: 'u1', what: '가'.repeat(400) }).what.length === 200)
+  ok('ref 는 120자에서 자른다', (() => {
+    const op = markOp({ step: 'develop', actor: 'u1', what: 'x', ref: 'r'.repeat(300), refKind: 'ep' })
+    return op.ref.length === 120 && op.refKind === 'ep'
+  })())
+
+  ok('markOp 을 그대로 toEntry 에 넣으면 그 단계 이름이 붙는다', (() => {
+    const e = toEntry(markOp({ step: 'develop', actor: 'u1', what: '씨앗 3개를 잡았습니다' }))
+    return e.stepLabel === '스토리 디벨롭' && e.what === '씨앗 3개를 잡았습니다' && e.actor === 'u1'
+  })())
+  ok('who 를 주면 id 대신 이름을 쓴다', (() => {
+    const op = markOp({ step: 'board', actor: 'u9', what: '했습니다' })
+    const e = toEntry(op, (id) => (id === 'u9' ? { name: '연출 김' } : null))
+    return e.name === '연출 김'
+  })())
+  ok('who 가 모르는 사람이면 id 를 그대로 보여준다',
+    toEntry(markOp({ step: 'board', actor: 'u9', what: '했습니다' }), () => null).name === 'u9')
+  ok('kind 나 id 가 없는 것은 줄이 되지 않는다',
+    toEntry(null) === null && toEntry({ kind: 'step.mark' }) === null && toEntry({ id: 'x' }) === null)
+
+  /*
+   * 히스토리에 넣지 않는 op 가 있다. 프레즌스나 읽음 표시는 "한 일"이 아니라서 섞으면
+   * 목록이 금방 쓸모없어진다 — SAY 에 없는 kind 는 null 로 떨어져야 한다.
+   */
+  ok('모르는 kind 는 목록에서 빠진다', toEntry({ kind: 'presence', id: 'p1', actor: 'u1' }) === null)
+  ok('board.patch 는 제목과 시나리오만 줄이 된다', (() => {
+    const t = toEntry({ kind: 'board.patch', id: 'b1', actor: 'u1', fields: { title: '케데헌' } })
+    const s = toEntry({ kind: 'board.patch', id: 'b2', actor: 'u1', fields: { scenario: '한 줄' } })
+    const n = toEntry({ kind: 'board.patch', id: 'b3', actor: 'u1', fields: { updatedAt: 1 } })
+    return t.what.includes('케데헌') && s.step === 'board' && n === null
+  })())
+
+  /*
+   * refKind 가 이 파일의 핵심이다. 「이어서 하기」가 보드의 #cut= 으로 보내도 되는 줄은
+   * refKind 가 panel 인 것만이다. 회차 id 를 그 자리에 넣으면 보드가 없는 패널을 찾다가
+   * 아무 일도 하지 않고, 누른 사람은 엉뚱한 화면에 도착한다.
+   */
+  ok('컷을 만든 줄은 panel 을 가리킨다', (() => {
+    const e = toEntry({ kind: 'panel.add', id: 'o1', actor: 'u1', panel: { id: 'p7', scene: 'S#3' } })
+    return e.refKind === 'panel' && e.ref === 'p7' && e.step === 'board' && e.what.includes('S#3')
+  })())
+  ok('키비주얼이 붙인 컷은 키비주얼 단계로 간다', (() => {
+    const e = toEntry({ kind: 'panel.add', id: 'o2', actor: 'u1', panel: { id: 'p8', scene: 'S#4', keyVisual: true } })
+    return e.step === 'keyvisual' && e.refKind === 'panel' && e.ref === 'p8'
+  })())
+  ok('인물 구도는 보드에서 만든 컷으로 읽는다', (() => {
+    const e = toEntry({ kind: 'panel.add', id: 'o3', actor: 'u1', panel: { id: 'p9', charId: 'c1', pose: '정면' } })
+    return e.step === 'board' && e.what.includes('정면') && e.refKind === 'panel'
+  })())
+  ok('AI 그림과 올린 그림을 갈라 적는다', (() => {
+    const a = toEntry({ kind: 'panel.version', id: 'v1', actor: 'u1', panelId: 'p1', version: { source: 'ai' } })
+    const h = toEntry({ kind: 'panel.version', id: 'v2', actor: 'u1', panelId: 'p1', version: { source: 'upload' } })
+    return a.step === 'keyvisual' && a.what.includes('생성') && h.step === 'board' && h.what.includes('올렸')
+  })())
+  ok('상태 이동은 한글로 적는다', (() => {
+    const e = toEntry({ kind: 'panel.status', id: 's1', actor: 'u1', panelId: 'p1', to: 'in_review' })
+    return e.what.includes('리뷰 중') && e.refKind === 'panel'
+  })())
+  ok('의견은 앞부분만 잘라 넣는다', (() => {
+    const e = toEntry({
+      kind: 'comment.add', id: 'c1', actor: 'u1',
+      comment: { panelId: 'p1', body: '가'.repeat(80) },
+    })
+    return e.what.includes('…') && e.what.length < 70 && e.refKind === 'panel'
+  })())
+  ok('인물은 char, 회차는 ep 를 가리킨다 — 둘 다 panel 이 아니다', (() => {
+    const c = toEntry({ kind: 'char.add', id: 'h1', actor: 'u1', char: { id: 'c1', name: '루미' } })
+    const p = toEntry({ kind: 'ep.add', id: 'e1', actor: 'u1', ep: { id: 'ep1', title: '1화' } })
+    return c.refKind === 'char' && p.refKind === 'ep' && c.what.includes('루미') && p.what.includes('1화')
+  })())
+  ok('step.mark 이 준 refKind 는 그대로 살아 넘어온다', (() => {
+    const e = toEntry(markOp({ step: 'develop', actor: 'u1', what: 'x', ref: 'probe|a,b', refKind: 'seed' }))
+    return e.refKind === 'seed' && e.ref === 'probe|a,b'
+  })())
+  ok('예전 예시 데이터(seed) 도 예시 줄로 읽는다',
+    toEntry({ kind: 'panel.add', id: 'sd', actor: 'u1', seed: true, panel: { id: 'p1' } }).example === true)
+
+  const HL = [
+    markOp({ step: 'develop', actor: 'u1', what: 'A' }),
+    markOp({ step: 'board', actor: 'u2', what: 'B' }),
+    markOp({ step: 'develop', actor: 'u2', what: 'C', example: true }),
+    { kind: 'presence', id: 'x', actor: 'u1' },
+  ]
+  ok('entries 는 최신이 앞이다', (() => {
+    const l = entries([{ ...HL[0], ts: 100 }, { ...HL[1], ts: 300 }, { ...HL[2], ts: 200 }])
+    return l.map((e) => e.what).join() === 'B,C,A'
+  })())
+  ok('entries 가 단계 · 사람으로 좁힌다', (() => {
+    const byStep = entries(HL, { step: 'develop' }).map((e) => e.what).sort().join()
+    const byActor = entries(HL, { actor: 'u2' }).map((e) => e.what).sort().join()
+    return byStep === 'A,C' && byActor === 'B,C'
+  })())
+  ok('example: false 는 예시를 빼고, true 는 예시만 남긴다', (() => {
+    const off = entries(HL, { example: false }).map((e) => e.what).sort().join()
+    const on = entries(HL, { example: true }).map((e) => e.what).join()
+    return off === 'A,B' && on === 'C'
+  })())
+  ok('줄이 되지 않는 op 는 세지 않는다', entries(HL).length === 3)
+  ok('limit 은 자른 뒤의 개수다', entries(HL, { limit: 2 }).length === 2)
+  ok('ops 가 없어도 빈 목록을 준다', entries(null).length === 0 && entries(undefined).length === 0)
+
+  /*
+   * 컷 9개를 만든 것이 9줄이 되면 목록이 그것만으로 찬다. 같은 사람이 같은 단계에서
+   * 잇달아 한 일은 한 덩어리로 묶는다 — 그리고 「이어서 하기」는 그 덩어리의 가장
+   * 최근 ref 를 쓴다. 그게 그 사람이 마지막으로 손댄 자리다.
+   */
+  ok('같은 사람 · 같은 단계는 한 덩어리로 묶는다', (() => {
+    const now = 1_700_000_000_000
+    const l = entries([
+      { ...markOp({ step: 'board', actor: 'u1', what: '컷 3' }), ts: now },
+      { ...markOp({ step: 'board', actor: 'u1', what: '컷 2' }), ts: now - 1000 },
+      { ...markOp({ step: 'board', actor: 'u1', what: '컷 1' }), ts: now - 2000 },
+    ])
+    const g = group(l)
+    return g.length === 1 && g[0].n === 3 && g[0].what === '컷 3 외 2건'
+  })())
+  ok('사람이나 단계가 다르면 묶지 않는다', (() => {
+    const now = 1_700_000_000_000
+    const l = entries([
+      { ...markOp({ step: 'board', actor: 'u1', what: 'A' }), ts: now },
+      { ...markOp({ step: 'board', actor: 'u2', what: 'B' }), ts: now - 500 },
+      { ...markOp({ step: 'develop', actor: 'u2', what: 'C' }), ts: now - 700 },
+    ])
+    return group(l).length === 3
+  })())
+  ok('예시 줄과 직접 한 줄은 섞이지 않는다', (() => {
+    const now = 1_700_000_000_000
+    const l = entries([
+      { ...markOp({ step: 'develop', actor: 'u1', what: 'A' }), ts: now },
+      { ...markOp({ step: 'develop', actor: 'u1', what: 'B', example: true }), ts: now - 500 },
+    ])
+    return group(l).length === 2
+  })())
+  ok('한참 전에 한 일은 따로 둔다', (() => {
+    const now = 1_700_000_000_000
+    const l = entries([
+      { ...markOp({ step: 'board', actor: 'u1', what: 'A' }), ts: now },
+      { ...markOp({ step: 'board', actor: 'u1', what: 'B' }), ts: now - 40 * 60_000 },
+    ])
+    return group(l).length === 2
+  })())
+  ok('덩어리는 그 안에서 가장 최근 ref 를 이어서 하기의 자리로 쓴다', (() => {
+    const now = 1_700_000_000_000
+    const l = entries([
+      { ...markOp({ step: 'board', actor: 'u1', what: '컷 2' }), ts: now },
+      { ...markOp({ step: 'board', actor: 'u1', what: '컷 1', ref: 'p1', refKind: 'panel' }), ts: now - 500 },
+    ])
+    const g = group(l)
+    return g.length === 1 && g[0].ref === 'p1' && g[0].refKind === 'panel'
+  })())
+  ok('group 은 빈 목록에도 견딘다', group([]).length === 0 && group(null).length === 0)
+
+  ok('오늘 한 일은 시:분, 어제 것은 월/일', (() => {
+    const now = new Date(2026, 0, 15, 14, 30).getTime()
+    const same = when(new Date(2026, 0, 15, 9, 5).getTime(), now)
+    const other = when(new Date(2026, 0, 3, 9, 5).getTime(), now)
+    return same === '09:05' && other === '1/3'
+  })())
+
+  /*
+   * 눌러도 아무 일 없는 버튼을 두지 않는다. onPick 이 있어도 ref 가 없는 줄은 <div> 다 —
+   * 이어서 갈 곳이 없는 줄이기 때문이다.
+   */
+  ok('ref 가 있는 줄만 버튼이 된다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    const now = 1_700_000_000_000
+    const l = group(entries([
+      { ...markOp({ step: 'board', actor: 'u1', what: '컷', ref: 'p1', refKind: 'panel' }), ts: now },
+      { ...markOp({ step: 'develop', actor: 'u2', what: '뽑기' }), ts: now - 10 * 60_000 },
+    ]))
+    paintList(mount, l, { onPick: () => {} })
+    const rows = mount.querySelectorAll('.hist__row')
+    const r = rows.length === 2 && rows[0].tagName === 'BUTTON' && rows[1].tagName === 'DIV'
+      && mount.classList.contains('hist')
+    mount.remove()
+    return r
+  })())
+  ok('줄을 누르면 그 줄이 onPick 으로 넘어온다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    const got = []
+    const l = group(entries([{ ...markOp({ step: 'board', actor: 'u1', what: '컷', ref: 'p1', refKind: 'panel' }), ts: 1 }]))
+    paintList(mount, l, { onPick: (e) => got.push(e) })
+    mount.querySelector('button.hist__row').click()
+    mount.remove()
+    return got.length === 1 && got[0].ref === 'p1' && got[0].refKind === 'panel'
+  })())
+  ok('onPick 이 없으면 아무 줄도 버튼이 아니다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    paintList(mount, group(entries([{ ...markOp({ step: 'board', actor: 'u1', what: 'x', ref: 'p1', refKind: 'panel' }), ts: 1 }])))
+    const r = !mount.querySelector('button')
+    mount.remove()
+    return r
+  })())
+  ok('비었으면 비었다고 적는다 — 빈 자리로 두지 않는다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    paintList(mount, [], { none: '내가 등록한 것이 아직 없습니다.' })
+    const r = mount.querySelector('.hist__none')?.textContent === '내가 등록한 것이 아직 없습니다.'
+    mount.remove()
+    return r
+  })())
+  ok('showStep 을 끄면 단계 이름을 붙이지 않는다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    const l = group(entries([{ ...markOp({ step: 'board', actor: 'u1', what: 'x' }), ts: 1 }]))
+    paintList(mount, l, { showStep: false })
+    const off = !mount.querySelector('.hist__step')
+    paintList(mount, l, { showStep: true })
+    const on = mount.querySelector('.hist__step')?.textContent === '스토리보드'
+    mount.remove()
+    return off && on
+  })())
+  ok('예시 줄에는 「예시」 표시가 붙는다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    const l = group(entries([{ ...markOp({ step: 'board', actor: 'u1', what: 'x', example: true }), ts: 1 }]))
+    paintList(mount, l, {})
+    const r = mount.querySelector('.hist__ex')?.textContent === '예시'
+    mount.remove()
+    return r
+  })())
+  ok('다시 그리면 앞의 줄이 남지 않는다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    paintList(mount, group(entries([{ ...markOp({ step: 'board', actor: 'u1', what: 'A' }), ts: 1 }])))
+    paintList(mount, group(entries([{ ...markOp({ step: 'board', actor: 'u1', what: 'B' }), ts: 2 }])))
+    const r = mount.querySelectorAll('.hist__row').length === 1 && mount.textContent.includes('B')
+    mount.remove()
+    return r
+  })())
+  ok('목록의 CSS 는 한 번만 넣는다', document.querySelectorAll('#histCss').length === 1)
+  ok('mount 가 없어도 던지지 않는다', (() => { paintList(null, []); return true })())
+
+  /* ══ onboard.js: 빈 화면 안내와 예시 재생기 ══════════════════════════════ */
+
+  ok('빈 화면 안내에 큰 줄과 설명이 들어간다', (() => {
+    const p = emptyPanel({ eyebrow: '스토리 디벨롭', lines: ['한 줄', '두 줄'], onExample: () => {} })
+    return p.querySelector('.onb__head').textContent === '처음 오셨나요?'
+      && p.querySelector('.onb__eyebrow').textContent === '스토리 디벨롭'
+      && p.querySelectorAll('.onb__lines li').length === 2
+  })())
+  /*
+   * 「예시 보기」에 data-coach 가 붙어 있어야 코치마크가 그 버튼을 가리킬 수 있다.
+   * 이 표시가 빠지면 앵커가 없어 그 장이 조용히 건너뛰어진다 — 눈에 안 보이는 고장이다.
+   */
+  ok('「예시 보기」는 코치마크가 가리킬 수 있게 표시를 달고 나온다', (() => {
+    const p = emptyPanel({ onExample: () => {} })
+    return p.querySelector('[data-coach="example"]')?.textContent === '예시 보기'
+  })())
+  ok('두 버튼의 이름을 화면마다 바꿔 달 수 있다', (() => {
+    const p = emptyPanel({ onExample: () => {}, onOwn: () => {}, exampleLabel: '예시 대본으로 보기', ownLabel: '직접 씁니다' })
+    return p.querySelector('.onb__go').textContent === '예시 대본으로 보기'
+      && p.querySelector('.onb__own').textContent === '직접 씁니다'
+  })())
+  ok('넘기지 않은 버튼은 만들지 않는다', (() => {
+    const only = emptyPanel({ onExample: () => {} })
+    const none = emptyPanel({ lines: ['한 줄'] })
+    return !only.querySelector('.onb__own') && !none.querySelector('.onb__row')
+  })())
+  ok('두 버튼이 각자의 손잡이를 부른다', (() => {
+    const hit = []
+    const p = emptyPanel({ onExample: () => hit.push('ex'), onOwn: () => hit.push('own') })
+    p.querySelector('.onb__go').click()
+    p.querySelector('.onb__own').click()
+    return hit.join() === 'ex,own'
+  })())
+  /* 예시 내용이 서버에 남는다는 사실을 모른 채 누르게 두지 않는다 */
+  ok('되돌릴 수 없다는 주의를 판에 남길 수 있다',
+    emptyPanel({ onExample: () => {}, warn: '예시 내용도 서버에 남습니다.' })
+      .querySelector('.onb__warn').textContent.includes('서버에 남습니다'))
+
+  ok('재생기는 띠를 세우고 첫 단계를 적는다', await (async () => {
+    const ran = []
+    const h = play({ steps: [
+      { say: '예시 시놉시스를 넣습니다', sub: '케데헌', ms: 1, run: () => ran.push(1) },
+      { say: '그래프를 뽑습니다', ms: 1, run: () => ran.push(2) },
+    ] })
+    const bar = document.querySelector('.onbbar')
+    const shape = !!bar && bar.getAttribute('role') === 'status'
+      && bar.querySelector('.onbbar__n').textContent === '1 / 2'
+      && bar.querySelector('.onbbar__say b').textContent === '예시 시놉시스를 넣습니다'
+      && bar.querySelector('.onbbar__say small').textContent === '케데헌'
+    const on = playing()
+    await new Promise((r) => setTimeout(r, 500))
+    const done = !playing() && !document.querySelector('.onbbar') && ran.join() === '1,2'
+    h?.stop?.()
+    return shape && on && done
+  })())
+  ok('두 번 겹쳐 재생하지 않는다', await (async () => {
+    play({ steps: [{ say: 'A', ms: 40 }] })
+    const second = play({ steps: [{ say: 'B', ms: 40 }] })
+    const one = document.querySelectorAll('.onbbar').length === 1
+    stopPlay()
+    return second === null && one && !playing()
+  })())
+  ok('단계가 없으면 띠를 세우지 않고 바로 끝낸다', (() => {
+    let done = false
+    const h = play({ steps: [], onDone: () => { done = true } })
+    return h === null && done && !document.querySelector('.onbbar') && !playing()
+  })())
+  /*
+   * 멈출 수 없는 자동 재생은 안내가 아니라 방해다. 그리고 끝까지 돌아도, 건너뛰어도
+   * onDone 을 한 번은 지나야 한다 — 화면이 그걸로 안내 판을 다시 그린다.
+   */
+  ok('「예시 끝내기」로 중간에 그만두면 남은 단계는 돌지 않는다', await (async () => {
+    const ran = []
+    let done = false
+    play({
+      steps: [{ say: 'A', ms: 5000, run: () => ran.push(1) }, { say: 'B', ms: 10, run: () => ran.push(2) }],
+      onDone: () => { done = true },
+    })
+    await new Promise((r) => setTimeout(r, 30))
+    document.querySelector('.onbbar__btn--go').click()
+    await new Promise((r) => setTimeout(r, 60))
+    return done && ran.join() === '1' && !playing() && !document.querySelector('.onbbar')
+  })())
+  ok('「잠시 멈춤」은 눌린 상태와 이름이 함께 바뀐다', await (async () => {
+    play({ steps: [{ say: 'A', ms: 4000 }] })
+    const b = document.querySelector('.onbbar__btn')
+    b.click()
+    const paused = b.textContent === '이어서' && b.getAttribute('aria-pressed') === 'true'
+    b.click()
+    const resumed = b.textContent === '잠시 멈춤' && b.getAttribute('aria-pressed') === 'false'
+    stopPlay()
+    await new Promise((r) => setTimeout(r, 20))
+    return paused && resumed
+  })())
+  /* 한 단계가 걸려도 재생이 그 자리에 멈춰 서면 안 된다 — 다음 단계로 넘어간다 */
+  ok('단계 하나가 걸려도 나머지는 계속 돈다', await (async () => {
+    const ran = []
+    play({ steps: [
+      { say: 'A', ms: 1, run: () => { throw new Error('일부러') } },
+      { say: 'B', ms: 1, run: () => ran.push(2) },
+    ] })
+    await new Promise((r) => setTimeout(r, 400))
+    return ran.join() === '2' && !playing()
+  })())
+  ok('돌지 않을 때 stop 을 불러도 던지지 않는다', (() => { stopPlay(); return !playing() })())
+  ok('재생기 CSS 도 한 번만 넣는다', document.querySelectorAll('#onboardCss').length === 1)
+
+  /* ══ coach.js: 막 위로 올려 가리키는 층 ═══════════════════════════════════ */
+
+  /* 앵커를 만들어 두고 검사한다. 카드는 지금 화면에 실제로 있는 것만 가리켜야 한다 */
+  const cStage = document.createElement('div')
+  cStage.innerHTML = '<div data-coach="one">하나</div><div data-coach="two">둘</div>'
+  document.body.appendChild(cStage)
+
+  /* 좌표는 화면이 다시 그려진 뒤에 잰다(show 가 rAF 를 지난다) — 그래서 한 프레임 기다린다 */
+  ok('시작하면 막이 서고 가리킬 것이 막 위로 올라간다', await (async () => {
+    coach.start({
+      cards: [
+        { head: '첫 장', body: '한 줄\n두 줄', spot: ['one'] },
+        { head: '둘째 장', body: 'x', spot: ['two'] },
+      ],
+      key: 'sb.test.coach', title: '검사',
+    })
+    const root = document.querySelector('.coach')
+    const up = !!root && root.getAttribute('aria-modal') === 'true'
+      && document.body.classList.contains('coaching')
+    await new Promise((r) => setTimeout(r, 40))
+    const drawn = !!root.querySelector('.coach__veil')
+      && root.querySelector('.coach__h').textContent === '첫 장'
+      && root.querySelectorAll('.coach__p').length === 2
+      && root.querySelector('.coach__n').textContent === '1 / 2'
+      && document.querySelector('[data-coach="one"]').classList.contains('coach-lit')
+    coach.stop(false)
+    return up && drawn
+  })())
+  /* 막을 눌러도 다음 장으로 넘어간다. 앞뒤로 오갈 수 있고 마지막에서 넘기면 닫힌다 */
+  ok('다음 장으로 넘어가면 가리키는 것도 옮겨간다', await (async () => {
+    let done = false
+    coach.start({
+      cards: [{ head: 'A', body: 'x', spot: ['one'] }, { head: 'B', body: 'y', spot: ['two'] }],
+      key: 'sb.test.coach', onDone: () => { done = true },
+    })
+    await new Promise((r) => setTimeout(r, 40))
+    document.querySelector('.coach__next').click()
+    await new Promise((r) => setTimeout(r, 40))
+    const moved = document.querySelector('.coach__h').textContent === 'B'
+      && document.querySelector('[data-coach="two"]').classList.contains('coach-lit')
+      && !document.querySelector('[data-coach="one"]').classList.contains('coach-lit')
+    document.querySelector('.coach__next').click()
+    await new Promise((r) => setTimeout(r, 40))
+    return moved && done && !document.querySelector('.coach') && !document.querySelector('.coach-lit')
+  })())
+  ok('마지막 장의 버튼 이름을 카드가 정할 수 있다', await (async () => {
+    coach.start({
+      cards: [{ head: 'A', body: 'x', spot: ['one'], next: '시작하기', skip: '다시 보지 않기' }],
+      key: 'sb.test.coach',
+    })
+    await new Promise((r) => setTimeout(r, 40))
+    const r = document.querySelector('.coach__next').textContent === '시작하기'
+      && document.querySelector('.coach__skip').textContent === '다시 보지 않기'
+    coach.stop(false)
+    return r
+  })())
+  ok('그만두면 막과 표시가 다 지워진다', (() => {
+    coach.start({ cards: [{ head: 'x', body: 'y', spot: ['one'] }], key: 'sb.test.coach' })
+    coach.stop(false)
+    return !document.querySelector('.coach') && !document.body.classList.contains('coaching')
+      && !document.querySelector('.coach-lit')
+  })())
+  ok('카드가 없으면 막을 세우지 않고 바로 끝낸다', (() => {
+    let done = false
+    coach.start({ cards: [], key: 'sb.test.coach', onDone: () => { done = true } })
+    return done && !document.querySelector('.coach')
+  })())
+  /*
+   * 이것이 이 파일에서 가장 중요한 규칙이다. 없는 것을 가리키면 코치마크가 먼저 신뢰를
+   * 잃는다 — 앵커가 하나도 없는 장은 조용히 건너뛰고, 그런 장만 있으면 아예 열지 않는다.
+   */
+  ok('앵커가 없는 장은 조용히 건너뛴다', await (async () => {
+    let done = false
+    coach.start({
+      cards: [{ head: '없는 것', body: 'x', spot: ['nope'] }],
+      key: 'sb.test.coach', onDone: () => { done = true },
+    })
+    await new Promise((r) => setTimeout(r, 60))
+    return done && !document.querySelector('.coach')
+  })())
+  ok('건너뛰기는 다시 보지 않게 기억하고, 그냥 닫기는 기억하지 않는다', (() => {
+    const key = 'sb.test.coach.remember'
+    localStorage.removeItem(key)
+    coach.start({ cards: [{ head: 'x', body: 'y', spot: ['one'] }], key })
+    coach.stop(false)
+    const notYet = coach.seen(key) === false
+    coach.start({ cards: [{ head: 'x', body: 'y', spot: ['one'] }], key })
+    coach.stop(true)
+    const now = coach.seen(key) === true
+    localStorage.removeItem(key)
+    return notYet && now
+  })())
+  ok('본 적 없는 키는 seen 이 false', coach.seen('sb.test.coach.never') === false)
+  ok('막이 서 있는 동안 다시 시작해도 두 겹이 되지 않는다', (() => {
+    coach.start({ cards: [{ head: 'A', body: 'x', spot: ['one'] }], key: 'sb.test.coach' })
+    coach.start({ cards: [{ head: 'B', body: 'x', spot: ['two'] }], key: 'sb.test.coach' })
+    const one = document.querySelectorAll('.coach').length === 1
+    coach.stop(false)
+    return one
+  })())
+  /*
+   * 앵커가 지금 열려 있지 않은 탭 안에 있으면 크기가 0 으로 재어져 막 위로 올려도
+   * 보이지 않는다. 그래서 step 이 있는 장은 host 에게 그 탭을 열어 달라고 한다.
+   */
+  ok('step 이 있는 장은 host 에게 그 자리를 열어 달라고 한다', (() => {
+    const went = []
+    let at = 'seeds'
+    coach.start({
+      cards: [{ head: 'x', body: 'y', spot: ['one'], step: 'hist' }],
+      key: 'sb.test.coach',
+      host: { atStep: () => at, goStep: (t) => { went.push(t); at = t } },
+    })
+    coach.stop(false)
+    return went.join() === 'hist'
+  })())
+  ok('이미 그 자리에 있으면 옮기지 않는다', (() => {
+    const went = []
+    coach.start({
+      cards: [{ head: 'x', body: 'y', spot: ['one'], step: 'hist' }],
+      key: 'sb.test.coach',
+      host: { atStep: () => 'hist', goStep: (t) => went.push(t) },
+    })
+    coach.stop(false)
+    return went.length === 0
+  })())
+  ok('host 가 없어도 step 이 있는 카드에 던지지 않는다', (() => {
+    coach.start({ cards: [{ head: 'x', body: 'y', spot: ['one'], step: 'hist' }], key: 'sb.test.coach' })
+    const up = !!document.querySelector('.coach')
+    coach.stop(false)
+    return up
+  })())
+  ok('코치마크 CSS 도 한 번만 넣는다', (() => {
+    coach.start({ cards: [{ head: 'x', body: 'y', spot: ['one'] }], key: 'sb.test.coach' })
+    coach.stop(false)
+    return document.querySelectorAll('#coachCss').length === 1
+  })())
+  ok('돌지 않을 때 stop 을 불러도 던지지 않는다', (() => { coach.stop(false); return true })())
+  cStage.remove()
 
   // ── net.js: AWSJSON 필드 풀기 ─────────────────────────────────────────────
   // 배포된 리졸버들은 JSON.stringify 한 문자열을 AWSJSON 으로 내보내고 AppSync 가 한 번 더

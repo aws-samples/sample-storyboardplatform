@@ -118,6 +118,36 @@
   .foot { margin-top: 26px; font-size: 12px; line-height: 1.7; color: var(--sb-ink-3) }
   .foot a { color: var(--sb-accent-ink) }
 
+  /*
+   * 지나간 일. 목록 자체의 모양(.hist*)은 demo/history.js 가 넣습니다 — 홈과 보드와
+   * 키비주얼이 같은 목록을 보여주므로 화면마다 베껴 두지 않습니다. 여기 있는 것은
+   * 그 목록을 이 화면에 앉히는 것과 머리줄뿐입니다.
+   */
+  .act { margin-top: 34px }
+  .act__h {
+    display: flex; align-items: center; gap: 9px; margin: 0 0 11px;
+    font-size: 13.5px; font-weight: 600; letter-spacing: -.01em;
+  }
+  .act__h::after {
+    content: ''; flex: 1 1 auto; height: 1px; background: var(--sb-line); order: 2;
+  }
+  .act__n { font-family: var(--sb-mono); font-size: 11px; color: var(--sb-ink-3); order: 1 }
+  .act__mine {
+    order: 3; flex: none; background: none; border: 1px solid var(--sb-line);
+    border-radius: var(--sb-r); padding: 3px 9px; font: inherit; font-size: 11.5px;
+    color: var(--sb-ink-3); cursor: pointer;
+  }
+  .act__mine:hover { border-color: var(--sb-ink-3); color: var(--sb-ink-2) }
+  .act__mine[aria-pressed="true"] {
+    color: var(--sb-accent); border-color: var(--sb-accent-line); background: var(--sb-accent-soft);
+  }
+  .act__note { margin: 10px 0 0; font-size: 11.5px; line-height: 1.7; color: var(--sb-ink-3) }
+  .act[hidden] { display: none }
+
+  /* 처음 온 사람에게 보이는 판. 모양은 demo/onboard.js 가 넣습니다 */
+  .onbslot { margin-top: 34px }
+  .onbslot[hidden] { display: none }
+
   /* ── 로그인 문 ───────────────────────────────────── */
   .gate {
     position: fixed; inset: 0; z-index: 90;
@@ -213,8 +243,26 @@
       시놉시스에서 시작해 대본이 되고, 그림이 나오고, 마지막에 보드에 얹힙니다.
       순서대로 가도 되고 필요한 단계만 골라도 됩니다.
     </p>
-    <ol class="steps" id="steps"></ol>
+    <ol class="steps" id="steps" data-coach="steps"></ol>
     <p class="foot" id="foot"></p>
+
+    <!-- 처음 온 사람에게 뜨는 판. 활동 기록이 하나도 없을 때만 보입니다 -->
+    <div class="onbslot" id="onbSlot" hidden></div>
+
+    <!--
+      전역 활동. 누가 · 어떤 단계에서 · 뭘 · 언제 했는지 한자리에 모입니다. 화면마다
+      따로 쌓는 것이 아니라 보드의 op 로그 한 곳을 읽습니다 — 그래서 다른 사람이 어제
+      키비주얼에서 한 일도 여기서 보입니다.
+    -->
+    <section class="act" id="actBox" hidden data-coach="actbox">
+      <h2 class="act__h">지나간 일
+        <span class="act__n" id="actN"></span>
+        <button class="act__mine" id="actMine" type="button" aria-pressed="false"
+                title="내가 한 것만 봅니다">내 것만</button>
+      </h2>
+      <div id="act"></div>
+      <p class="act__note" id="actNote"></p>
+    </section>
   </div>
 </main>
 

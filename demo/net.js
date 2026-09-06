@@ -167,6 +167,45 @@ export function planClient() {
   return { plan: (spec) => runPlanJob((query, variables) => gqlPost(cfg, query, variables), spec) }
 }
 
+/**
+ * 로그만 읽는 최소 클라이언트. 홈처럼 활동 내역만 보여주는 화면에서 씁니다.
+ *
+ * connect() 를 쓰지 않는 이유는 그쪽이 WebSocket 을 열고 구독 두 개를 붙이고
+ * connection_ack 을 기다린다는 것입니다. 홈은 실시간으로 바뀔 것이 없고 한 번 읽어
+ * 그리면 끝입니다. 문 앞에서 소켓을 붙잡고 있을 이유가 없습니다.
+ *
+ * 쓰기(sendOp)도 하나 둡니다. 보드 화면 밖에서도 「누가 뭘 했다」를 같은 로그에 남길
+ * 수 있어야 하기 때문입니다 — 키비주얼과 디벨롭이 그렇게 씁니다. connect() 쪽의
+ * sendOp 과 달리 실패하면 대기열에 넣지 않고 그대로 던집니다. 기록은 화면의 본 일이
+ * 아니므로 부르는 쪽이 조용히 넘깁니다.
+ *
+ * @param {string} [boardId] - 없으면 설정의 기본 보드
+ * @returns {{boardId: string, fetchOps: Function, sendOp: Function}|null} 설정이 없으면 null
+ */
+export function opsClient(boardId) {
+  const cfg = window.SB_CONFIG
+  if (!cfg?.graphqlUrl) return null
+  const id = boardId || cfg.boardId || 'demo'
+  return {
+    boardId: id,
+    sendOp: (op) => gqlPost(cfg, M_OP, {
+      boardId: id, id: op.id, ts: pad(op.ts), actor: op.actor, body: JSON.stringify(op),
+    }),
+    fetchOps: async (since) => {
+      const out = []
+      let token = null
+      do {
+        const d = await gqlPost(cfg, Q_LIST, { boardId: id, since: since ? pad(since) : null, nextToken: token })
+        for (const it of d.listOps.items) {
+          try { out.push(JSON.parse(it.body)) } catch {  }
+        }
+        token = d.listOps.nextToken
+      } while (token)
+      return out.sort((a, b) => a.ts - b.ts)
+    },
+  }
+}
+
 const Q_LOAD_GRAPH = `query LoadGraph($projectId: String) { loadGraph(projectId: $projectId) }`
 const Q_QUERY_GRAPH = `query QueryGraph($spec: AWSJSON!) { queryGraph(spec: $spec) }`
 const M_SAVE_GRAPH = `mutation SaveGraph($spec: AWSJSON!) { saveGraph(spec: $spec) }`
