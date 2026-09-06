@@ -62,6 +62,15 @@ const M_PRESENCE = `mutation Beat($boardId: ID!, $actor: ID!, $body: String!) {
 const M_PLAN = `mutation Plan($spec: AWSJSON!) { plan(spec: $spec) { jobId status } }`
 const Q_PLAN_RESULT = `query PlanResult($jobId: ID!) { planResult(jobId: $jobId) }`
 
+// 세계관 네비게이터 챗봇. plan 과 같은 이유로 Mutation 이고 같은 폴링 패턴을 쓴다.
+// plan 은 spec 하나를 AWSJSON 으로 받지만 navigate 는 필드가 나뉜 입력 타입을 받는다
+// (infra/schema.graphql 의 NavigateInput). navigateResult 의 owner 인자는 리졸버가
+// 쓰지 않으므로 보내지 않는다 — 대조는 토큰의 클레임으로 한다.
+const M_NAVIGATE = `mutation Navigate($input: NavigateInput!) {
+  navigate(input: $input) { jobId status }
+}`
+const Q_NAVIGATE_RESULT = `query NavigateResult($jobId: ID!) { navigateResult(jobId: $jobId) }`
+
 const S_OP = `subscription OnOp($boardId: ID!) { onOp(boardId: $boardId) { ${OP_FIELDS} } }`
 const S_PRESENCE = `subscription OnBeat($boardId: ID!) {
   onPresence(boardId: $boardId) { boardId actor body }
@@ -155,16 +164,85 @@ export async function runPlanJob(post, spec, opts = {}) {
   throw new Error(`plan 이 ${Math.round(timeoutMs / 1000)}초 안에 끝나지 않았다`)
 }
 
+/** navigate 리졸버가 튕기는 그래프 크기. 왕복 한 번을 아끼려고 여기서도 본다 */
+const GRAPH_MAX_CHARS = 180_000
+
+/**
+ * 네비게이터 질문 한 건을 띄우고 답을 기다린다. runPlanJob 과 같은 흐름이다 —
+ * navigate mutation 으로 jobId 를 받고 navigateResult(jobId) 를 폴링한다.
+ * 결과는 plan 과 같은 Ops 테이블 항목이라 {status, text, ...} 모양도 같다.
+ *
+ * @param {Function|Object} net - (query, variables) => Promise<data> 또는 planClient() 의 결과
+ * @param {Object} input - {projectId, question, graphData, conversationHistory, model}
+ *   graphData 는 {nodes, edges} 객체, conversationHistory 는 [{role, content}] 배열로 준다.
+ *   AWSJSON 필드라서 여기서 JSON 문자열로 만들어 보낸다
+ * @param {Object} [opts] - {pollMs, timeoutMs}. 테스트에서 기다리지 않게 두는 문이다
+ * @returns {Promise<string>} 모델이 쓴 답변 텍스트
+ */
+export async function runNavigateJob(net, input = {}, opts = {}) {
+  const post = typeof net === 'function' ? net : net?.post
+  if (!post) throw new Error('네비게이터는 Bedrock 연결이 필요하다')
+
+  const pollMs = opts.pollMs ?? PLAN_POLL_MS
+  const timeoutMs = opts.timeoutMs ?? PLAN_TIMEOUT_MS
+
+  const graphData = JSON.stringify(input.graphData ?? { nodes: [], edges: [] })
+  if (graphData.length > GRAPH_MAX_CHARS) {
+    throw new Error('그래프가 너무 커서 질문을 보낼 수 없다')
+  }
+
+  const started = await post(M_NAVIGATE, {
+    input: {
+      projectId: input.projectId || 'default',
+      question: input.question,
+      graphData,
+      conversationHistory: JSON.stringify(input.conversationHistory ?? []),
+      model: input.model,
+    },
+  })
+  const jobId = started?.navigate?.jobId
+  if (!jobId) throw new Error('navigate jobId 를 받지 못했다')
+
+  const deadline = Date.now() + timeoutMs
+  let fails = 0
+  while (Date.now() < deadline) {
+    await sleep(pollMs)
+
+    let got
+    try {
+      got = parseField((await post(Q_NAVIGATE_RESULT, { jobId })).navigateResult)
+      fails = 0
+    } catch (e) {
+      // Bedrock 은 계속 돌고 있다. 몇 번은 참고 다시 물어본다
+      if (++fails > PLAN_POLL_FAILS) throw e
+      continue
+    }
+
+    if (got?.status === 'done') return String(got.text ?? '')
+    if (got?.status === 'error') throw new Error(got.error || 'navigate 실패')
+  }
+  throw new Error(`답변이 ${Math.round(timeoutMs / 1000)}초 안에 오지 않았다`)
+}
+
 /**
  * plan 만 쓰는 최소 클라이언트. story-graph.html 처럼 보드 동기화(구독·프레즌스)는
  * 필요 없고 Bedrock 호출만 하는 화면에서 쓴다.
  *
- * @returns {{plan: Function}|null} 설정이 없으면 null — 부르는 쪽은 로컬 모드로 내려간다
+ * post 도 함께 내보낸다 — 네비게이터처럼 이 클라이언트를 그대로 받아
+ * 다른 오퍼레이션을 부르는 곳이 있다 (runNavigateJob).
+ *
+ * @returns {{plan: Function, navigate: Function, post: Function}|null}
+ *   설정이 없으면 null — 부르는 쪽은 로컬 모드로 내려간다
  */
 export function planClient() {
   const cfg = window.SB_CONFIG
   if (!cfg?.graphqlUrl) return null
-  return { plan: (spec) => runPlanJob((query, variables) => gqlPost(cfg, query, variables), spec) }
+  const post = (query, variables) => gqlPost(cfg, query, variables)
+  return {
+    post,
+    plan: (spec) => runPlanJob(post, spec),
+    navigate: (input) => runNavigateJob(post, input),
+  }
 }
 
 const Q_LOAD_GRAPH = `query LoadGraph($projectId: String) { loadGraph(projectId: $projectId) }`

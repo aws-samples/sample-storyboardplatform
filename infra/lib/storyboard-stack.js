@@ -126,6 +126,8 @@ class StoryboardStack extends Stack {
     js(bus, 'Presence', 'Mutation', 'publishPresence', 'presence.js')
     // plan 결과는 GraphFn 이 Ops 테이블에 적어 둔 것을 읽어 온다
     js(ops, 'PlanResult', 'Query', 'planResult', 'planResult.js')
+    // navigate 결과도 같은 항목이다 — GraphFn 이 두 잡을 같은 키로 적는다
+    js(ops, 'NavigateResult', 'Query', 'navigateResult', 'navigateResult.js')
     // plan 자체는 GraphFn 이 받는다 — 데이터소스는 graphDs 를 만든 뒤에 붙인다.
     // Bedrock 을 치던 HTTP 데이터소스(BedrockDs)는 지웠다.
 
@@ -248,6 +250,8 @@ class StoryboardStack extends Stack {
     js(graphDs, 'UpdateGraph', 'Mutation', 'updateGraph', 'updateGraph.js')
     // Query 가 아니라 Mutation 이다. 리졸버가 Lambda 를 Event 로 띄우고 jobId 만 돌려준다
     js(graphDs, 'Plan', 'Mutation', 'plan', 'plan.js')
+    // 네비게이터 챗봇도 같은 Lambda·같은 Event 패턴이다. 새 권한은 필요 없다
+    js(graphDs, 'Navigate', 'Mutation', 'navigate', 'navigate.js')
 
     const sg = new ec2.SecurityGroup(this, 'GpuSg', { vpc: net, description: 'storyboard gpu' })
 
