@@ -1,4 +1,4 @@
-# Storyboard Board
+# Storyboard Platform
 
 A collaborative storyboard: planners, artists, and a director open the **same board at the same time**,
 break a script into cuts, generate the art, mark up the drawings with feedback, and sign off.
