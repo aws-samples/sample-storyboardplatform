@@ -990,7 +990,7 @@ function warnBlock(warnings) {
 }
 
 function freeBox() {
-  return `<div class="free-box">
+  return `<div class="free-box" data-coach="free">
       <h4>혹은 직접 입력</h4>
       <textarea id="freeIn" rows="3" spellcheck="false"
         placeholder="원하는 스토리 방향을 적습니다. 예: 미라가 먼저 비밀을 알아내고, 루미를 감싸는 쪽으로."></textarea>
@@ -1656,6 +1656,12 @@ function runExample() {
         ? '직접 하실 때는 이 버튼이 Bedrock 으로 이 일을 합니다. 예시는 미리 뽑아 둔 결과를 얹으므로 기다리지 않습니다'
         : '로컬 모드에서는 추출이 막혀 있어 미리 뽑아 둔 결과를 얹습니다',
       spot: 'extract', see: 'input',
+      /*
+       * 미리 뽑아 둔 그래프를 얹는 것이라 실제로는 즉시 끝납니다. 그래도 3초를 기다립니다 —
+       * 직접 할 때 이 버튼은 Bedrock 을 부르고 대본이 길면 먼저 요약까지 합니다. 예시가
+       * 즉시 끝나는 것으로 보여 주면 직접 하는 사람이 그 기다림을 고장으로 읽습니다.
+       */
+      wait: 3000, waitSay: `${modelLabel()} 로 그래프를 뽑고 있습니다`,
       run: async () => {
         await boot()
         if (STORE) mark(`예시 그래프를 얹었습니다 — 노드 ${STORE.stats().nodes}개`)
@@ -1671,16 +1677,40 @@ function runExample() {
       say: '씨앗 하나에서 분기를 만듭니다',
       sub: '직접 하실 때는 이 버튼이 모델을 부릅니다. 예시는 미리 받아 둔 분기를 그 자리에 세웁니다',
       spot: '[data-seed="0"]', see: 'tabs',
+      wait: 3000, waitSay: '분기 세 개를 만들고 있습니다',
       run: () => (SEEDS.length ? pickSeed(0, true) : null),
     },
+    /*
+     * 자유 입력을 짚습니다. 탐지기가 찾아 준 씨앗만으로 도는 화면으로 읽히면 기획자가
+     * 「내 생각을 넣을 자리」를 못 찾습니다 — 이 칸이 그 자리입니다. 예시는 방향 한 줄을
+     * 넣어 보이는 것까지만 하고 생성은 하지 않습니다(그것이 모델을 부르는 자리입니다).
+     */
     {
-      say: demoActive() ? '이 화면의 예시는 여기까지입니다' : '여기까지가 예시입니다',
+      say: '기획자가 방향을 직접 줄 수도 있습니다',
+      sub: '탐지기가 제안한 분기가 마음에 들지 않을 때 이 칸에 원하는 방향을 적습니다. 씨앗을 고르지 않아도 됩니다',
+      spot: 'free', see: 'tabs',
+      tag: '이 칸을 누르십시오', do: '표시된 칸을 눌러 예시 방향을 넣습니다',
+      run: () => {
+        const box = $('freeIn')
+        if (!box) return
+        box.value = '미라가 먼저 비밀을 알아내고, 루미를 감싸는 쪽으로.'
+        box.scrollIntoView({ block: 'nearest' })
+      },
+    },
+    /*
+     * 끝은 말풍선의 버튼 하나로 냅니다. 예전에는 「지나간 일」을 짚고 그것을 누르게 했는데,
+     * 짚어 준 자리를 누르는 것과 예시를 끝내는 것이 같은 동작이 되어 무엇이 끝나는지가
+     * 흐렸습니다. 나가는 일은 나가는 버튼으로 합니다. 지나간 일은 see 로 열어 둡니다 —
+     * 예시가 남긴 기록이 어디에 쌓이는지는 보여 주고 싶습니다.
+     */
+    {
+      say: demoActive() ? '스토리 디벨롭을 다 보셨습니다' : '여기까지가 예시입니다',
       sub: demoActive()
         ? demoSay('develop')
         : '분기를 골라 [이 분기로 대본 생성] 을 누르면 개요 → 컷 → 대본으로 이어집니다. 이제 직접 해 보세요',
-      spot: 'histbox',
-      do: demoActive() ? '「지나간 일」을 눌러 다음 화면으로 넘어갑니다' : '「지나간 일」을 눌러 예시를 마칩니다',
-      tag: demoActive() ? '다음 화면으로' : '여기를 누르십시오',
+      see: 'histbox',
+      go: demoActive() ? '다음 메뉴 예시로 넘어가기' : '예시 마치기',
+      leaves: demoActive(),
     },
   ]
 

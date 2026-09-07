@@ -1585,6 +1585,13 @@ let exampleRun = null
  */
 const EXAMPLE_SPOTS = ['scenario', '#newChar', '#breakdown', 'board']
 
+/*
+ * 그 단계에서 기다릴 초. 모델을 부르는 자리에만 답니다 — 「컷으로 분해」가 그렇습니다.
+ * 예시는 미리 만들어 둔 op 를 밀어 넣으므로 실제로는 즉시 끝나지만, 그렇게 보여 주면
+ * 직접 할 때의 기다림을 고장으로 읽게 됩니다(app/onboard.js 머리글의 wait).
+ */
+const EXAMPLE_WAITS = { 2: { wait: 3000, waitSay: '시나리오를 컷으로 나누고 있습니다' } }
+
 /**
  * 예시를 클릭에 맞춰 안내합니다. op 를 한 번에 밀어 넣지 않고 seedBuild 의 표시(marks)
  * 단위로 나눠 넣어, 시나리오 → 인물 → 컷 → 리뷰 순서를 사람이 한 번씩 눌러 보게 합니다.
@@ -1602,6 +1609,7 @@ function runExample() {
     const to = marks[i + 1]?.at ?? ops.length
     return {
       say: m.say, sub: m.sub, spot: EXAMPLE_SPOTS[i], see: 'board',
+      ...(EXAMPLE_WAITS[i] || {}),
       run: () => {
         for (const op of ops.slice(from, to)) push(op)
         if (!selectedId) { pickView() }
@@ -1609,14 +1617,16 @@ function runExample() {
       },
     }
   })
+  // 끝은 말풍선의 버튼으로 냅니다 — 나가는 일과 짚은 자리를 누르는 일을 가릅니다
   steps.push({
-    say: demoActive() ? '이 화면의 예시는 여기까지입니다' : '여기까지가 예시입니다',
+    say: demoActive() ? '스토리보드까지 다 보셨습니다' : '여기까지가 예시입니다',
     sub: demoActive()
       ? demoSay('board')
       : '이제 컷을 눌러 오른쪽에서 고치거나, 관리 화면에서 보드를 비우고 직접 시작할 수 있습니다',
-    spot: 'histbox',
-    // 보드가 마지막 걸음이라 여기서는 두 갈래가 같은 말이 됩니다 — 둘 다 예시가 끝납니다
-    do: '「지나간 일」을 눌러 예시를 마칩니다',
+    see: 'histbox',
+    // 보드가 마지막 걸음이라 여기서는 두 갈래가 같은 곳으로 갑니다 — 홈으로 돌아갑니다
+    go: demoActive() ? '예시를 마치고 홈으로' : '예시 마치기',
+    leaves: demoActive(),
     run: () => { pickView(); render() },
   })
   exampleRun = guideExample({

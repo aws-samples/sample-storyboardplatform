@@ -2216,6 +2216,80 @@
     stopGuide()
     return label === '대본을 넣습니다'
   })())
+  /*
+   * 화면을 떠나는 버튼은 그렇게 보여야 한다 — 「다음 메뉴 예시로 넘어가기 →」. 떠나는
+   * 것과 이 화면에서 한 걸음 가는 것이 같은 모양이면 어디로 가는지 모른 채 누른다.
+   */
+  ok('화면을 떠나는 버튼에는 표시가 붙는다', await (async () => {
+    guide({ steps: [{ say: 'A', go: '다음 메뉴 예시로 넘어가기', leaves: true }] })
+    await painted()
+    const go = document.querySelector('.onbg__next')
+    const marked = go.classList.contains('onbg__next--go')
+    stopGuide()
+    guide({ steps: [{ say: 'A', go: '다음' }] })
+    await painted()
+    const plain = !document.querySelector('.onbg__next').classList.contains('onbg__next--go')
+    stopGuide()
+    return marked && plain
+  })())
+  /*
+   * ── 기다리는 단계 ──────────────────────────────────────────────────────────
+   *
+   * 예시는 미리 받아 둔 데이터를 얹으므로 실제로는 즉시 끝난다. 그런데 즉시 끝나는 것으로
+   * 보여 주면 두 가지가 어긋난다 — 직접 할 때 같은 버튼이 20초를 먹는데 그것을 고장으로
+   * 읽게 되고, 즉시 완성된 결과는 진짜로 만든 것처럼 보이지 않는다. 그래서 모델을 부르는
+   * 자리에는 wait 를 단다. 검사에서는 그 초를 짧게 줄여 돌린다.
+   */
+  ok('wait 를 준 단계는 그 시간이 지난 뒤에 돈다', await (async () => {
+    const ran = []
+    guide({ steps: [{ say: 'A', spot: 'gone', wait: 60, waitSay: '그래프를 뽑고 있습니다', run: () => ran.push(1) }] })
+    gSpot('gone').click()
+    await new Promise((r) => setTimeout(r, 10))
+    // 아직 안 돌았고, 말풍선은 무엇을 기다리는지 적고 있다
+    const waiting = !ran.length && guiding()
+      && document.querySelector('.onbg__waitsay')?.textContent === '그래프를 뽑고 있습니다'
+      && !!document.querySelector('.onbg__waitfill')
+    await new Promise((r) => setTimeout(r, 90))
+    return waiting && ran.join() === '1' && !guiding()
+  })())
+  /*
+   * 기다리는 동안에는 짚은 자리가 걷혀야 한다. 안 걷으면 그 자리가 여전히 열려 있어서
+   * 두 번, 세 번 눌리고 — 사람은 「첫 클릭이 안 먹었다」로 읽는다.
+   */
+  ok('기다리는 동안에는 짚은 자리를 걷어 두 번 눌리지 않게 한다', await (async () => {
+    const ran = []
+    guide({ steps: [
+      { say: 'A', spot: 'gone', wait: 60, run: () => ran.push(1) },
+      { say: 'B', spot: 'gtwo' },
+    ] })
+    gSpot('gone').click()
+    await new Promise((r) => setTimeout(r, 10))
+    const cleared = guideMarks().lit === null
+    gSpot('gone').click()   // 기다리는 중에 또 눌러 본다
+    await new Promise((r) => setTimeout(r, 90))
+    const once = ran.join() === '1' && guideAt() === 1
+    stopGuide()
+    return cleared && once
+  })())
+  /* 기다리는 동안에는 「다음」 버튼도 없어야 한다 — 기다림을 건너뛰는 길이 되어 버린다 */
+  ok('기다리는 동안에는 넘어갈 버튼을 내지 않는다', await (async () => {
+    guide({ steps: [{ say: 'A', spot: 'gone', wait: 80 }, { say: 'B' }] })
+    gSpot('gone').click()
+    await new Promise((r) => setTimeout(r, 10))
+    const none = !document.querySelector('.onbg__next') && !document.querySelector('.onbg__do')
+    stopGuide()
+    return none
+  })())
+  /* 기다리는 중에 그만두면 run 은 돌지 않는다 — 막을 걷었는데 화면이 바뀌면 안 된다 */
+  ok('기다리는 중에 그만두면 그 단계는 돌지 않는다', await (async () => {
+    const ran = []
+    guide({ steps: [{ say: 'A', spot: 'gone', wait: 60, run: () => ran.push(1) }] })
+    gSpot('gone').click()
+    await new Promise((r) => setTimeout(r, 10))
+    stopGuide()
+    await new Promise((r) => setTimeout(r, 90))
+    return !ran.length && !guiding() && !document.querySelector('.onbg')
+  })())
   /* spot 을 CSS 선택자로도 준다 — data-coach 를 못 붙이는 자리가 있다 */
   ok('짚을 자리를 CSS 선택자로도 준다', (() => {
     guide({ steps: [{ say: 'A', spot: '[data-coach="gtwo"]' }] })

@@ -44,6 +44,18 @@
  * 안내 중에 끼워 넣으면 배우는 시간이 아니라 기다리는 시간이 됩니다. 실제 모델은 예시를
  * 마친 뒤 직접 누를 때 돕니다.
  *
+ * ══ 그래도 몇 초는 기다리게 합니다 (wait)
+ *
+ * 데이터가 이미 손에 있으니 누르는 순간 그래프가 다 서는 것이 기술적으로는 맞습니다.
+ * 그런데 그러면 예시를 본 사람이 「이 버튼은 원래 즉시 끝나는 일」로 배웁니다. 직접
+ * 할 때 같은 버튼이 20초를 먹으면 그 사람은 화면이 고장 난 것으로 읽습니다 — 예시가
+ * 가르친 것이 틀렸기 때문입니다. 그리고 즉시 완성된 결과는 진짜로 만든 것처럼 보이지
+ * 않습니다(사용자의 말: 「너무 가라 같다」).
+ *
+ * 그래서 모델을 부르는 자리의 단계에는 wait 를 답니다. 그 초 동안 말풍선이 「무엇을
+ * 기다리는지」를 적고 진행 띠가 돌고, 다 차면 run 이 돕니다. 기다리는 것은 흉내이고
+ * 왕복은 없으므로 GPU 도 Bedrock 도 부르지 않습니다 — 시간의 모양만 진짜를 닮습니다.
+ *
  * 되돌리기가 없다는 사실은 말풍선에 적어 둡니다 — 예시 내용은 서버에 남고 같은 보드를
  * 보는 사람에게도 보입니다(app/board.js 의 push 가 net.sendOp 를 부릅니다). 그것을 모른
  * 채 누르게 두지 않습니다. 네 화면을 잇는 예시는 그래서 「예시 프로젝트」 한 판에만
@@ -203,6 +215,33 @@ body.onbguiding { overflow: hidden; }
   border: 0; border-radius: var(--sb-r, 6px); cursor: pointer;
 }
 .onbg__next:hover { background: var(--sb-accent-ink, #1543ad); }
+/* 「다음 메뉴 예시로 넘어가기」처럼 화면을 떠나는 버튼. 떠난다는 것을 화살로 적습니다 */
+.onbg__next--go::after { content: ' →'; }
+/*
+ * 기다리는 동안의 진행 띠. 몇 초짜리인지를 transition 으로 주므로(아래 waitBar) 여기에
+ * 시간이 박혀 있지 않습니다 — 단계마다 다릅니다.
+ */
+.onbg__wait { display: grid; gap: 7px; margin-top: 3px; }
+.onbg__waitsay {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12.5px; font-weight: 600; color: var(--sb-ink-2, #5b6472);
+}
+.onbg__waitsay::before {
+  content: ''; width: 13px; height: 13px; flex: none; border-radius: 50%;
+  border: 2px solid var(--sb-line, #e4e7ec); border-top-color: var(--sb-accent, #1a56db);
+  animation: onbSpin .8s linear infinite;
+}
+@keyframes onbSpin { to { transform: rotate(360deg); } }
+.onbg__waittrack {
+  height: 5px; border-radius: 999px; background: var(--sb-line, #e4e7ec); overflow: hidden;
+}
+.onbg__waitfill {
+  height: 100%; width: 0; border-radius: 999px; background: var(--sb-accent, #1a56db);
+  transition: width linear;
+}
+@media (prefers-reduced-motion: reduce) {
+  .onbg__waitsay::before { animation: none; }
+}
 .onbg__x {
   position: absolute; top: 9px; right: 9px; width: 24px; height: 24px; padding: 0;
   display: grid; place-items: center; font: inherit; font-size: 15px;
@@ -223,6 +262,13 @@ function injectCss(doc) {
   el.textContent = CSS
   doc.head.appendChild(el)
 }
+
+/*
+ * 시각과 기다림. 한 곳에 모아 둔 이유는 이 파일이 시간을 쓰는 자리가 wait 하나뿐이고,
+ * 검사에서 그 하나를 짧게 줄여 돌리기 때문입니다(app/test.html).
+ */
+const now = () => Date.now()
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 const mk = (t, c, x) => {
   const n = document.createElement(t)
@@ -339,6 +385,7 @@ function unspot() {
   if (!live) return
   live.lit = null
   live.seen = []
+  live.wait = null
 }
 
 /**
@@ -507,11 +554,18 @@ function bubble(s, boxes, lit) {
   b.append(h)
   if (s?.sub) b.append(mk('p', 'onbg__p', s.sub))
 
-  // 짚은 자리가 있으면 「어디를 누르라」를 적고, 없으면 버튼을 내어 줍니다
-  if (lit) {
+  /*
+   * 아래 셋 중 하나가 붙습니다.
+   *   기다리는 중  진행 띠. 누를 것이 없습니다 — 몇 초 뒤 run 이 알아서 돕니다
+   *   짚은 자리 있음  「어디를 누르라」
+   *   자리 없음    「다음」 버튼. 그때는 그 버튼이 유일한 길입니다
+   */
+  if (live.wait) {
+    b.append(waitBar(s))
+  } else if (lit) {
     b.append(mk('div', 'onbg__do', s?.do || '표시된 곳을 눌러 주십시오'))
   } else {
-    const go = mk('button', 'onbg__next', s?.go || '다음')
+    const go = mk('button', 'onbg__next' + (s?.leaves ? ' onbg__next--go' : ''), s?.go || '다음')
     go.type = 'button'
     go.onclick = () => fire()
     go.disabled = !!live.busy
@@ -545,8 +599,41 @@ function bubble(s, boxes, lit) {
 }
 
 /**
+ * 기다리는 동안의 진행 띠 한 장.
+ *
+ * 남은 시간만큼만 채웁니다. draw 는 창이 바뀔 때마다 다시 도는데, 그때 띠를 0 에서 다시
+ * 시작하면 스크롤 한 번에 진행이 되돌아가는 것으로 보입니다. 그래서 live.wait 에 끝나는
+ * 시각을 적어 두고 여기서는 그것까지의 나머지만 그립니다.
+ */
+function waitBar(s) {
+  const box = mk('div', 'onbg__wait')
+  box.append(mk('div', 'onbg__waitsay', s?.waitSay || '만들고 있습니다'))
+  const track = mk('div', 'onbg__waittrack')
+  const fill = mk('i', 'onbg__waitfill')
+  fill.style.fontStyle = 'normal'
+  fill.style.display = 'block'
+  track.append(fill)
+  track.setAttribute('role', 'progressbar')
+  track.setAttribute('aria-label', s?.waitSay || '만들고 있습니다')
+  box.append(track)
+
+  const left = Math.max(0, live.wait.until - now())
+  fill.style.width = `${Math.round(100 - (left / live.wait.ms) * 100)}%`
+  // 다음 프레임에 목표를 줍니다 — 같은 프레임에 주면 브라우저가 시작값을 못 봅니다
+  requestAnimationFrame(() => {
+    fill.style.transitionDuration = `${left}ms`
+    fill.style.width = '100%'
+  })
+  return box
+}
+
+/**
  * 지금 단계를 실행하고 다음으로 넘깁니다. 짚은 자리를 눌러도, 띠의 버튼을 눌러도
  * 여기 한 곳을 지납니다.
+ *
+ * wait 가 붙은 단계는 그 초를 먼저 기다립니다 — 짚은 자리는 그때 걷습니다(live.lit 을
+ * 비웁니다). 안 걷으면 기다리는 동안 그 자리가 여전히 열려 있어서 두 번, 세 번 눌리고,
+ * 사람은 「첫 번째 클릭이 안 먹었다」로 읽습니다.
  *
  * run 이 비동기인 동안 버튼을 잠급니다. 안 잠그면 두 번 눌러 같은 단계가 두 번 돕니다.
  */
@@ -554,6 +641,16 @@ async function fire() {
   if (!live || live.busy) return
   const s = live.steps[live.i]
   live.busy = true
+
+  if (s?.wait > 0) {
+    live.lit = null
+    live.wait = { ms: s.wait, until: now() + s.wait }
+    draw()
+    await sleep(s.wait)
+    if (!live) return
+    live.wait = null
+  }
+
   try {
     await s?.run?.()
   } catch (e) {
@@ -573,15 +670,18 @@ async function fire() {
  * 자리에는 테 · 물결 · 마우스 표시 · 꼬리표 넉 장이 얹혀서 어디를 눌러야 하는지 한눈에
  * 보입니다. 누르면 그 자리의 원래 동작은 막고 run 이 대신 돌아 내용이 채워집니다.
  *
- * 각 단계는 { say, sub?, spot?, see?, do?, go?, run? } 입니다.
- *   say   말풍선의 큰 줄. 지금 무엇을 하는지
- *   sub   그 아래 설명 줄
- *   spot  누를 자리. data-coach 이름이거나 CSS 선택자
- *   see   같이 막 위로 올려 보여 줄 자리들. 누를 곳과 결과가 들어갈 판이 다를 때 씁니다
- *   do    「표시된 곳을 눌러 주십시오」 대신 적을 한 줄
- *   tag   자리에 붙는 꼬리표의 글자. 기본은 「여기를 누르십시오」
- *   go    자리를 못 찾았을 때만 나오는 버튼의 글자. 기본은 「다음」
- *   run   실제로 화면을 바꾸는 함수. 동기·비동기 둘 다 됩니다
+ * 각 단계는 { say, sub?, spot?, see?, do?, tag?, go?, leaves?, wait?, waitSay?, run? } 입니다.
+ *   say      말풍선의 큰 줄. 지금 무엇을 하는지
+ *   sub      그 아래 설명 줄
+ *   spot     누를 자리. data-coach 이름이거나 CSS 선택자
+ *   see      같이 막 위로 올려 보여 줄 자리들. 누를 곳과 결과가 들어갈 판이 다를 때 씁니다
+ *   do       「표시된 곳을 눌러 주십시오」 대신 적을 한 줄
+ *   tag      자리에 붙는 꼬리표의 글자. 기본은 「여기를 누르십시오」
+ *   go       자리를 못 찾았을 때만 나오는 버튼의 글자. 기본은 「다음」
+ *   leaves   그 버튼이 이 화면을 떠나는 것이면 true — 이름 뒤에 화살을 붙입니다
+ *   wait     run 전에 기다릴 밀리초. 모델을 부르는 자리의 단계에 답니다(머리글 참고)
+ *   waitSay  기다리는 동안 적을 한 줄. 기본은 「만들고 있습니다」
+ *   run      실제로 화면을 바꾸는 함수. 동기·비동기 둘 다 됩니다
  *
  * 원래 동작을 막는 것은 예시가 실수로 진짜 모델 호출에 닿지 않게 하려는 것입니다 —
  * 무슨 일이 일어나는지는 run 한 곳만 읽으면 됩니다. 자리에 커서를 두어야 하는
@@ -606,7 +706,7 @@ export function guide({ steps = [], title = '예시', onDone } = {}) {
   document.body.append(root)
   document.body.classList.add('onbguiding')
 
-  live = { i: 0, steps, root, title, lit: null, seen: [], busy: false, onDone }
+  live = { i: 0, steps, root, title, lit: null, seen: [], busy: false, wait: null, onDone }
 
   /*
    * 짚은 자리의 클릭을 document 의 캡처 단계에서 받습니다. 캡처는 target 보다 먼저
