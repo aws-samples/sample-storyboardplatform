@@ -41,6 +41,7 @@
   const { parseJson } = await import(`./domain/json-repair.js?t=${Date.now()}`)
   const {
     toScenes, readHeading, readCast, readSlug, placeTime, stripCont,
+    needsAiSplit, proseSplitPrompt, normalizeProseScenes, aiSplitScenes, PROSE_CAP,
   } = await import(`./domain/scene-split.js?t=${Date.now()}`)
   const { applyWriteback, validateWritebackBeforeApply } = await import(`./domain/graph-writeback.js?t=${Date.now()}`)
   const { edgeLabel, graphDelta, EDGE_LABELS_KR } = await import(`./components/graph-canvas.js?t=${Date.now()}`)
@@ -3675,6 +3676,129 @@
   })())
   ok('readSlug 는 옛 이름으로 남아 있다',
     readSlug('INT. 카페 - 낮')?.place === '카페' && readSlug('그는 문을 열었다.') === null)
+
+  /*
+   * Fountain 명세(fountain.io/syntax)의 규칙입니다. 이 명세를 읽는 도구가 많아서
+   * 다른 도구에서 옮겨 온 대본이 이 모양으로 들어옵니다.
+   */
+  ok('EST. 와 INT./EXT. 슬러그도 읽는다', (() => {
+    // 갈마드는 자리에서 INT 를 먼저 두면 장소가 `/EXT. 차 안` 이 됩니다
+    const a = readHeading('EST. 극장 - 밤')
+    const b = readHeading('INT./EXT. 차 안 - 낮')
+    return a?.place === '극장' && b?.place === '차 안' && b.time === '낮'
+  })())
+  ok('앞의 점 하나는 머리글을 강제한다', (() => {
+    // INT. 를 쓰지 않는 대본이 쓰는 도피처입니다. 명세가 이 자리를 그렇게 둡니다
+    const h = readHeading('.분장실 - 밤')
+    return h?.forced === true && h.place === '분장실' && h.time === '밤'
+  })())
+  ok('점이 여러 개면 강제 머리글이 아니다', readHeading('...말을 잇지 못한다') === null)
+  ok('앞의 ! 하나는 머리글을 취소한다', readHeading('!INT. 이건 지문이다') === null)
+  ok('취소 표시는 본문에 남지 않는다', (() => {
+    const sc = toScenes('INT. 방 - 밤\n!INT. 대문자 지문')
+    return sc.length === 1 && sc[0].text === 'INT. 방 - 밤\nINT. 대문자 지문'
+  })())
+  ok('끝에 붙은 #12# 을 씬 번호로 읽는다', (() => {
+    const h = readHeading('INT. 카페 - 낮 #12#')
+    return h?.no === 12 && h.place === '카페' && h.time === '낮'
+  })())
+  ok('#1A# 처럼 글자가 섞인 번호는 장소만 읽는다', (() => {
+    // 사이에 끼워 넣은 씬이라 순서를 숫자로 셀 수 없습니다. 장소는 그대로 읽습니다
+    const h = readHeading('INT. 카페 - 낮 #1A#')
+    return h?.no === null && h.place === '카페'
+  })())
+
+  /*
+   * 씬은 「한 장소 · 이어지는 시간 · 이어지는 행동」의 덩어리입니다. 그래서 같은 장소라도
+   * 시간이 끊기면 씬이 둘입니다. `(이어서)` 는 합치고 `잠시 후` 는 끊는 것이 이 차이입니다.
+   */
+  ok('같은 장소라도 시간이 끊기면 새 씬이다', (() => {
+    const sc = toScenes('INT. 분장실 - 밤\n거울 앞.\n\nINT. 분장실 - 잠시 후\n문이 열린다.')
+    return sc.length === 2 && sc[1].time === '잠시 후'
+  })())
+  ok('LATER 도 시간이 끊긴 것으로 본다',
+    toScenes('INT. BAR - NIGHT\n술잔.\n\nINT. BAR - LATER\n빈 잔.').length === 2)
+
+  // ── scene-split.js: 머리글이 없는 글을 모델이 나누기 ───────────────────────
+  /*
+   * 시놉시스 · 트리트먼트에는 읽을 머리글이 없어서 규칙으로는 씬 하나입니다. 그 자리만
+   * 문장 모델에게 넘깁니다. 머리글이 있으면 작가가 쓴 표시를 믿고 왕복하지 않습니다.
+   */
+  ok('머리글이 없는 긴 글은 모델에게 넘긴다',
+    needsAiSplit('그는 문을 열었다. '.repeat(40)) === true)
+  ok('머리글이 하나라도 있으면 규칙으로 나눈다',
+    needsAiSplit(`S#1. 방 / 밤\n${'어둡다. '.repeat(80)}`) === false)
+  ok('짧은 글은 나눌 것이 없어 넘기지 않는다',
+    needsAiSplit('방 안이 어둡다.') === false && needsAiSplit('') === false)
+  ok('나누는 프롬프트가 씬의 경계를 못 박는다', (() => {
+    const p = proseSplitPrompt('아무 글')
+    // 장소·시간·인물 세 가지를 다 적어야 모델이 문단 수로 나누지 않습니다
+    return p.includes('장소가 바뀐다') && p.includes('시간이 끊긴다')
+      && p.includes('인물이 바뀐다') && p.includes('컷이다')
+      && p.includes('아무 글') && p.includes('JSON')
+  })())
+  ok('모델이 준 씬을 화면이 쓰는 모양으로 맞춘다', (() => {
+    const sc = normalizeProseScenes({ scenes: [
+      { place: '무대', time: '밤', cast: ['루미'], text: '혼문이 갈라지는 소리를 듣는다.' },
+      { place: '대기실', time: '', cast: [], text: '미라가 손목을 잡아 세운다.' },
+    ] })
+    // toScenes 와 같은 키를 내야 뒤쪽 단계가 무엇이 나눴는지 몰라도 됩니다
+    return sc.length === 2 && sc[0].id === 'S01' && sc[1].id === 'S02'
+      && sc[0].byAi === true && sc[0].cast[0] === '루미' && sc[0].prompt === ''
+  })())
+  ok('내용이 없는 씬은 버린다', (() => {
+    const sc = normalizeProseScenes({ scenes: [
+      { place: '무대', text: '' }, { place: '대기실' }, { place: '창고', text: '   ' },
+      { place: '복도', text: '지영이 벽에 등을 붙인다.' },
+    ] })
+    return sc.length === 1 && sc[0].place === '복도'
+  })())
+  ok('짧아도 그릴 수 있으면 버리지 않는다', (() => {
+    // 「혼문이 갈라진다.」 한 줄도 씬입니다. 길이로 자르면 진짜 씬이 사라집니다
+    const sc = normalizeProseScenes({ scenes: [{ place: '무대', text: '혼문이 갈라진다.' }] })
+    return sc.length === 1
+  })())
+  ok('모델이 형식을 어기면 빈 목록이다',
+    normalizeProseScenes(null).length === 0
+    && normalizeProseScenes({ scenes: '아니다' }).length === 0
+    && normalizeProseScenes({ note: '설명만' }).length === 0)
+  ok('씬 수에 상한이 있다', (() => {
+    const many = Array.from({ length: 40 }, (_, i) => ({ place: `방${i}`, text: '지영이 문을 연다.' }))
+    return normalizeProseScenes({ scenes: many }).length === PROSE_CAP
+  })())
+
+  ok('모델이 없으면 규칙으로 나눈 결과를 낸다', await (async () => {
+    const r = await aiSplitScenes(null, '그는 문을 열었다. '.repeat(40))
+    return r.byAi === false && r.scenes.length === 1 && r.err === null
+  })())
+  ok('모델이 나누면 그 결과를 쓴다', await (async () => {
+    const fake = { plan: async () => ({ text: JSON.stringify({ scenes: [
+      { place: '무대', time: '밤', text: '혼문이 갈라진다.' },
+      { place: '대기실', time: '밤', text: '미라가 조이를 세운다.' },
+    ] }) }) }
+    const r = await aiSplitScenes(fake, '그는 문을 열었다. '.repeat(40))
+    return r.byAi === true && r.scenes.length === 2 && r.scenes[1].place === '대기실'
+  })())
+  /*
+   * 나누지 못한 것이 이 화면을 멈출 이유는 아닙니다. 규칙 결과로 돌아가고 무엇이
+   * 잘못됐는지만 말합니다. 빈 화면을 내밀지 않습니다.
+   */
+  ok('모델이 깨진 것을 주면 규칙 결과로 돌아간다', await (async () => {
+    const fake = { plan: async () => ({ text: '설명만 하고 JSON 이 없습니다' }) }
+    const r = await aiSplitScenes(fake, '그는 문을 열었다. '.repeat(40))
+    return r.byAi === false && r.scenes.length === 1 && !!r.err
+  })())
+  ok('모델이 끊기면 규칙 결과로 돌아간다', await (async () => {
+    const fake = { plan: async () => { throw new Error('끊김') } }
+    const r = await aiSplitScenes(fake, '그는 문을 열었다. '.repeat(40))
+    return r.byAi === false && r.scenes.length === 1 && r.err === '끊김'
+  })())
+  ok('머리글이 있는 대본은 모델을 부르지 않는다', await (async () => {
+    let called = 0
+    const fake = { plan: async () => { called++; return { text: '{}' } } }
+    const r = await aiSplitScenes(fake, 'S#1. 방 / 밤\n어둡다.\n\nS#2. 카페 / 낮\n밝다.')
+    return called === 0 && r.byAi === false && r.scenes.length === 2
+  })())
 
   // ── graph-view.js: 엣지 라벨과 역기입 전후 비교 ────────────────────────────
   // 캔버스 그리기는 여기서 못 돌린다. 순수 함수인 라벨 표와 판 비교만 본다

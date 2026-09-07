@@ -12,7 +12,7 @@
  */
 
 import { ART_ROLES, orderKeyBetween } from '../domain/panels.js'
-import { toScenes, readSlug } from '../domain/scene-split.js'
+import { toScenes, readSlug, needsAiSplit, aiSplitScenes } from '../domain/scene-split.js'
 import { configured, idToken, session } from '../services/auth.js'
 import { connect } from '../services/api.js'
 import { showLogin } from '../components/login-form.js'
@@ -57,7 +57,7 @@ const S = {
   seed: '',
   seedOn: false,
   model: null,
-  busy: null,           // 'split' | 'prompt' | 'batch'
+  busy: null,           // 'split'(머리글 없는 글을 모델이 나누는 중) | 'prompt' | 'batch'
   gpu: { state: 'unknown', text: '확인 중', models: [], resident: null, loading: null, wait: 0 },
   jobs: {},             // sceneId → { status, ms, url, err, code, tries }
   pick: null,
@@ -185,6 +185,54 @@ function parseJson(text) {
   try { return JSON.parse(s.slice(a, b + 1)) } catch {
     throw new Error('프롬프트가 깨져서 왔습니다. 다시 눌러주세요.')
   }
+}
+
+/*
+ * STEP 1 의 「씬으로 나누기」.
+ *
+ * 머리글(`S#1.` · `INT.` · `씬 1`)이 있으면 규칙으로 나눕니다. 왕복이 없어 즉시 끝납니다.
+ * 머리글이 하나도 없는 글(시놉시스 · 트리트먼트)은 읽을 표시가 없어서 규칙으로는 씬
+ * 하나입니다. 그 자리만 문장 모델에게 넘깁니다. 모델이 없거나 실패하면 규칙 결과로
+ * 돌아갑니다. 나누지 못한 것이 이 화면을 멈출 이유는 아닙니다.
+ */
+async function splitScript() {
+  if (!S.script.trim()) { S.warn = '대본을 먼저 붙여넣어 주세요.'; paint(); return }
+
+  // 지난번 경고를 지웁니다. 이번에 다시 걸리면 아래에서 다시 답니다
+  S.warn = null
+  const ai = needsAiSplit(S.script)
+  const useAi = ai && canPlan()
+
+  if (ai && !canPlan()) {
+    // 로컬 모드입니다. 무엇이 없어서 못 하는지 그대로 말합니다. 흉내내지 않습니다
+    S.warn = '머리글이 없는 글은 문장 모델이 나눕니다. 로컬 모드에서는 씬 하나로 들어갑니다. '
+      + 'S#1. 장소 / 밤 처럼 머리글을 붙이면 모델 없이도 나뉩니다.'
+  }
+
+  if (useAi) {
+    S.busy = 'split'; paint()
+    wire('u', `plan()  머리글이 없는 글 ${S.script.length}자 → 씬 나누기`)
+  }
+
+  const { scenes, byAi, err } = useAi
+    ? await aiSplitScenes(S.net, S.script, { model: S.model })
+    : { scenes: toScenes(S.script), byAi: false, err: null }
+
+  S.busy = null
+  S.scenes = scenes
+  S.jobs = {}
+  S.pick = scenes[0]?.id || null
+  if (!scenes.length) { S.warn = '나눌 것을 찾지 못했습니다. 대본을 확인해 주세요.'; paint(); return }
+
+  if (err) { wire('r', `실패  ${err}`); S.warn = `${err} 규칙으로 나눈 결과를 보여드립니다.` }
+  else if (byAi) wire('g', `200  씬 ${scenes.length}개`)
+
+  const how = byAi ? '문장 모델이 ' : ''
+  note(`${how}대본을 씬 ${scenes.length}개로 나눴습니다`)
+  mark(`${how}대본을 씬 ${scenes.length}개로 나눴습니다`)
+  S.step = 2
+  paint()
+  if (canPlan()) writePrompts()
 }
 
 async function writePrompts() {
@@ -646,7 +694,9 @@ const ROLE_KO = { planner: '기획', artist: '아티스트', director: '감독',
 /* ── STEP 1 ───────────────────────────────────── */
 function step1() {
   const w = el('div', 'wrap wrap--2')
-  const a = card('대본', '붙여넣은 대본을 씬 머리글에서 끊습니다. S#1 · INT. · 씬 1 을 다 읽습니다.', 'script')
+  const a = card('대본',
+    '씬 머리글에서 끊습니다. S#1 · INT. · 씬 1 을 다 읽습니다. 머리글이 없는 글은 문장 모델이 나눕니다.',
+    'script')
   const ta = el('textarea', 'script')
   ta.value = S.script
   ta.placeholder = 'INT. 극장 분장실 - 밤\n거울 앞. 분장을 지우다 멈춘다.\n\n    수린\n  그 이름을 어디서 들었어.'
@@ -657,24 +707,18 @@ function step1() {
   const go = el('button', 'btn btn--go', '씬으로 나누기')
   go.type = 'button'
   go.dataset.coach = 'split'    // 예시 안내가 짚는 자리입니다
-  go.onclick = () => {
-    S.scenes = toScenes(S.script)
-    S.jobs = {}
-    S.pick = S.scenes[0]?.id || null
-    if (!S.scenes.length) { S.warn = '대본을 먼저 붙여넣어 주세요.'; paint(); return }
-    S.warn = null
-    note(`대본을 씬 ${S.scenes.length}개로 나눴습니다`)
-    mark(`대본을 씬 ${S.scenes.length}개로 나눴습니다`)
-    S.step = 2
-    paint()
-    if (canPlan()) writePrompts()
-  }
+  go.onclick = () => splitScript()
+  go.disabled = S.busy === 'split'
   row.append(go)
-  // 나누기 전에도 몇 개로 갈릴지 보여줍니다. 머리글이 하나도 없으면 블록 수로 말합니다
+  /*
+   * 나누기 전에도 무엇을 보고 나눌지 말해 줍니다. 머리글이 있으면 그 수를, 머리글이
+   * 없는 글이면 모델이 나눌 것임을 미리 알립니다. 눌러 보고 알게 되지 않도록 합니다.
+   */
   const heads = S.script.split('\n').filter((l) => readSlug(l)).length
-  const n = el('span', 'hint', heads
-    ? `머리글 ${heads}개`
-    : `${S.script.split(/\n[ \t]*\n/).filter((x) => x.trim()).length} 블록`)
+  const n = el('span', 'hint', S.busy === 'split' ? '나누는 중입니다'
+    : heads ? `씬 머리글 ${heads}개`
+      : needsAiSplit(S.script) ? '머리글이 없는 글입니다. 문장 모델이 나눕니다'
+        : `${S.script.split(/\n[ \t]*\n/).filter((x) => x.trim()).length} 블록`)
   row.append(n)
   a.append(row)
   w.append(a)
