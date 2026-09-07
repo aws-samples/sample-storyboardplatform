@@ -862,6 +862,19 @@ function expandToScript(seed, story, branch) {
 const nodeName = (id) => STORE?.getNode(id)?.name || id
 
 /**
+ * 엣지 하나를 네비게이터 프롬프트에 넣을 한국어 한 줄로 옮긴다.
+ *
+ * 술어 → 한국어 표는 graph-ko.js 한 벌뿐이고 그것은 브라우저에만 있다. Lambda 는
+ * 그 표를 모르므로, 옮기지 않고 보내면 프롬프트에 영문 술어가 들어가고 모델이 그것을
+ * 그대로 베낀다 — 챗봇 답변에 "재혁 → reveals → 강회장 비리" 가 새어 나오던 자리다.
+ *
+ * @param {{s: string, p: string, o: string, props?: Object, asserted?: boolean, derived?: boolean}} e
+ * @returns {string} "재혁이 강회장 비리를 폭로함". 파생 엣지는 [추론] 을 달아 둔다
+ */
+const edgeKo = (e) => `${predicateToKo(nodeName(e?.s), e?.p, nodeName(e?.o), e?.props)}`
+  + `${e?.asserted === false || e?.derived ? ' [추론]' : ''}`
+
+/**
  * 변경 개수 한 줄. writebackCountsKo 가 나눈 조각을 굵게·흐리게만 입혀 잇는다.
  * 늘어난 것은 굵게, 바뀐 것은 흐리게다 (weak).
  */
@@ -1095,6 +1108,9 @@ const WB_LIST_MAX = 40
  * 만들어 두고 있어 거기서 풀리고, 페이로드도 작다. 목록은 WB_LIST_MAX 에서 자르고
  * 전체 개수는 counts 에 남긴다 (자른 것을 전부라고 답하지 않게).
  *
+ * 술어는 id 처럼 풀리지 않는다. 그래서 ko 에 한국어 한 줄씩을 함께 실어 보낸다
+ * (edgeKo · nodeKindKo). Lambda 는 ko 가 있으면 그것만 프롬프트에 적는다.
+ *
  * @param {{nodes: Array, edges: Array}} before - 역기입 전 판
  * @param {{nodes: Array, edges: Array}} after - 역기입 뒤 판
  * @param {string} branch - 어느 분기의 역기입인가
@@ -1106,7 +1122,8 @@ function writebackSummary(before, after, branch) {
   const hasEdge = new Set(after.edges.map(edgeKey))
   // 파생 엣지는 규칙이 다시 만든 것이라 갈라 적는다. 작가가 직접 넣은 것이 아니다
   const triple = (e) => (e.asserted ? { s: e.s, p: e.p, o: e.o } : { s: e.s, p: e.p, o: e.o, derived: true })
-  const nodes = after.nodes.filter((n) => !hadNode.has(n.id)).map((n) => n.id)
+  const fresh = after.nodes.filter((n) => !hadNode.has(n.id))
+  const nodes = fresh.map((n) => n.id)
   const added = after.edges.filter((e) => !hadEdge.has(edgeKey(e)))
   const removed = before.edges.filter((e) => !hasEdge.has(edgeKey(e)))
   return {
@@ -1116,6 +1133,11 @@ function writebackSummary(before, after, branch) {
     addedEdges: added.slice(0, WB_LIST_MAX).map(triple),
     removedEdges: removed.slice(0, WB_LIST_MAX).map(triple),
     counts: { addedNodes: nodes.length, addedEdges: added.length, removedEdges: removed.length },
+    ko: {
+      nodes: fresh.slice(0, WB_LIST_MAX).map((n) => `「${n.name}」 ${nodeKindKo(n.kind)}`),
+      added: added.slice(0, WB_LIST_MAX).map(edgeKo),
+      removed: removed.slice(0, WB_LIST_MAX).map(edgeKo),
+    },
   }
 }
 
@@ -1769,12 +1791,19 @@ function mountChat() {
       try {
         // 히스토리는 navigator-ui.js 가 sessionStorage 에 적어 둔 것을 그대로 읽는다.
         // 이번 질문은 아직 들어 있지 않다. Lambda 가 마지막 user 메시지로 따로 붙인다
+        const snap = STORE.toJSON()
         return await runNavigateJob(NET, {
           projectId: STORE.projectId || DEFAULT_PROJECT,
           question,
           // 스냅샷에 최근 역기입의 변경 요약을 얹어 보낸다. 역기입을 한 적이 없으면
-          // null 이고, 그때는 Lambda 가 스냅샷만으로 답한다
-          graphData: { ...STORE.toJSON(), recentWriteback: LAST_WRITEBACK },
+          // null 이고, 그때는 Lambda 가 스냅샷만으로 답한다.
+          // 엣지에는 한국어 서술을 한 줄씩 달아 둔다 (edgeKo) — 술어 표가 없는 Lambda 가
+          // 프롬프트를 지을 때 영문 술어를 쓰지 않게 한다
+          graphData: {
+            ...snap,
+            edges: snap.edges.map((e) => ({ ...e, ko: edgeKo(e) })),
+            recentWriteback: LAST_WRITEBACK,
+          },
           conversationHistory: readHistory(),
           model: MODEL(),
         })

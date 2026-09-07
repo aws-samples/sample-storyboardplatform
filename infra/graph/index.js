@@ -426,12 +426,19 @@ const NAVIGATE_SYSTEM = [
   '규칙:',
   '1. 반드시 그래프 데이터에 근거하여 답변하세요.',
   '2. 그래프에 없는 내용은 추측하지 말고 "현재 그래프에 해당 정보가 없습니다"라고 답하세요.',
-  '3. 캐릭터 간 관계를 설명할 때 구체적인 관계(엣지)를 인용하세요.',
+  '3. 캐릭터 간 관계를 설명할 때 그 관계를 구체적으로 짚어 말하세요.',
   '4. 추론 규칙으로 파생된 관계는 "[추론]"으로 표시하세요.',
   '5. 비전문가가 이해할 수 있는 자연어로, 한국어로 답변하세요.',
   '6. 답변은 간결하게 하되, 필요한 맥락은 빠뜨리지 마세요.',
-  '7. "## 최근 역기입 변경 사항" 블록이 있으면, 방금 무엇이 바뀌었는지 묻는 질문에는'
+  '7. "## 최근 세계관 변경 사항" 블록이 있으면, 방금 무엇이 바뀌었는지 묻는 질문에는'
     + ' 그 목록만 근거로 답하세요. 블록이 없으면 최근에 무엇이 바뀌었는지 알 수 없다고 답하세요.',
+  /*
+   * 아래 컨텍스트는 그래프에서 편 것이라 목록 모양이다. 그것을 그대로 베끼면 작가·PD 가
+   * 읽는 자리에 "재혁 → reveals → 강회장 비리" 같은 줄이 찍힌다. 답변은 사람의 말이어야 한다.
+   */
+  '8. 그래프 용어(노드, 엣지, 트리플, 술어)와 영문 관계 이름을 답변에 쓰지 마세요.'
+    + ' "A → rel → B" 같은 화살표 표기도 쓰지 마세요. 한국어 문장으로 풀어 쓰세요'
+    + ' (예: "재혁이 강회장의 비리를 폭로했습니다", "재혁이 강회장을 보좌하던 관계가 사라졌습니다").',
 ].join('\n')
 
 /** 챗봇 답변 상한. 대본 생성(2000~4000)보다 짧다 */
@@ -460,15 +467,22 @@ function parseJson(raw, dflt) {
  *
  * 역기입을 한 적이 없으면 빈 문자열이다. 그때는 이 블록이 아예 붙지 않는다.
  *
- * @param {Object} wb - {at, branch, addedNodes, addedEdges, removedEdges, counts}
+ * 줄은 브라우저가 한국어로 옮겨 보낸 것(wb.ko)을 먼저 쓴다. 술어 → 한국어 표는
+ * app/domain/graph-ko.js 한 벌이고 이 Lambda 는 그것을 모른다 — 옮긴 줄이 없을 때만
+ * 영문 술어를 그대로 적는다 (지난 판의 브라우저가 보낸 요약).
+ *
+ * @param {Object} wb - {at, branch, addedNodes, addedEdges, removedEdges, counts, ko?}
  * @param {Function} nm - id → 이름. graphContext 가 만든 표를 그대로 받는다
  * @returns {string} 프롬프트에 붙이는 블록. 변경이 없으면 빈 문자열
  */
 function writebackContext(wb, nm) {
   if (!wb) return ''
-  const nodes = asList(wb?.addedNodes)
-  const added = asList(wb?.addedEdges)
-  const removed = asList(wb?.removedEdges)
+  const arrow = (e) => `${nm(e?.s)} --${str(e?.p) || '관계'}--> ${nm(e?.o)}${e?.derived ? ' [추론]' : ''}`
+  /** 한국어로 옮겨 온 줄이 있으면 그것, 없으면 날것을 fmt 로 편다 */
+  const lines = (ko, raw, fmt) => (asList(ko).length ? asList(ko).map(str) : asList(raw).map(fmt))
+  const nodes = lines(wb?.ko?.nodes, wb?.addedNodes, nm)
+  const added = lines(wb?.ko?.added, wb?.addedEdges, arrow)
+  const removed = lines(wb?.ko?.removed, wb?.removedEdges, arrow)
   if (!nodes.length && !added.length && !removed.length) return ''
 
   const counts = wb?.counts || {}
@@ -477,18 +491,17 @@ function writebackContext(wb, nm) {
     const n = Number(total) >= list.length ? total : list.length
     return `${name} ${n}개${n > list.length ? ` (아래는 그중 ${list.length}개)` : ''}:`
   }
-  const edgeLine = (e) => `- ${nm(e?.s)} --${str(e?.p) || '관계'}--> ${nm(e?.o)}${e?.derived ? ' [추론]' : ''}`
 
-  const out = ['## 최근 역기입 변경 사항']
+  const out = ['## 최근 세계관 변경 사항']
   if (wb?.branch) out.push(`붙인 분기: ${str(wb.branch)}`)
   if (wb?.at) out.push(`붙인 시각: ${str(wb.at)}`)
   out.push('이 목록이 이 그래프에서 가장 최근에 바뀐 것 전부다. 그 앞의 변경은 알 수 없다.')
-  if (nodes.length) out.push(head('추가된 노드', nodes, counts?.addedNodes), ...nodes.map((id) => `- ${nm(id)}`))
-  else out.push('추가된 노드: 없다')
-  if (added.length) out.push(head('추가된 엣지', added, counts?.addedEdges), ...added.map(edgeLine))
-  else out.push('추가된 엣지: 없다')
-  if (removed.length) out.push(head('제거된 엣지', removed, counts?.removedEdges), ...removed.map(edgeLine))
-  else out.push('제거된 엣지: 없다')
+  if (nodes.length) out.push(head('새로 생긴 것', nodes, counts?.addedNodes), ...nodes.map((s) => `- ${s}`))
+  else out.push('새로 생긴 것: 없다')
+  if (added.length) out.push(head('새 관계', added, counts?.addedEdges), ...added.map((s) => `- ${s}`))
+  else out.push('새 관계: 없다')
+  if (removed.length) out.push(head('사라진 관계', removed, counts?.removedEdges), ...removed.map((s) => `- ${s}`))
+  else out.push('사라진 관계: 없다')
   return out.join('\n')
 }
 
@@ -513,17 +526,25 @@ function graphContext(raw) {
   const nm = (id) => label.get(str(id)) || str(id) || '(알 수 없음)'
 
   const nodeLines = nodes.map((n) => `- ${str(n?.name) || str(n?.id)} (${str(n?.kind) || '종류 없음'})`)
+  /*
+   * 엣지 한 줄. 브라우저가 한국어 서술(e.ko)을 달아 보내면 그것을 쓴다 — 영문 술어를
+   * 프롬프트에 넣으면 모델이 그대로 베껴 답변에 새어 나온다 (NAVIGATE_SYSTEM 8번).
+   * 술어 → 한국어 표는 app/domain/graph-ko.js 한 벌이라 이쪽에서는 옮길 수 없다.
+   */
+  const koEdges = edges.some((e) => str(e?.ko))
   const edgeLines = edges.map((e) => {
     const p = str(e?.p ?? e?.predicate)
-    return `- ${nm(e?.s ?? e?.source)} --${p || '관계'}--> ${nm(e?.o ?? e?.target)}`
-      + `${isDerived(e) ? ' [추론]' : ''}`
+    const body = str(e?.ko) || `${nm(e?.s ?? e?.source)} --${p || '관계'}--> ${nm(e?.o ?? e?.target)}`
+    // ko 는 [추론] 을 이미 달고 온다. 두 번 붙지 않게 본다
+    return `- ${body}${isDerived(e) && !body.includes('[추론]') ? ' [추론]' : ''}`
   })
 
   const text = [
     `[노드 ${nodes.length}개] 이름 (종류)`,
     ...nodeLines,
     '',
-    `[관계 ${edges.length}개] 출발 --관계--> 도착`,
+    koEdges ? `[관계 ${edges.length}개] 한 줄에 관계 하나씩, 한국어 서술이다`
+      : `[관계 ${edges.length}개] 출발 --관계--> 도착`,
     ...edgeLines,
   ].join('\n')
   const body = text.length <= GRAPH_CTX_MAX ? text : `${text.slice(0, GRAPH_CTX_MAX)}\n(그래프를 여기서 잘랐다)`
