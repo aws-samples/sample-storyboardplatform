@@ -28,9 +28,9 @@
  */
 
 import { navHref, boardParam, DEFAULT_BOARD, navTab, wantsNew } from './nav-tabs.js'
-import { projectsClient } from './net.js'
+import { projectsClient } from '../platform/net.js'
 import { when } from './history.js'
-import { DEMO_USERS } from './login.js'
+import { DEMO_USERS } from '../platform/login.js'
 
 /** 로컬 모드의 프로젝트 목록. Cognito·AppSync 가 없을 때만 씁니다 */
 const LOCAL_KEY = 'sb.projects.v1'

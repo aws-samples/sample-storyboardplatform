@@ -25,16 +25,28 @@
  * Cognito 없이 화면만 보는 용도이고, 보드도 같은 조건에서 로그인을 건너뜁니다
  * (app/board.js 의 boot 이 configured 로 갈라지는 것과 같습니다).
  */
-import { NAV_TABS, navHref, newHref } from './nav-tabs.js'
-import { configured, session, logout } from './auth.js'
-import { showLogin, DEMO_USERS } from './login.js'
-import { setHtml } from './dom.js'
-import { opsClient } from './net.js'
-import { entries, group, paintTable } from './history.js'
-import { emptyPanel } from './onboard.js'
-import { list as listProjects, paintCards } from './projects.js'
-import { startDemo, DEMO_BOARD, DEMO_NAME, DEMO_TOTAL } from './demo.js'
-import * as coach from './coach.js'
+import { NAV_TABS, navHref, newHref } from '../chrome/nav-tabs.js'
+import { configured, session, logout } from '../platform/auth.js'
+import { showLogin, DEMO_USERS } from '../platform/login.js'
+import { setHtml } from '../platform/dom.js'
+import { opsClient } from '../platform/net.js'
+import { entries, group, paintTable } from '../chrome/history.js'
+import { emptyPanel } from '../chrome/empty-panel.js'
+import { list as listProjects, paintCards, touch as touchProject } from '../chrome/projects.js'
+import { wire as wireTour, startDemo, DEMO_BOARD, DEMO_NAME, DEMO_TOTAL } from '../../app-walkthrough/tour.js'
+import * as coach from '../chrome/coach.js'
+
+/*
+ * 예시가 쓸 제품 쪽 함수를 넣습니다. app-walkthrough 는 app/ 을 import 할 수 없습니다.
+ * 배포에서 app/* 는 버킷 루트로 올라가서 상대 경로가 그쪽으로 닿지 않습니다
+ * (app-walkthrough/tour.js 의 머리글).
+ */
+wireTour({
+  navHref,
+  label: (id) => NAV_TABS.find((t) => t.id === id)?.label || id,
+  touch: touchProject,
+})
+
 
 const byId = (id) => document.getElementById(id)
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) =>

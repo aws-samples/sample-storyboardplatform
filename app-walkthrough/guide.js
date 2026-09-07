@@ -1,15 +1,12 @@
 /*
- * 온보딩 · 빈 화면 안내와 예시 길잡이.
+ * 예시 길잡이 · 막을 덮고 누를 자리 하나만 남기는 층.
  *
- * 두 가지를 맡습니다.
+ * 화면을 어둡게 덮고, 지금 봐야 하는 것만 그 막 위로 내보이고, 눌러야 하는 자리에
+ * 동그라미와 마우스 표시를 얹습니다. 그 자리를 누르면 내용이 채워지고 다음으로 갑니다.
  *
- *   1) 빈 화면 안내(emptyPanel). 각 화면은 처음에 비어 있습니다. 비어 있을 때
- *      「처음 오셨나요?」와 두 갈래를 보여줍니다. 예시를 보거나, 직접 시작하거나.
- *      비어 있지 않으면 이 판을 부르지 않고 화면이 자기 목록을 그립니다.
- *
- *   2) 예시 길잡이(guide). 화면을 어둡게 덮고, 지금 봐야 하는 것만 그 막 위로 올리고,
- *      눌러야 하는 자리에 동그라미와 마우스 표시를 얹습니다. 그 자리를 누르면 내용이
- *      채워지고 다음으로 갑니다.
+ * 예시 전용입니다. 이 폴더를 지우면 예시만 사라지고 제품은 그대로 돕니다. 빈 화면
+ * 안내(「처음 오셨나요?」)는 예시를 안 보는 사람도 지나므로 제품 쪽에 있습니다
+ * (app/chrome/empty-panel.js).
  *
  * 예전에는 타이머로 알아서 넘어가는 재생기였습니다. 화면이 저 혼자 움직이니 읽는 속도를
  * 사람이 정할 수 없었고, 다 본 뒤에도 어디를 눌러 그렇게 되었는지는 배우지 못했습니다.
@@ -20,8 +17,9 @@
  * 「이 단계 실행」·「예시 끝내기」 버튼을 뒀습니다. 그러면 짚어 준 자리 대신 띠의 버튼을
  * 누르며 끝까지 가게 됩니다. 배우라고 만든 자리를 건너뛰는 길을 우리가 같이 놓아 준
  * 셈이었습니다. 게다가 막이 없어서 눈이 갈 곳이 화면 전체였습니다. 지금은 코치마크와
- * 같은 방식으로 막을 덮고(coach.js), 누를 자리 하나만 남깁니다. 그만두는 길은 말풍선
- * 모서리의 ×(그리고 Esc) 하나로 남겨 둡니다. 막에 갇히는 화면을 만들 수는 없습니다.
+ * 같은 방식으로 막을 덮고(app/chrome/coach.js), 누를 자리 하나만 남깁니다. 그만두는
+ * 길은 말풍선 모서리의 ×(그리고 Esc) 하나로 남겨 둡니다. 막에 갇히는 화면을 만들 수는
+ * 없습니다.
  *
  * ══ 막에 구멍을 뚫습니다. 짚은 자리를 들어 올리지 않습니다
  *
@@ -70,8 +68,9 @@
  * ══ 「왜 이렇게 만들었는가」는 다른 색으로 적습니다 (note)
  *
  * 예시에는 성격이 다른 두 가지 말이 섞입니다. 하나는 길잡이입니다. 어디를 누르고 그
- * 결과가 무엇인지. 다른 하나는 그것이 왜 그런 모양인지입니다. 문장 모델은 맡기고
- * 그림 모델만 우리가 띄운다, 두 종류가 같이 도니 관리할 것이 둘로 갈린다, 같은 말.
+ * 결과가 무엇인지. 다른 하나는 그것이 왜 그런 모양인지입니다. LLM 은 Bedrock 으로
+ * 호출하고 그림 모델은 이 계정의 EC2 에서 직접 돌린다, 두 종류가 같이 도니 관리할 것이
+ * 갈린다, 같은 말.
  *
  * 두 번째를 파란 안내와 같은 모양으로 적으면 「누르라는 지시」로 읽힙니다. 반대로 안
  * 적으면 화면이 하는 선택의 이유가 아무 데도 없습니다. 그래서 같은 말풍선 안에 호박색
@@ -82,42 +81,12 @@
  * 말을 다시 들을 이유가 없습니다. 그때는 막도 덮지 않습니다(각 화면의 onOwn).
  *
  * 되돌리기가 없다는 사실은 말풍선에 적어 둡니다. 예시 내용은 서버에 남고 같은 보드를
- * 보는 사람에게도 보입니다(app/board.js 의 push 가 net.sendOp 를 부릅니다). 그것을 모른
- * 채 누르게 두지 않습니다. 네 화면을 잇는 예시는 그래서 「예시 프로젝트」 한 판에만
- * 씁니다(app/demo.js).
+ * 보는 사람에게도 보입니다(app/screens/board.js 의 push 가 net.sendOp 를 부릅니다).
+ * 그것을 모른 채 누르게 두지 않습니다. 네 화면을 잇는 예시는 그래서 「예시 프로젝트」
+ * 한 판에만 씁니다(app-walkthrough/tour.js).
  */
 
 const CSS = `
-/* ── 빈 화면 안내 ─────────────────────────────── */
-.onb {
-  display: grid; gap: 14px; justify-items: start; max-width: 520px;
-  padding: 22px; border: 1px solid var(--sb-line, #e4e7ec);
-  border-radius: var(--sb-r-lg, 10px); background: var(--sb-panel, #fff);
-  font-family: var(--sb-sans, sans-serif); color: var(--sb-ink, #111318);
-}
-.onb__eyebrow {
-  font: 500 10.5px/1 var(--sb-mono, monospace); letter-spacing: .14em;
-  color: var(--sb-accent, #1a56db); text-transform: uppercase;
-}
-.onb__head { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -.02em; line-height: 1.35; }
-.onb__lines { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
-.onb__lines li { font-size: 13px; line-height: 1.6; color: var(--sb-ink-2, #5b6472); }
-.onb__row { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
-.onb__go, .onb__own {
-  font: inherit; font-size: 13.5px; font-weight: 600; padding: 9px 15px;
-  border-radius: var(--sb-r, 6px); border: 1px solid transparent; cursor: pointer;
-}
-.onb__go { background: var(--sb-accent, #1a56db); color: #fff; }
-.onb__go:hover { background: var(--sb-accent-ink, #1543ad); }
-.onb__own {
-  background: var(--sb-panel, #fff); color: var(--sb-ink, #111318);
-  border-color: var(--sb-line, #e4e7ec);
-}
-.onb__own:hover { background: var(--sb-fill, #f8f9fb); }
-.onb__warn {
-  margin: 0; font-size: 11.5px; line-height: 1.6; color: var(--sb-ink-3, #767f8c);
-}
-
 /* ── 길잡이: 막 · 누를 자리 · 말풍선 ──────────── */
 /*
  * 층 구조는 코치마크(coach.js)와 같은 자리에 한 칸 위(100~106)를 씁니다. 둘이 같이
@@ -335,55 +304,6 @@ const mk = (t, c, x) => {
   if (x != null) n.textContent = x
   return n
 }
-
-/**
- * 빈 화면 안내 한 판을 만듭니다. 붙이는 것은 부르는 쪽이 합니다. 화면마다 들어갈
- * 자리가 다르고, 어떤 화면은 이걸 카드 안에 넣습니다.
- *
- * @param {object} o
- * @param {string} o.head - 큰 줄. 기본은 「처음 오셨나요?」
- * @param {string} o.eyebrow - 위의 작은 줄. 어느 단계인지
- * @param {string[]} o.lines - 설명 줄들
- * @param {() => void} o.onExample - 「예시 보기」
- * @param {() => void} o.onOwn - 「직접 시작하기」. 없으면 그 버튼을 안 만든다
- * @param {string} o.exampleLabel
- * @param {string} o.ownLabel
- * @param {string} o.warn - 버튼 아래의 작은 주의. 예시가 서버에 남는 화면에서 쓴다
- * @returns {HTMLElement}
- */
-export function emptyPanel({
-  head = '처음 오셨나요?', eyebrow = '', lines = [],
-  onExample, onOwn, exampleLabel = '예시 보기', ownLabel = '직접 시작하기', warn = '',
-} = {}) {
-  injectCss(document)
-  const box = mk('div', 'onb')
-  if (eyebrow) box.append(mk('div', 'onb__eyebrow', eyebrow))
-  const h = mk('h2', 'onb__head', head)
-  box.append(h)
-  if (lines.length) {
-    const ul = mk('ul', 'onb__lines')
-    for (const l of lines) ul.append(mk('li', null, l))
-    box.append(ul)
-  }
-  const row = mk('div', 'onb__row')
-  if (onExample) {
-    const b = mk('button', 'onb__go', exampleLabel)
-    b.type = 'button'
-    b.dataset.coach = 'example'
-    b.onclick = () => onExample()
-    row.append(b)
-  }
-  if (onOwn) {
-    const b = mk('button', 'onb__own', ownLabel)
-    b.type = 'button'
-    b.onclick = () => onOwn()
-    row.append(b)
-  }
-  if (row.childElementCount) box.append(row)
-  if (warn) box.append(mk('p', 'onb__warn', warn))
-  return box
-}
-
 /* ══ 예시 길잡이 ═══════════════════════════════════ */
 
 let live = null
