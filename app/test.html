@@ -2437,6 +2437,76 @@
     await painted()
     return held && !guiding() && !document.querySelector('.onbg')
   })())
+  /*
+   * ── 「왜 이렇게 만들었는가」 칸 (note) ──────────────────────────────────
+   *
+   * 예시에는 성격이 다른 두 가지 말이 섞인다 — 어디를 누르라는 길잡이와, 그것이 왜 그런
+   * 모양인지. 둘을 같은 모양으로 적으면 두 번째가 지시로 읽히고, 안 적으면 화면이 하는
+   * 선택의 이유가 아무 데도 없다. 그래서 색을 갈라 둔다(파랑은 하실 일, 호박은 알아 두실 것).
+   */
+  ok('참고 칸은 안내와 다른 칸에 적힌다', await (async () => {
+    guide({ steps: [{ say: 'A', spot: 'gone', note: '문장 모델은 맡깁니다' }] })
+    await painted()
+    const n = document.querySelector('.onbg__note')
+    const r = !!n && n.querySelector('b').textContent === '참고'
+      && n.querySelector('span').textContent === '문장 모델은 맡깁니다'
+      // 파란 안내와 같은 칸에 섞이지 않는다
+      && !document.querySelector('.onbg__p')?.textContent.includes('맡깁니다')
+    stopGuide()
+    return r
+  })())
+  ok('참고 칸의 머리글을 단계가 정할 수 있다', await (async () => {
+    guide({ steps: [{ say: 'A', spot: 'gone', note: { head: '직접 들 것만 직접 듭니다', body: 'x' } }] })
+    await painted()
+    const r = document.querySelector('.onbg__note b').textContent === '직접 들 것만 직접 듭니다'
+    stopGuide()
+    return r
+  })())
+  /* *별표* 로 감싼 토막만 굵어진다. innerHTML 을 쓰지 않으려고 둔 최소한의 표시다 */
+  ok('참고 칸에서 별표로 감싼 말만 굵어진다', await (async () => {
+    guide({ steps: [{ say: 'A', spot: 'gone', note: '이것은 *굵게* 나옵니다' }] })
+    await painted()
+    const line = document.querySelector('.onbg__note span')
+    const r = line.querySelectorAll('em').length === 1
+      && line.querySelector('em').textContent === '굵게'
+      && line.textContent === '이것은 굵게 나옵니다'
+    stopGuide()
+    return r
+  })())
+  ok('참고를 주지 않은 단계에는 그 칸이 없다', await (async () => {
+    guide({ steps: [{ say: 'A', spot: 'gone' }] })
+    await painted()
+    const none = !document.querySelector('.onbg__note')
+    stopGuide()
+    return none
+  })())
+  /*
+   * 결과를 보는 뒷걸음은 참고를 물려받지 않는다. 물려받으면 같은 말이 앞걸음과 뒷걸음에
+   * 두 번 적히고, 두 번째는 이미 읽은 말이라 그때부터 이 칸을 아무도 안 읽는다.
+   */
+  ok('결과를 보는 걸음은 앞걸음의 참고를 물려받지 않는다', await (async () => {
+    guide({ steps: [
+      { say: 'A', spot: 'gone', note: '앞걸음의 말', done: { say: '됐습니다' } },
+      { say: 'B' },
+    ] })
+    gSpot('gone').click()
+    await painted()
+    const gone = !document.querySelector('.onbg__note')
+      && document.querySelector('.onbg__h').textContent === '됐습니다'
+    stopGuide()
+    return gone
+  })())
+  ok('결과를 보는 걸음에도 따로 참고를 달 수 있다', await (async () => {
+    guide({ steps: [
+      { say: 'A', spot: 'gone', done: { say: '됐습니다', note: '뒷걸음의 말' } },
+      { say: 'B' },
+    ] })
+    gSpot('gone').click()
+    await painted()
+    const r = document.querySelector('.onbg__note span').textContent === '뒷걸음의 말'
+    stopGuide()
+    return r
+  })())
   /* done 이 없는 단계는 예전처럼 곧바로 넘어간다 — 이 갈래를 지우면 그 동작으로 돌아간다 */
   ok('done 이 없으면 곧바로 다음 단계로 간다', await (async () => {
     guide({ steps: [{ say: 'A', spot: 'gone' }, { say: 'B', spot: 'gtwo' }] })
@@ -2649,6 +2719,21 @@
     return notYet && now
   })())
   ok('본 적 없는 키는 seen 이 false', coach.seen('sb.test.coach.never') === false)
+  /*
+   * 「직접 시작하기」를 누른 사람에게는 열지 않는다. 그런데 표시를 안 남기면 다음에 그
+   * 화면을 열 때(그때는 판에 내용이 있으므로) 코치마크가 스스로 열린다 — 한 번 거절한
+   * 것을 다시 내미는 셈이다. 그래서 거절도 기억한다. skip 은 막을 세우지 않는다.
+   */
+  ok('열지 않고 「봤다」로 둘 수 있다', (() => {
+    const key = 'sb.test.coach.skip'
+    localStorage.removeItem(key)
+    coach.skip(key)
+    const r = coach.seen(key) === true && !document.querySelector('.coach')
+      && !document.body.classList.contains('coaching')
+    localStorage.removeItem(key)
+    return r
+  })())
+  ok('키 없이 skip 을 불러도 던지지 않는다', (() => { coach.skip(); return true })())
   ok('막이 서 있는 동안 다시 시작해도 두 겹이 되지 않는다', (() => {
     coach.start({ cards: [{ head: 'A', body: 'x', spot: ['one'] }], key: 'sb.test.coach' })
     coach.start({ cards: [{ head: 'B', body: 'x', spot: ['two'] }], key: 'sb.test.coach' })

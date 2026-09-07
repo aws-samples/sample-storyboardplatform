@@ -104,6 +104,22 @@ function remember(key) {
 }
 
 /**
+ * 열지 않고 「봤다」로 둡니다.
+ *
+ * 「직접 시작하기」를 누른 사람에게 씁니다. 그 사람은 이미 쓰기로 정한 사람인데 막을
+ * 덮어 넉 장을 넘기게 하면 안내가 아니라 걸림돌입니다. 그런데 표시를 안 남기면 다음에
+ * 그 화면을 열 때(그때는 판에 내용이 있으므로) 코치마크가 스스로 열립니다 — 한 번
+ * 거절한 것을 다시 내미는 셈입니다. 그래서 거절도 기억합니다.
+ *
+ * 다시 보고 싶은 사람의 길은 남아 있습니다 — 헤더의 「안내 다시 보기」입니다.
+ *
+ * @param {string} key - seen 이 읽는 것과 같은 키
+ */
+export function skip(key) {
+  if (key) remember(key)
+}
+
+/**
  * 코치마크를 시작한다.
  * @param {object} o
  * @param {Array} o.cards - 카드들. { head, body, spot[], tags?, next, skip, step? }

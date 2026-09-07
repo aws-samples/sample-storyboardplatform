@@ -67,6 +67,20 @@
  * 사람이 정합니다 — 또 타이머로 넘기면 읽는 속도를 우리가 정하는 셈이고, 이 파일에
  * 타이머가 없는 이유가 그것입니다.
  *
+ * ══ 「왜 이렇게 만들었는가」는 다른 색으로 적습니다 (note)
+ *
+ * 예시에는 성격이 다른 두 가지 말이 섞입니다. 하나는 길잡이입니다 — 어디를 누르고 그
+ * 결과가 무엇인지. 다른 하나는 그것이 왜 그런 모양인지입니다 — 문장 모델은 맡기고
+ * 그림 모델만 우리가 띄운다, 두 종류가 같이 도니 관리할 것이 둘로 갈린다, 같은 말.
+ *
+ * 두 번째를 파란 안내와 같은 모양으로 적으면 「누르라는 지시」로 읽힙니다. 반대로 안
+ * 적으면 화면이 하는 선택의 이유가 아무 데도 없습니다. 그래서 같은 말풍선 안에 호박색
+ * 칸(--sb-work)으로 갈라 둡니다 — 파랑은 「하실 일」, 호박은 「알아 두실 것」입니다.
+ * 색을 나눈 김에 지시가 아님을 이름으로도 적어 둡니다(꼬리표 「참고」).
+ *
+ * 이 말은 예시에만 붙습니다. 직접 시작한 사람은 이미 쓰기로 정한 사람이라 값을 파는
+ * 말을 다시 들을 이유가 없습니다 — 그때는 막도 덮지 않습니다(각 화면의 onOwn).
+ *
  * 되돌리기가 없다는 사실은 말풍선에 적어 둡니다 — 예시 내용은 서버에 남고 같은 보드를
  * 보는 사람에게도 보입니다(app/board.js 의 push 가 net.sendOp 를 부릅니다). 그것을 모른
  * 채 누르게 두지 않습니다. 네 화면을 잇는 예시는 그래서 「예시 프로젝트」 한 판에만
@@ -262,6 +276,25 @@ body.onbguiding { overflow: hidden; }
   font: 600 11.5px/1.4 var(--sb-sans, sans-serif); color: var(--sb-ok, #0f7b5f);
 }
 .onbg__got::before { content: '✓'; font-size: 12px; }
+/*
+ * 「왜 이렇게 만들었는가」를 적는 칸. 길잡이와 색을 갈라 둡니다 — 파랑은 하실 일이고
+ * 호박(--sb-work)은 알아 두실 것입니다. 상태 색 셋 중 파랑과 부딪히지 않는 것이
+ * 호박이라 그것을 씁니다(app/theme.css 의 주석).
+ */
+.onbg__note {
+  display: grid; gap: 4px; margin-top: 2px; padding: 9px 11px;
+  background: var(--sb-work-soft, #fff7e8); border: 1px solid var(--sb-work-line, #f5dfb4);
+  border-left-width: 3px; border-radius: var(--sb-r, 6px);
+}
+.onbg__note b {
+  font: 700 10.5px/1 var(--sb-sans, sans-serif); letter-spacing: .04em;
+  color: var(--sb-work, #b45309); text-transform: none;
+}
+.onbg__note b::before { content: '◆ '; }
+.onbg__note span { font-size: 12.5px; line-height: 1.6; color: var(--sb-ink-2, #5b6472); }
+.onbg__note em {
+  font-style: normal; font-weight: 700; color: var(--sb-work, #b45309);
+}
 .onbg__x {
   position: absolute; top: 9px; right: 9px; width: 24px; height: 24px; padding: 0;
   display: grid; place-items: center; font: inherit; font-size: 15px;
@@ -431,6 +464,8 @@ function viewOf(s) {
     see: d.see ?? s.see,
     got: val(d.got) || '방금 만들어진 것입니다',
     go: val(d.go) || '다음으로',
+    /* 참고 칸은 물려받지 않습니다 — 같은 말이 앞걸음과 뒷걸음에 두 번 적힙니다 */
+    note: d.note || null,
     leaves: false,
     wait: 0,
   }
@@ -615,6 +650,11 @@ function bubble(s, boxes, lit) {
   if (s?.sub) b.append(mk('p', 'onbg__p', s.sub))
   /* 기다려서 나온 것을 보고 있는 걸음이면 그렇다고 적습니다 — 번호는 그대로이므로 */
   if (s?.got) b.append(mk('div', 'onbg__got', s.got))
+  /*
+   * 「왜 이렇게 만들었는가」. 누를 곳을 적기 전에 둡니다 — 무엇인지 → 왜 그런지 →
+   * 무엇을 할지 순서로 읽힙니다. 지시 다음에 두면 누른 뒤에 읽게 됩니다.
+   */
+  if (s?.note) b.append(noteBox(s.note))
 
   /*
    * 아래 셋 중 하나가 붙습니다.
@@ -658,6 +698,29 @@ function bubble(s, boxes, lit) {
   b.style.left = `${Math.max(gap, Math.min(x0, innerWidth - W - gap))}px`
   b.style.top = `${Math.max(gap, Math.min(y0, innerHeight - H - gap))}px`
   return b
+}
+
+/**
+ * 참고 칸 한 장. 길잡이가 아니라 「이 화면이 왜 이런 모양인가」입니다.
+ *
+ * 문자열 하나로도, { head, body } 로도 받습니다. 굵게 할 말은 * 로 감쌉니다 —
+ * innerHTML 을 쓰지 않으려고 둔 최소한의 표시입니다(예시 문구도 결국 사람이 쓴
+ * 데이터이므로 태그를 그대로 심는 길은 열어 두지 않습니다).
+ *
+ * @param {string|{head?: string, body: string}} note
+ */
+function noteBox(note) {
+  const { head = '참고', body } = typeof note === 'string' ? { body: note } : note
+  const box = mk('div', 'onbg__note')
+  box.append(mk('b', null, head))
+  const line = mk('span')
+  // * 로 감싼 토막만 굵게. 홀수 번째가 감싸인 쪽입니다
+  String(body || '').split('*').forEach((part, i) => {
+    if (!part) return
+    line.append(i % 2 ? mk('em', null, part) : document.createTextNode(part))
+  })
+  box.append(line)
+  return box
 }
 
 /**
@@ -765,9 +828,11 @@ async function fire() {
  * 자리에는 테 · 물결 · 마우스 표시 · 꼬리표 넉 장이 얹혀서 어디를 눌러야 하는지 한눈에
  * 보입니다. 누르면 그 자리의 원래 동작은 막고 run 이 대신 돌아 내용이 채워집니다.
  *
- * 각 단계는 { say, sub?, spot?, see?, do?, tag?, go?, leaves?, wait?, waitSay?, done?, run? } 입니다.
+ * 각 단계는 { say, sub?, note?, spot?, see?, do?, tag?, go?, leaves?, wait?, waitSay?, done?, run? } 입니다.
  *   say      말풍선의 큰 줄. 지금 무엇을 하는지
  *   sub      그 아래 설명 줄
+ *   note     「왜 이렇게 만들었는가」. 호박색 칸으로 갈라 적습니다(머리글의 note).
+ *            문자열이거나 { head, body }. 굵게 할 토막은 *별표* 로 감쌉니다
  *   spot     누를 자리. data-coach 이름이거나 CSS 선택자
  *   see      같이 막 위로 올려 보여 줄 자리들. 누를 곳과 결과가 들어갈 판이 다를 때 씁니다
  *   do       「표시된 곳을 눌러 주십시오」 대신 적을 한 줄
@@ -778,8 +843,9 @@ async function fire() {
  *   waitSay  기다리는 동안 적을 한 줄. 기본은 「만들고 있습니다」
  *   run      실제로 화면을 바꾸는 함수. 동기·비동기 둘 다 됩니다
  *   done     run 뒤에 나온 것을 보여 줄 한 걸음. 없으면 바로 다음 단계로 갑니다
- *            { say, sub?, see?, got?, go? } — see 를 주면 그 판만 밝힙니다(기본은 단계의 see).
- *            네 글자는 함수로도 줄 수 있습니다. run 이 돈 뒤에야 아는 숫자를 적을 때 씁니다
+ *            { say, sub?, see?, got?, go?, note? } — see 를 주면 그 판만 밝힙니다(기본은 단계의 see).
+ *            네 글자는 함수로도 줄 수 있습니다. run 이 돈 뒤에야 아는 숫자를 적을 때 씁니다.
+ *            note 는 물려받지 않습니다 — 여기 적은 것만 이 걸음에 뜹니다
  *
  * 원래 동작을 막는 것은 예시가 실수로 진짜 모델 호출에 닿지 않게 하려는 것입니다 —
  * 무슨 일이 일어나는지는 run 한 곳만 읽으면 됩니다. 자리에 커서를 두어야 하는
