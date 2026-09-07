@@ -25,7 +25,7 @@
  * Cognito 없이 화면만 보는 용도이고, 보드도 같은 조건에서 로그인을 건너뜁니다
  * (app/board.js 의 boot 이 configured 로 갈라지는 것과 같습니다).
  */
-import { NAV_TABS, navHref } from './nav-tabs.js'
+import { NAV_TABS, navHref, newHref } from './nav-tabs.js'
 import { configured, session, logout } from './auth.js'
 import { showLogin, DEMO_USERS } from './login.js'
 import { setHtml } from './dom.js'
@@ -116,12 +116,18 @@ function paintSide() {
 
 /* ══ 새로 생성 ═════════════════════════════════════ */
 
-/* 단계 넷. 번호는 NAV_TABS 순서에서 나옵니다 — 별도로 적어 두면 어긋납니다 */
+/*
+ * 단계 넷. 번호는 NAV_TABS 순서에서 나옵니다 — 별도로 적어 두면 어긋납니다.
+ *
+ * 주소는 navHref 가 아니라 newHref 입니다(?new=1). 이 목록은 「새로 생성」 안에 있으므로
+ * 여기서 여는 단계는 늘 새 프로젝트로 시작합니다 — 그 화면 앞의 문이 이름 칸 하나만
+ * 내고 기존 판의 카드는 내지 않습니다. 이어서 할 판은 「프로젝트」 메뉴에서 엽니다.
+ */
 function paintSteps() {
   setHtml(byId('steps'), NAV_TABS.map((t, i) => {
     const n = String(i + 1).padStart(2, '0')
     return `<li class="step">
-      <a class="step__go" href="${esc(navHref(t.id))}">
+      <a class="step__go" href="${esc(newHref(t.id))}">
         <span class="step__n" aria-hidden="true">${n}</span>
         <span class="step__body">
           <span class="step__label">${esc(t.label)}</span>

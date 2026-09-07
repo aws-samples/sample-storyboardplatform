@@ -27,7 +27,7 @@
  * 말합니다.
  */
 
-import { navHref, boardParam, DEFAULT_BOARD, navTab } from './nav-tabs.js'
+import { navHref, boardParam, DEFAULT_BOARD, navTab, wantsNew } from './nav-tabs.js'
 import { projectsClient } from './net.js'
 import { when } from './history.js'
 import { DEMO_USERS } from './login.js'
@@ -313,14 +313,24 @@ export function paintCards(mount, rows, { onPick, current, who, none = '아직 �
  * (net.connect 의 구독, 로그 재생, Neptune projectId). 새로 여는 편이 안전하고,
  * 무엇보다 주소에 지금 보는 프로젝트가 남아 공유할 수 있습니다.
  *
+ * ══ 두 가지 문
+ *
+ * 홈의 「새로 생성」에서 온 것이면(?new=1) 이름 칸 하나만 냅니다. 예전에는 한 문이
+ * 두 일을 다 했습니다 — 이미 있는 판의 카드를 먼저 늘어놓고 그 아래에 이름 칸을 두는
+ * 모양이었습니다. 그러면 「새로 생성」을 누른 사람에게 기존 판을 열라고 권하는 셈이고,
+ * 실제로 그 카드를 눌러 이어서 할 판을 연 사람이 「처음 오셨나요?」를 만나는 자리도
+ * 생겼습니다(그 화면은 비어 있는 판을 전제로 그 안내를 띄웁니다). 새로 만드는 길과
+ * 이어서 하는 길은 홈에서 이미 갈라져 있으니, 문도 그대로 갈라 둡니다.
+ *
  * @param {object} o
  * @param {string} o.step - NAV_TABS 의 id. 고른 뒤 돌아올 화면입니다
  * @param {string} [o.actor] - 새로 만든 카드의 만든 사람
  * @param {Function} [o.who] - actor id → {name}
  * @param {HTMLElement} [o.mount] - 문이 들어갈 자리. 없으면 body 에 붙입니다
+ * @param {boolean} [o.fresh] - 새로 만드는 문. 기본은 주소의 ?new=1
  * @returns {Promise<string>} 고른 boardId. 고르기 전에는 해결되지 않습니다
  */
-export function pickProject({ step = 'board', actor, who, mount } = {}) {
+export function pickProject({ step = 'board', actor, who, mount, fresh = wantsNew() } = {}) {
   const chosen = boardParam()
   if (chosen) return Promise.resolve(chosen)
 
@@ -333,14 +343,18 @@ export function pickProject({ step = 'board', actor, who, mount } = {}) {
   box.className = 'pj'
   box.innerHTML = `
     <div class="pj__eyebrow">${esc(navTab(step)?.label || '프로젝트')}</div>
+    ${fresh ? `
+    <h2 class="pj__h">새 프로젝트 이름을 붙여 주십시오</h2>
+    <p class="pj__p">이 이름으로 판이 하나 열립니다. 대본도, 씬별 그림도, 컷도 그 안에 담기고
+      팀원들의 작업 상황에도 이 이름으로 뜹니다.</p>` : `
     <h2 class="pj__h">어느 프로젝트를 여시겠습니까?</h2>
     <p class="pj__p">우리 팀이 여기까지 해 둔 것입니다. 카드를 누르면 그 판을 이어서 엽니다.</p>
-    <div id="pjList" data-coach="projects"></div>
+    <div id="pjList" data-coach="projects"></div>`}
     <form class="pj__new" id="pjNew">
       <input class="pj__in" id="pjName" type="text" maxlength="60" autocomplete="off"
              placeholder="새 프로젝트 이름 — 예: 여름 스튜디오 파일럿" aria-label="새 프로젝트 이름">
       <button class="pj__go" id="pjMake" type="submit">만들어서 열기</button>
-      <button class="pj__skip" id="pjSkip" type="button">둘러보기</button>
+      ${fresh ? '' : '<button class="pj__skip" id="pjSkip" type="button">둘러보기</button>'}
     </form>
     <p class="pj__note" id="pjNote"></p>`
   wrap.append(box)
@@ -357,16 +371,26 @@ export function pickProject({ step = 'board', actor, who, mount } = {}) {
     none: '아직 만든 프로젝트가 없습니다. 아래에 이름을 적어 첫 판을 여십시오.',
   })
 
-  list().then((rows) => {
-    paint(rows)
-    note.textContent = rows.length
-      ? `프로젝트 ${rows.length}개. 「둘러보기」는 이름을 붙이지 않은 기본 판을 엽니다.`
-      : '이름은 나중에 바꿀 수 없습니다 — 팀이 서로 알아볼 만한 것으로 붙이십시오.'
-  }).catch((e) => {
-    // 목록을 못 읽어도 새로 만드는 길은 살려 둡니다. 여기서 막히면 아무 일도 못 합니다
-    paint([])
-    note.textContent = `목록을 읽지 못했습니다 — ${e.message}. 새로 만드는 것은 됩니다.`
-  })
+  /*
+   * 새로 만드는 문에서는 목록을 아예 읽지 않습니다. 안 보여 줄 것을 읽는 것은 값을
+   * 치르는 일이고(배포에서는 AppSync 왕복입니다), 커서를 이름 칸에 먼저 둡니다.
+   */
+  if (fresh) {
+    note.textContent = '이름은 나중에 바꿀 수 없습니다 — 팀이 서로 알아볼 만한 것으로 붙이십시오. '
+      + '이미 있는 판을 이어서 하시려면 홈의 「프로젝트」에서 여십시오.'
+    q('pjName').focus()
+  } else {
+    list().then((rows) => {
+      paint(rows)
+      note.textContent = rows.length
+        ? `프로젝트 ${rows.length}개. 「둘러보기」는 이름을 붙이지 않은 기본 판을 엽니다.`
+        : '이름은 나중에 바꿀 수 없습니다 — 팀이 서로 알아볼 만한 것으로 붙이십시오.'
+    }).catch((e) => {
+      // 목록을 못 읽어도 새로 만드는 길은 살려 둡니다. 여기서 막히면 아무 일도 못 합니다
+      paint([])
+      note.textContent = `목록을 읽지 못했습니다 — ${e.message}. 새로 만드는 것은 됩니다.`
+    })
+  }
 
   q('pjNew').onsubmit = async (ev) => {
     ev.preventDefault()
@@ -378,7 +402,9 @@ export function pickProject({ step = 'board', actor, who, mount } = {}) {
     await touch({ boardId, actor, name, what: '프로젝트를 만들었습니다' })
     open(boardId)
   }
-  q('pjSkip').onclick = () => open(DEFAULT_BOARD)
+  // 「둘러보기」는 새로 만드는 문에는 없습니다 — 이름을 붙이러 온 사람의 길이 아닙니다
+  const skip = q('pjSkip')
+  if (skip) skip.onclick = () => open(DEFAULT_BOARD)
 
   // 고르면 화면을 다시 엽니다. 그래서 이 약속은 일부러 해결되지 않습니다 —
   // 부르는 쪽의 boot() 이 여기서 멈춰 서고, 작업판은 아직 그려지지 않습니다.

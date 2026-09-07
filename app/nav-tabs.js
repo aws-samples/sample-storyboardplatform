@@ -75,6 +75,30 @@ export function navHref(id, boardId) {
 }
 
 /**
+ * 「새로 생성」으로 들어가는 주소. 프로젝트를 새로 하나 만들며 시작한다는 뜻입니다.
+ *
+ * 홈의 단계 목록이 이것을 씁니다. 그냥 navHref 로 보내면 그 화면 앞의 문이 「어느
+ * 프로젝트를 여시겠습니까?」를 띄우고 이미 있는 판의 카드까지 같이 내밀었습니다 —
+ * 「새로 생성」을 누른 사람에게 기존 판을 열라고 권하는 셈이고, 그 판을 열면 이어서
+ * 할 화면인데 「처음 오셨나요?」가 뜨는 자리도 생겼습니다. 그래서 새로 만드는 길과
+ * 이어서 하는 길을 주소에서 갈라 둡니다(app/projects.js 의 pickProject).
+ *
+ * @param {string} id - NAV_TABS 의 id
+ */
+export function newHref(id) {
+  const base = navTab(id)?.href || '/'
+  return `${base}${base.includes('?') ? '&' : '?'}new=1`
+}
+
+/**
+ * 「새로 생성」으로 들어온 것인지. 그때 문은 이름 칸 하나만 냅니다.
+ * @param {string} [search] - location.search. 테스트에서 넣어 봅니다
+ */
+export function wantsNew(search = typeof location === 'undefined' ? '' : location.search) {
+  return new URLSearchParams(String(search || '').replace(/^\?/, '')).get('new') === '1'
+}
+
+/**
  * 프로젝트를 고르지 않았을 때의 보드. net.js 의 opsClient·awsTransport 가 쓰는
  * 기본값과 같습니다 — 두 곳이 다르면 주소에 board 가 없을 때 서로 다른 로그를 봅니다.
  */
