@@ -1759,8 +1759,24 @@
     paintCards(mount, pjRows, { who: (id) => (id === 'u1' ? { name: '가온' } : null) })
     const first = mount.querySelector('[data-board="p-a"]')
     const r = first.querySelector('.pj__name').textContent === '여름 파일럿'
-      && first.querySelector('.pj__last').textContent === '가온 · 컷을 만들었습니다'
+      && first.querySelector('.pj__last').textContent === '컷을 만들었습니다'
       && mount.querySelectorAll('.pj__card').length === 2
+    mount.remove()
+    return r
+  })())
+  /*
+   * 「누가」와 「언제」는 테 두른 조각으로 따로 선다. 한 줄의 글로 흘려 두면 사람 이름과
+   * 한 일과 시각이 한 문장으로 뭉쳐, 어디까지가 이름인지 사람이 짚어야 한다.
+   */
+  ok('누가·언제는 카드 안에서 조각으로 따로 선다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    paintCards(mount, pjRows, { who: (id) => (id === 'u1' ? { name: '가온' } : null), nowMs: 2 })
+    const chips = [...mount.querySelectorAll('[data-board="p-a"] .pj__chip')]
+    const r = chips.length === 2
+      && chips[0].textContent === '가온'
+      && chips[1].classList.contains('pj__t')
+      && chips[1].textContent.length > 0
     mount.remove()
     return r
   })())
@@ -1770,6 +1786,26 @@
     document.body.appendChild(mount)
     paintCards(mount, pjRows)
     const r = mount.querySelector('[data-board="p-b"] .pj__last').textContent === '아직 아무 일도 없습니다'
+    mount.remove()
+    return r
+  })())
+  /* 없는 사실을 「알 수 없음」으로 적으면 이름을 못 읽은 것처럼 보인다 */
+  ok('손댄 사람이 없는 판에는 사람 조각을 달지 않는다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    paintCards(mount, pjRows, { nowMs: 2 })
+    const chips = [...mount.querySelectorAll('[data-board="p-b"] .pj__chip')]
+    const r = chips.length === 1 && chips[0].classList.contains('pj__t')
+    mount.remove()
+    return r
+  })())
+  /* 이름 첫 글자. 카드가 두 열로 서면 이름을 읽기 전에 어느 판인지 눈에 걸려야 한다 */
+  ok('카드에 이름 첫 글자를 표지로 단다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    paintCards(mount, pjRows)
+    const mark = mount.querySelector('[data-board="p-a"] .pj__mark')
+    const r = mark.textContent === '여' && mark.getAttribute('aria-hidden') === 'true'
     mount.remove()
     return r
   })())

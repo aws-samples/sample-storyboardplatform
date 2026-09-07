@@ -155,7 +155,8 @@ const CSS = `
   font-family: var(--sb-sans, sans-serif); color: var(--sb-ink, #111318);
 }
 .pj {
-  width: 100%; max-width: 620px; background: var(--sb-panel, #fff);
+  /* 카드가 두 열로 서므로 문도 그만큼 넓힙니다 — 620px 에서는 두 열이 너무 좁습니다 */
+  width: 100%; max-width: 680px; background: var(--sb-panel, #fff);
   border: 1px solid var(--sb-line, #e4e7ec); border-radius: var(--sb-r, 6px);
   padding: 22px 22px 18px;
 }
@@ -165,24 +166,55 @@ const CSS = `
 }
 .pj__h { margin: 0 0 7px; font-size: 20px; font-weight: 650; letter-spacing: -.015em; }
 .pj__p { margin: 0 0 16px; font-size: 12.5px; line-height: 1.65; color: var(--sb-ink-2, #5b6472); }
-.pj__list { display: grid; gap: 1px; background: var(--sb-line-2, #f1f3f6);
-  border: 1px solid var(--sb-line, #e4e7ec); border-radius: var(--sb-r, 6px); overflow: hidden; }
+/*
+ * 두 열로 셉니다. 한 열로 길게 늘어놓으면 판이 열 개만 넘어도 아래가 접히고, 세 열로
+ * 쪼개면 카드 하나의 폭이 프로젝트 이름을 담지 못합니다. 좁은 화면에서는 한 열입니다.
+ */
+.pj__list { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 620px) { .pj__list { grid-template-columns: minmax(0, 1fr); } }
 .pj__card {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 10px;
-  align-items: center; width: 100%; padding: 11px 13px; text-align: left;
-  background: var(--sb-panel, #fff); border: 0; font: inherit;
-  color: var(--sb-ink, #111318); cursor: pointer;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 10px;
+  align-content: start; width: 100%; padding: 13px; text-align: left;
+  background: var(--sb-panel, #fff); font: inherit; color: var(--sb-ink, #111318);
+  border: 1px solid var(--sb-line, #e4e7ec); border-radius: 9px;
 }
-.pj__card:hover { background: var(--sb-accent-soft, #eef2ff); }
-.pj__card[aria-current="true"] { background: var(--sb-fill, #f8f9fb); }
-.pj__name { font-size: 14px; font-weight: 600; letter-spacing: -.01em;
+button.pj__card { cursor: pointer; }
+button.pj__card:hover { border-color: var(--sb-accent, #1a56db); background: var(--sb-accent-soft, #eef2ff); }
+button.pj__card:hover .pj__open { color: var(--sb-accent, #1a56db); }
+.pj__card:focus-visible { outline: 2px solid var(--sb-accent, #1a56db); outline-offset: 1px; }
+.pj__card[aria-current="true"] { border-color: var(--sb-accent, #1a56db); background: var(--sb-accent-soft, #eef2ff); }
+/* 이름 첫 글자. 카드가 두 열로 서면 이름을 읽기 전에 어느 판인지 눈에 걸립니다 */
+.pj__mark {
+  grid-row: 1; display: grid; place-items: center; width: 26px; height: 26px; flex: none;
+  border-radius: 7px; background: var(--sb-accent-soft, #eef2ff);
+  border: 1px solid var(--sb-accent-line, #c7d6f7);
+  font-size: 12px; font-weight: 700; color: var(--sb-accent, #1a56db);
+}
+.pj__name { grid-row: 1; align-self: center; font-size: 14px; font-weight: 650; letter-spacing: -.01em;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pj__t { font: 400 11px var(--sb-mono, monospace); color: var(--sb-ink-3, #767f8c); white-space: nowrap; }
-.pj__last { grid-column: 1 / -1; font-size: 12px; line-height: 1.5;
-  color: var(--sb-ink-2, #5b6472); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pj__last b { font-weight: 600; }
+.pj__open { grid-row: 1; align-self: center; font-size: 13px; color: var(--sb-ink-3, #767f8c); }
+.pj__last { grid-column: 1 / -1; margin: 3px 0 1px; font-size: 12px; line-height: 1.5;
+  color: var(--sb-ink-2, #5b6472); overflow: hidden;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .pj__last i { font-style: normal; color: var(--sb-ink-3, #767f8c); }
-.pj__none { padding: 15px 13px; background: var(--sb-panel, #fff);
+/*
+ * 「누가」와 「언제」는 테를 둘러 따로 세웁니다. 한 줄의 글로 흘려 두면 이름·한 일·
+ * 시각이 한 문장으로 뭉쳐 읽는 사람이 어디까지가 사람 이름인지 짚어야 합니다.
+ * 누르는 것은 카드 하나이므로 이 조각들은 span 입니다 — 버튼 안의 버튼이 되면
+ * 무엇을 누른 것인지 화면 낭독기가 말할 수 없습니다.
+ */
+.pj__meta { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 5px; }
+.pj__chip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px;
+  border: 1px solid var(--sb-line, #e4e7ec); border-radius: 999px;
+  background: var(--sb-fill, #f8f9fb); font-size: 11px; line-height: 1.4;
+  color: var(--sb-ink-2, #5b6472); white-space: nowrap; max-width: 100%;
+}
+.pj__chip b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.pj__chip::before { content: attr(data-ico); flex: none; color: var(--sb-ink-3, #767f8c); }
+.pj__t { font-family: var(--sb-mono, monospace); font-size: 10.5px; }
+.pj__none { grid-column: 1 / -1; padding: 15px 13px; background: var(--sb-panel, #fff);
+  border: 1px dashed var(--sb-line, #e4e7ec); border-radius: 9px;
   font-size: 12.5px; line-height: 1.6; color: var(--sb-ink-3, #767f8c); }
 .pj__new { display: flex; gap: 7px; margin-top: 14px; flex-wrap: wrap; }
 .pj__in {
@@ -249,12 +281,22 @@ export function paintCards(mount, rows, { onPick, current, who, none = '아직 �
       el.onclick = () => onPick(r)
     }
     if (current && r.boardId === current) el.setAttribute('aria-current', 'true')
-    const last = r.lastWhat
-      ? `<b>${esc(nameOf(r.lastActor, who))}</b> · ${esc(r.lastWhat)}`
-      : '<i>아직 아무 일도 없습니다</i>'
-    el.innerHTML = `<span class="pj__name">${esc(r.name || r.boardId)}</span>
-      <span class="pj__t">${esc(when(r.updatedAt, nowMs))}</span>
-      <span class="pj__last">${last}</span>`
+    const name = r.name || r.boardId
+    const at = when(r.updatedAt, nowMs)
+    /*
+     * 한 일은 카드 본문에, 「누가」와 「언제」는 아래 테 두른 조각에 담습니다. 아직 아무
+     * 일도 없는 판에는 사람 조각을 달지 않습니다 — 없는 사실을 「알 수 없음」으로 적으면
+     * 이름을 못 읽은 것처럼 보입니다.
+     */
+    const chips = [
+      r.lastActor ? `<span class="pj__chip" data-ico="◍"><b>${esc(nameOf(r.lastActor, who))}</b></span>` : '',
+      at ? `<span class="pj__chip pj__t" data-ico="◷">${esc(at)}</span>` : '',
+    ].filter(Boolean).join('')
+    el.innerHTML = `<span class="pj__mark" aria-hidden="true">${esc([...name][0] || '·')}</span>
+      <span class="pj__name">${esc(name)}</span>
+      <span class="pj__open" aria-hidden="true">${onPick ? '→' : ''}</span>
+      <span class="pj__last">${r.lastWhat ? esc(r.lastWhat) : '<i>아직 아무 일도 없습니다</i>'}</span>
+      <span class="pj__meta">${chips}</span>`
     mount.append(el)
   }
 }
