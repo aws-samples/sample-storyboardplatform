@@ -31,6 +31,7 @@ import { configured, session, login, setNewPassword, logout } from '../services/
 import { DEMO_USERS } from '../components/login-form.js'
 import { NAV_TABS, navHref, navTabFromSearch, boardFromSearch } from '../domain/routes.js'
 import { mountNav } from '../components/nav-tabs.js'
+import { mountBrand } from '../components/brand.js'
 import { entries, group, markOp } from '../services/activity-log.js'
 import { paintList } from '../components/history-list.js'
 import { emptyPanel } from '../components/empty-panel.js'
@@ -40,6 +41,7 @@ import { wire as wireTour, demoActive, demoAdvance, demoSay, demoTitle } from '.
 import * as coach from '../components/coachmark.js'
 import { pickProject } from '../components/project-picker.js'
 import { touch as touchProject } from '../services/projects.js'
+import { saveAsset, loadAsset } from '../services/assets.js'
 
 /*
  * 예시가 쓸 제품 쪽 함수를 넣습니다. app-walkthrough 는 app/ 을 import 할 수 없습니다.
@@ -430,8 +432,29 @@ const openTab = (name) => {
   document.querySelectorAll('.panel').forEach((p) => p.classList.toggle('active', p.id === `panel-${name}`))
   if (name !== 'script') LAST_DEV_TAB = name
   NAV?.setActive(name === 'script' ? 'script' : 'develop')
-  if (name === 'script') renderScriptPanel()
+  if (name === 'script') { renderScriptPanel(); restoreScript() }
   if (name === 'hist') paintHist()
+}
+
+/*
+ * 전에 담아 둔 대본을 다시 걸어 줍니다. 한 번만 읽습니다.
+ *
+ * 이 화면은 대본을 만들 때마다 에셋에 담는데(keepScript), 새로고침하면 SCRIPT.text 가
+ * 빈 문자열로 돌아가서 「대본 생성」을 다시 눌러야 했습니다. 같은 대본을 두 번 만드는
+ * 셈이고 배포에서는 Bedrock 을 한 번 더 부르는 셈입니다.
+ *
+ * 화면에 이미 대본이 있으면 건드리지 않습니다. 방금 만든 것이 담아 둔 것보다 새롭고,
+ * 사람이 보고 있는 것을 뒤에서 갈아 끼우면 안 됩니다.
+ */
+let scriptRestored = false
+async function restoreScript() {
+  if (scriptRestored || SCRIPT.text) return
+  scriptRestored = true
+  const kept = await loadAsset(BOARD, 'script')
+  // 그 사이에 사람이 대본을 만들었을 수 있습니다. 그때는 그쪽이 새것입니다
+  if (!kept || SCRIPT.text) return
+  SCRIPT.text = kept
+  renderScriptPanel()
 }
 
 /** 지금 보고 있는 스토리의 캐시 키. 씨앗을 안 골랐으면 자유 입력 자리다 */
@@ -998,8 +1021,26 @@ function renderScriptPanel() {
   const box = $('scriptPanel')
   if (!box) return
   if (!EPISODES.length) {
-    box.innerHTML = `<div class="placeholder">컷이 없습니다. 먼저 스토리를 생성해 주세요.<br>
+    /*
+     * 컷이 없습니다. 그래도 전에 담아 둔 대본이 있으면 그것을 보여줍니다.
+     *
+     * 컷은 저장되지 않아서 새로고침하면 EPISODES 가 빕니다. 대본은 에셋에 남아 있는데
+     * (restoreScript 가 걸어 줍니다) 여기서 그냥 「컷이 없습니다」로 덮으면 담아 둔
+     * 대본을 볼 자리가 없어집니다. 저장한 보람이 사라지는 자리가 바로 여기였습니다.
+     */
+    box.innerHTML = SCRIPT.text ? `<div class="story-content">
+      <div class="sec-label">대본</div>
+      <pre class="script">${esc(SCRIPT.text)}</pre>
+      <div class="card__row">
+        <button class="btn btn--line" id="scCopy">복사</button>
+        <button class="btn btn--line" id="scDown">다운로드</button>
+      </div>
+      <div class="hint" id="scNote">이 프로젝트에 담아 둔 대본입니다.
+        컷은 남지 않아서 다시 만들려면 씨앗 → 분기를 지나야 합니다.</div>
+    </div>` : `<div class="placeholder">컷이 없습니다. 먼저 스토리를 생성해 주세요.<br>
       씨앗 → 분기 → <b>이 분기로 대본 생성</b> 을 지나면 여기에 컷이 들어옵니다.</div>`
+    if ($('scCopy')) $('scCopy').onclick = () => copyScript(SCRIPT.text)
+    if ($('scDown')) $('scDown').onclick = () => downloadScript(SCRIPT.text, scriptFileName('대본'))
     return
   }
   const i = Math.min(Math.max(0, SCRIPT.ep), EPISODES.length - 1)
@@ -1056,12 +1097,50 @@ async function runScript() {
     })
     mark(`「${ep.title}」를 ${SCRIPT_FORMATS[SCRIPT.format]?.label || SCRIPT.format} 대본으로 옮겼습니다`,
       { step: 'script', ref: String(SCRIPT.ep), refKind: 'ep' })
+    /*
+     * 대본을 프로젝트에 넣어 둡니다. 전에는 이 값이 SCRIPT.text 라는 전역 변수에만
+     * 있었습니다. 그래서 새로고침 한 번에 사라졌고, 키비주얼로 옮기려면 사람이 「복사」를
+     * 눌러 그 화면의 대본 칸에 붙여야 했습니다. 이제 키비주얼이 같은 자리를 읽습니다.
+     *
+     * 실패해도 대본은 화면에 그대로 있습니다(SCRIPT.text). 그래서 화면을 멈추지 않고
+     * 못 담았다는 것만 적습니다. 복사와 다운로드 버튼도 그대로라 사람이 손으로 건질
+     * 길이 남아 있습니다.
+     */
+    await keepScript(SCRIPT.text)
   } catch (err) {
     console.warn('[story-graph] 대본화 실패', err)
     SCRIPT.err = `${err.message || '서버 연결에 실패했습니다.'} 다시 시도해 주세요.`
   } finally {
     SCRIPT.busy = false
     renderScriptPanel()
+  }
+}
+
+/**
+ * 대본을 이 프로젝트의 에셋으로 담습니다. 실패는 삼키고 적어만 둡니다.
+ *
+ * saveAsset 은 못 담으면 던집니다(너무 길거나, 저장소가 꽉 찼거나, 리뷰 역할이거나).
+ * 그것을 여기서 받아 안내문으로 바꿉니다. 대본 자체는 화면에 남아 있으므로 작업이
+ * 사라지는 것은 아니고, 「담겼다」고 조용히 넘어가지만 않으면 됩니다.
+ */
+async function keepScript(text) {
+  if (!text?.trim()) return
+  /*
+   * 리뷰 역할은 에셋을 쓰지 못합니다(infra/resolvers/putAsset.js). 보내면 401 이 오고
+   * 그 문구가 안내문 자리에 뜨는데, 이 사람이 잘못한 것이 아니라서 겁만 줍니다.
+   * 대본은 화면에 그대로 있고 복사·다운로드도 그대로입니다.
+   */
+  if ((session()?.role || 'reviewer') === 'reviewer' && configured) return
+  const note = $('scNote')
+  try {
+    await saveAsset({ boardId: BOARD, kind: 'script', body: text, actor: session()?.id })
+  } catch (err) {
+    console.warn('[story-graph] 대본을 담지 못했습니다', err)
+    if (note) {
+      note.className = 'warn'
+      note.textContent = `대본을 프로젝트에 담지 못했습니다. ${err.message} `
+        + '아래 「다운로드」로 받아 두시는 것이 안전합니다.'
+    }
   }
 }
 
@@ -1109,7 +1188,7 @@ async function extract() {
     // 새 대본은 빈 판에서 뽑는다. 지금 그래프를 canon 으로 주면 남의 작품 id 를 물려받는다
     const g = await planGraph(NET, text, { model: MODEL() })
     build(newStore(g))
-    $('srcBadge').textContent = `graph: 대본 추출 (노드 ${g.nodes.length})`
+    // 노드 수는 아래 mark 와 hint 가 이미 말합니다. 머리의 배지는 없앴습니다
     mark(`대본에서 노드 ${g.nodes.length}개 · 씨앗 ${SEEDS.length}개를 뽑았습니다`)
     const bad = [...(g.warnings || []), ...(g.conflicts || []).map((c) => `${c.level}: ${c.msg}`)]
     hint.className = bad.length ? 'warn' : 'hint'
@@ -1196,8 +1275,14 @@ function runExample() {
     store: () => STORE, stories: () => STORIES, seeds: () => SEEDS,
     boot, mark, openTab, pickSeed,
     playing: (on) => { PLAYING_EXAMPLE = on },
-    afterDone: () => { syncWelcome(); paintHist() },
-    openCoach: () => openCoach(),
+    /*
+     * 예시를 마치면 끝입니다. 예전에는 여기서 코치마크를 이어 열었습니다. 예시가 이미
+     * 화면을 짚어 가며 다 보여준 뒤라, 끝났다고 생각한 사람에게 막이 한 번 더 덮였습니다.
+     *
+     * 코치마크 자체는 남아 있습니다. 예시를 보지 않고 온 사람에게는 열리고, 다시 보려면
+     * 헤더의 「안내 다시 보기」입니다. 봤다고 적어 두는 이유는 coach.skip 에 있습니다.
+     */
+    afterDone: () => { coach.skip(COACH_KEY); syncWelcome(); paintHist() },
   })
 }
 
@@ -1338,11 +1423,18 @@ drop.addEventListener('drop', async (e) => {
   $('inputHint').textContent = `${file.name} 을 읽었습니다. 그래프 추출을 눌러주세요.`
 })
 
-$('modeBadge').textContent = NET
-  ? (GRAPH_NET ? 'Bedrock · Neptune 연결' : 'Bedrock 연결')
-  : '로컬 모드 (mock)'
-$('modeBadge').className = NET ? 'badge badge--live' : 'badge'
-$('srcBadge').textContent = `graph: ${GRAPH_SRC}${SEED_SRC === 'mock' ? ' · seeds: mock' : ''}`
+/*
+ * 머리의 왼쪽. 네 화면이 같은 것을 씁니다. 누르면 홈입니다.
+ *
+ * 예전에는 여기에 배지 둘이 있었습니다. 「Bedrock · Neptune 연결」 과 「graph: …」 입니다.
+ * 둘 다 이 화면을 만드는 사람에게는 쓸모가 있었지만 쓰는 사람이 할 일과는 상관이 없어서,
+ * 머리에서 뺐습니다. 값 자체는 버리지 않고 콘솔에 한 줄로 남깁니다. 어느 쪽에 붙었는지
+ * 봐야 하는 일이 실제로 있습니다(로컬 모드에서 mock 씨앗을 보고 있는 줄 모르는 자리).
+ */
+mountBrand('#brandMount')
+console.info('[story-graph] %s · graph: %s%s',
+  NET ? (GRAPH_NET ? 'Bedrock · Neptune 연결' : 'Bedrock 연결') : '로컬 모드 (mock)',
+  GRAPH_SRC, SEED_SRC === 'mock' ? ' · seeds: mock' : '')
 
 // 로컬 모드에서는 고를 것이 없다. 생성이 전부 로컬 폴백으로 돌아 모델을 쓰지 않는다
 if (!NET) {
@@ -1370,7 +1462,6 @@ async function boot() {
     MOCK_SEEDS = d.seeds
     POOL = d.seeds.map((s, i) => ({ ...d.stories[i], probe: s.probe, focus: s.focus }))
     build(newStore(d.graph), { keepSeeds: SEED_SRC === 'mock' ? d.seeds : null })
-    $('srcBadge').textContent = `graph: ${GRAPH_SRC} (예시)`
   } catch (err) {
     fail(err)
   }
@@ -1406,11 +1497,9 @@ async function start() {
   if (!stored || !stored.stats().nodes) {
     // 빈 저장소로 판을 세운다. STORE 가 null 이면 renderNetwork·renderSeeds 가 터진다
     build(createGraphStore({ nodes: [], edges: [] }, { projectId: BOARD }))
-    $('srcBadge').textContent = 'graph: 비어 있음'
     return
   }
   build(stored)
-  $('srcBadge').textContent = `graph: Neptune (노드 ${stored.stats().nodes})`
 }
 
 /**

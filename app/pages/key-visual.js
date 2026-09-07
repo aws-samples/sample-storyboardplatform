@@ -18,15 +18,18 @@ import { connect } from '../services/api.js'
 import { showLogin } from '../components/login-form.js'
 import { NAV_TABS, navHref, boardFromSearch } from '../domain/routes.js'
 import { mountNav } from '../components/nav-tabs.js'
+import { mountBrand } from '../components/brand.js'
 import * as coach from '../components/coachmark.js'
 import { emptyPanel } from '../components/empty-panel.js'
 import { guiding } from '../../app-walkthrough/guide.js'
 import { keyVisualExample } from '../../app-walkthrough/steps/key-visual.js'
 import { makeArt } from '../lib/placeholder-art.js'
+import { gpuDownHint } from '../lib/gpu-hours.js'
 import { entries, group, markOp } from '../services/activity-log.js'
 import { paintList } from '../components/history-list.js'
 import { pickProject } from '../components/project-picker.js'
 import { touch as touchProject } from '../services/projects.js'
+import { saveAsset, loadAsset } from '../services/assets.js'
 import { wire as wireTour, demoActive, demoAdvance, demoSay, demoTitle } from '../../app-walkthrough/tour.js'
 
 /*
@@ -188,6 +191,55 @@ function parseJson(text) {
 }
 
 /*
+ * 이 프로젝트에 담긴 대본과 씬을 되살린다. boot 에서 한 번만 부른다.
+ *
+ * 못 읽어도 그냥 지나간다(loadAsset 이 null 을 준다). 대본 칸이 비어 있는 것은 이 화면의
+ * 원래 첫 모습이라 사람이 붙여넣으면 그대로 굴러간다. 여기서 막으면 읽기 한 번 실패한
+ * 것 때문에 화면 전체를 못 쓰게 된다.
+ *
+ * 예시를 재생하러 온 것이면 넣지 않는다. 예시는 자기 대본을 얹고 단계를 짚어 가는데,
+ * 그 앞에 프로젝트의 대본이 들어가 있으면 예시가 남의 글을 나누는 것으로 보인다.
+ */
+async function restoreAssets() {
+  if (demoActive()) return
+  const board = boardFromSearch()
+  const [script, scenes] = await Promise.all([
+    loadAsset(board, 'script'),
+    loadAsset(board, 'scenes'),
+  ])
+  if (script && !S.script) S.script = script
+  const list = Array.isArray(scenes?.scenes) ? scenes.scenes : []
+  if (list.length && !S.scenes.length) {
+    S.scenes = list
+    S.pick = list[0]?.id || null
+    // 씬이 있으면 2단계부터다. 나누기를 다시 누르게 하면 되살린 값을 덮어쓴다
+    S.step = 2
+  }
+}
+
+/**
+ * 씬을 프로젝트에 담는다. 실패는 삼키고 적어만 둔다.
+ *
+ * 프롬프트까지 같이 담는다. 씬 객체가 prompt 를 들고 있어서 따로 뺄 것이 없고, 서랍의
+ * 요약이 「씬 2개 · 프롬프트 1/2」로 그것을 센다(domain/assets.js).
+ */
+async function keepScenes() {
+  // 리뷰 역할은 에셋을 쓰지 못한다(infra/resolvers/putAsset.js). 막힐 것을 보내지 않는다.
+  // 로컬 모드는 막지 않는다. 그때는 브라우저 저장소라 리졸버를 지나지 않는다
+  if (configured && myRole() === 'reviewer') return
+  try {
+    await saveAsset({
+      boardId: boardFromSearch(), kind: 'scenes',
+      body: { scenes: S.scenes }, actor: S.me?.id,
+    })
+  } catch (err) {
+    console.warn('[key-visual] 씬을 담지 못했습니다', err)
+    S.warn = `씬을 프로젝트에 담지 못했습니다. ${err.message}`
+    paint()
+  }
+}
+
+/*
  * STEP 1 의 「씬으로 나누기」.
  *
  * 머리글(`S#1.` · `INT.` · `씬 1`)이 있으면 규칙으로 나눕니다. 왕복이 없어 즉시 끝납니다.
@@ -232,7 +284,28 @@ async function splitScript() {
   mark(`${how}대본을 씬 ${scenes.length}개로 나눴습니다`)
   S.step = 2
   paint()
+  /*
+   * 대본과 씬을 함께 담는다. 대본은 사람이 이 칸에 직접 붙여넣었을 수 있어서, 나눈
+   * 이 순간이 「쓸 만한 대본이 여기 있다」가 확인되는 자리다. 담아 두면 다음에 이
+   * 화면에 올 때 칸이 채워져 있고, 서랍에서도 이 프로젝트에 대본이 있다고 보인다.
+   *
+   * 기다리지 않는다. 프롬프트 쓰기는 씬만 있으면 되고, 저장은 그것과 상관없다.
+   */
+  keepScript()
+  keepScenes()
   if (canPlan()) writePrompts()
+}
+
+/** 대본을 프로젝트에 담는다. 실패는 적어만 둔다. 대본은 칸에 그대로 남아 있다 */
+async function keepScript() {
+  if (!S.script.trim() || (configured && myRole() === 'reviewer')) return
+  try {
+    await saveAsset({
+      boardId: boardFromSearch(), kind: 'script', body: S.script, actor: S.me?.id,
+    })
+  } catch (err) {
+    console.warn('[key-visual] 대본을 담지 못했습니다', err)
+  }
 }
 
 async function writePrompts() {
@@ -265,6 +338,9 @@ async function writePrompts() {
     if (got < S.scenes.length) {
       S.warn = `${S.scenes.length - got}개는 형식이 어긋나 버렸습니다. 그 씬은 직접 써주세요.`
     }
+    // 프롬프트가 씬에 붙었으니 담아 둔 씬도 고칩니다. 이것이 Bedrock 왕복 한 번의 결과라
+    // 새로고침으로 잃으면 다시 부르게 됩니다
+    keepScenes()
   } catch (e) {
     wire('r', `실패  ${e.message}`)
     S.warn = e.message
@@ -303,7 +379,8 @@ async function pollGpu() {
     }
     if (!S.model) S.model = j.loading || j.modelId
   } catch {
-    S.gpu = { state: 'down', text: '생성 서버에 닿지 않음', models: [], hint: '인스턴스가 꺼져 있을 수 있습니다' }
+    // 업무 시간 밖이면 꺼져 있는 것이 정상입니다. 시간표와 다음에 켜지는 때를 적습니다
+    S.gpu = { state: 'down', text: '생성 서버에 닿지 않음', models: [], hint: gpuDownHint() }
   }
   paintRig()
 }
@@ -409,6 +486,37 @@ async function runBatch(ids) {
   say(`${d}장 완료${f ? `, ${f}장 실패` : ''}`)
   // 장마다 남기지 않는다. 한 배치가 한 줄이다. 8장을 8줄로 남기면 목록이 그것만으로 찬다
   mark(`키 비주얼 ${d}장을 생성했습니다${f ? ` (${f}장 실패)` : ''}`)
+  keepKeyVisual()
+}
+
+/**
+ * 만든 그림을 프로젝트에 담는다. 주소만 담고 그림 자체는 담지 않는다.
+ *
+ * /gen 이 돌려주는 url 은 S3 의 키다(infra/gpu/server.py). 서명이 붙은 주소가 아니라
+ * 시간이 지나도 살아 있고, 그래서 담아 두면 다음에 그대로 뜬다.
+ *
+ * 예시 그림은 담지 않는다. 그것은 data: URL 이거나 그리는 법(art)이고, 예시로 만든
+ * 것이 프로젝트의 에셋으로 남으면 서랍이 「키 비주얼 3장」이라 말하는데 정작 만든
+ * 사람은 예시를 본 것뿐인 자리가 생긴다.
+ */
+async function keepKeyVisual() {
+  if (configured && myRole() === 'reviewer') return
+  const shots = S.scenes
+    .map((s) => ({ s, j: job(s.id) }))
+    .filter(({ j }) => j.status === 'done' && j.url && !j.example)
+    .map(({ s, j }) => ({
+      sceneId: s.id, place: s.place, url: j.url, seed: j.seed ?? null,
+      model: j.modelLabel || null, size: S.size,
+    }))
+  if (!shots.length) return
+  try {
+    await saveAsset({
+      boardId: boardFromSearch(), kind: 'keyvisual',
+      body: { shots }, actor: S.me?.id,
+    })
+  } catch (err) {
+    console.warn('[key-visual] 키 비주얼을 담지 못했습니다', err)
+  }
 }
 
 /* ══ 보드에 붙이기 · publishOp ════════════════════ */
@@ -1106,8 +1214,18 @@ function runExample() {
   return keyVisualExample({
     S, paint, wire, note, mark, job, makeArt, toScenes, normalizeVisuals,
     paintQueue, paintBoard, doneJobs,
-    // 예시를 마친 뒤. 코치마크는 예시가 남긴 것을 짚으므로 순서가 이래야 합니다
-    afterDone: () => openCoach(),
+    /*
+     * 예시를 마치면 끝입니다. 예전에는 여기서 코치마크 넉 장을 이어 열었습니다.
+     * 예시가 이미 네 단계를 짚어 가며 그 화면을 다 보여준 뒤라, 「여기까지가
+     * 예시입니다」 를 읽고 끝났다고 생각한 사람에게 막이 한 번 더 덮이는 셈이었습니다.
+     * 다 본 사람에게 같은 화면을 다시 설명하는 것이 피로해서 그 자리를 없앴습니다.
+     *
+     * 코치마크 자체는 남아 있습니다. 예시를 보지 않고 온 사람에게는 여전히 열리고,
+     * 다시 보고 싶으면 헤더의 「안내 다시 보기」입니다. 예시를 본 사람에게만 열지
+     * 않습니다. 그래서 봤다고 적어 둡니다. 안 적으면 다음에 이 화면을 열 때(그때는
+     * 대본이 차 있으므로) 스스로 열려서, 없앤 것이 한 걸음 미뤄지기만 합니다.
+     */
+    afterDone: () => { coach.skip(COACH_KEY); paint() },
   })
 }
 
@@ -1180,8 +1298,8 @@ function paint() {
   m.append([step1, step2, step3, step4][S.step - 1]())
   if (S.step === 3) { paintRig(); paintQueue(); paintLog() }
   if (S.step === 3 || S.step === 4) paintBoard()   // 두 단계 다 #kvgrid 를 가진다
-  $('#modeTag').textContent = canGen() ? '배포됨' : '로컬'
-  $('#modeTag').className = 'tag ' + (canGen() ? 'tag--live' : 'tag--local')
+  // 「배포됨」 배지는 없앴습니다. 보는 사람이 할 일과 상관없는 값이라 머리만 길어졌습니다.
+  // 배포인지 로컬인지가 실제로 갈리는 자리(생성 서버 · 문장 모델)는 그 자리에서 말합니다.
   const w = $('#whoami')
   w.textContent = `${ROLE_KO[myRole()] || myRole()}로 로그인`
   w.title = mayGen() ? '생성 요청이 서버를 통과합니다' : '서버가 생성 요청을 403 으로 거절합니다'
@@ -1202,6 +1320,9 @@ async function boot() {
    * 단계"다.
    */
   mountNav({ mount: $('#navMount'), active: 'keyvisual', handled: ['keyvisual'] })
+
+  // 머리의 왼쪽. 네 화면이 같은 것을 씁니다. 누르면 홈입니다
+  mountBrand('#brandMount')
 
   /*
    * 배포 모드에서는 먼저 로그인을 받는다.
@@ -1234,9 +1355,21 @@ async function boot() {
   })
 
   /*
-   * 대본 칸은 비어 있는 채로 시작한다. 예전에는 여기서 S.script = SAMPLE 이었다. * 그러면 처음 온 사람이 자기가 넣지도 않은 대본 앞에서, 그것이 예시인지 남이 넣은
-   * 것인지 모른 채 「씬으로 나누기」를 누르게 된다. 예시는 「예시 보기」로 들어온다.
+   * 대본 칸을 이 프로젝트에 담긴 대본으로 채운다.
+   *
+   * 예전에는 비어 있는 채로 시작했다. 예시 대본을 미리 넣어 두면 처음 온 사람이 자기가
+   * 넣지도 않은 대본 앞에서 그것이 예시인지 남이 넣은 것인지 모른 채 「씬으로 나누기」를
+   * 누르게 되므로, 그것을 없앤 자리다. 예시는 여전히 「예시 보기」로만 들어온다.
+   *
+   * 지금 넣는 것은 예시가 아니라 이 프로젝트의 대본이다. 스토리 디벨롭에서 만들었으면
+   * 거기서 담겼다(pages/story-graph.js 의 keepScript). 그전에는 사람이 그 화면에서
+   * 「복사」를 눌러 이 칸에 붙여야 했다. step 1-2-3 이 이어진 것처럼 보였던 것은 화면
+   * 순서일 뿐이고 데이터로는 끊겨 있었다. 이 한 줄이 그것을 잇는다.
+   *
+   * 씬도 같이 되살린다. 새로고침으로 씬이 사라지면 「그림 만들기」를 다시 하려고 나누기를
+   * 또 눌러야 했고, 머리글 없는 글이면 그것이 Bedrock 왕복 한 번이었다.
    */
+  await restoreAssets()
 
   // 보드에 붙기 전에 한 번 그린다. 연결이 오래 걸리거나 실패해도 화면은 이미 있고,
   // 실시간 기능만 나중에 붙는다. 아래 connect() 가 유일한 렌더 관문이면 안 된다.

@@ -125,6 +125,11 @@ class StoryboardStack extends Stack {
     // 프로젝트 카드는 같은 Ops 테이블의 pk='PROJECTS' 한 자리에 산다. op 와 달리 TTL 이 없다
     js(ops, 'PutProject', 'Mutation', 'putProject', 'putProject.js')
     js(ops, 'ListProjects', 'Query', 'listProjects', 'listProjects.js')
+    // 에셋(대본·시놉시스·그래프·씬·키비주얼·콘티)은 op 와 같은 pk=BOARD#<id> 에 살고
+    // sk 만 'ASSET#<kind>' 다. 프로젝트 하나의 에셋 전부를 Query 한 번에 읽는다.
+    // op 처럼 쌓지 않고 kind 마다 덮어쓰며, 카드와 같이 TTL 이 없다
+    js(ops, 'PutAsset', 'Mutation', 'putAsset', 'putAsset.js')
+    js(ops, 'ListAssets', 'Query', 'listAssets', 'listAssets.js')
     // plan 결과는 GraphFn 이 Ops 테이블에 적어 둔 것을 읽어 온다
     js(ops, 'PlanResult', 'Query', 'planResult', 'planResult.js')
     // navigate 결과도 같은 항목이다. GraphFn 이 두 잡을 같은 키로 적는다
@@ -468,8 +473,8 @@ class StoryboardStack extends Stack {
      *   app/*             → 버킷 루트. 아래 폴더 구조는 그대로 남습니다
      *   app-walkthrough/* → /app-walkthrough/. 예시 코드와 목데이터입니다
      * 최종 구조:
-     *   /aws-config.js  /index.html(홈)  /board.html  /story-graph.html
-     *   /key-visual.html
+     *   /aws-config.js  /index.html(홈)  /project.html(프로젝트 서랍)
+     *   /board.html  /story-graph.html  /key-visual.html
      *   /platform/…  /chrome/…  /story/…  /art/…  /screens/…
      *   /app-walkthrough/tour.js  /app-walkthrough/guide.js
      *   /app-walkthrough/steps/…  /app-walkthrough/data/graph.json …

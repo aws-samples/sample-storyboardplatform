@@ -43,14 +43,20 @@
     toScenes, readHeading, readCast, readSlug, placeTime, stripCont,
     needsAiSplit, proseSplitPrompt, normalizeProseScenes, aiSplitScenes, PROSE_CAP,
   } = await import(`./domain/scene-split.js?t=${Date.now()}`)
+  const {
+    GPU_ON_HOUR, GPU_OFF_HOUR, GPU_HOURS_TEXT, gpuHoursOpen, nextGpuOn, gpuDownHint,
+  } = await import(`./lib/gpu-hours.js?t=${Date.now()}`)
   const { applyWriteback, validateWritebackBeforeApply } = await import(`./domain/graph-writeback.js?t=${Date.now()}`)
   const { edgeLabel, graphDelta, EDGE_LABELS_KR } = await import(`./components/graph-canvas.js?t=${Date.now()}`)
   const { parseField, runPlanJob, PLAN_TIMEOUT_MS } = await import(`./services/api.js?t=${Date.now()}`)
-  const { NAV_TABS, navTab, navHref, newHref, wantsNew, navTabFromSearch } = await import(`./domain/routes.js?t=${Date.now()}`)
+  const { NAV_TABS, navTab, navHref, newHref, wantsNew, navTabFromSearch, drawerHref } = await import(`./domain/routes.js?t=${Date.now()}`)
   const { mountNav } = await import(`./components/nav-tabs.js?t=${Date.now()}`)
   const { MARK, markOp, toEntry, entries, group } = await import(`./services/activity-log.js?t=${Date.now()}`)
   const { when, paintList, paintTable } = await import(`./components/history-list.js?t=${Date.now()}`)
   const { newBoardId, store, touch, list } = await import(`./services/projects.js?t=${Date.now()}`)
+  const {
+    ASSET_KINDS, KIND_KEYS, ASSET_MAX_CHARS, assetKind, isAssetKind, fitsAsset, summarize,
+  } = await import(`./domain/assets.js?t=${Date.now()}`)
   const { paintCards, pickProject } = await import(`./components/project-picker.js?t=${Date.now()}`)
   const { wire: wireTour, DEMO_BOARD, DEMO_NAME, DEMO_STEPS, DEMO_TOTAL, demoActive, demoAt, demoSay, demoTitle,
   } = await import(`../app-walkthrough/tour.js?t=${Date.now()}`)
@@ -1307,6 +1313,17 @@
   ok('파라미터가 없으면 기본 탭', navTabFromSearch('', 'board') === 'board'
     && navTabFromSearch(undefined, 'board') === 'board')
   ok('? 없이 넘겨도 읽는다', navTabFromSearch('tab=keyvisual', 'board') === 'keyvisual')
+
+  /*
+   * 프로젝트 서랍. 홈의 카드가 여기로 온다. 일하는 화면 넷과 달리 NAV_TABS 에 없다.
+   * 넣으면 모든 화면의 탭 바에 다섯째 탭이 생기는데 서랍은 작업하는 곳이 아니다.
+   */
+  ok('서랍 주소는 프로젝트를 들고 간다', drawerHref('p-a') === '/project.html?board=p-a')
+  ok('보드가 없으면 붙이지 않는다. 서랍은 기본 보드로 떨어지지 않는다',
+    drawerHref() === '/project.html' && drawerHref('') === '/project.html')
+  ok('이름에 든 특수문자가 주소를 깨지 않는다',
+    drawerHref('p a&b') === '/project.html?board=p%20a%26b')
+  ok('서랍은 탭이 아니다', !NAV_TABS.some((t) => t.href.includes('project.html')))
 
   ok('탭 바는 내가 처리할 탭만 버튼으로, 나머지는 링크로 그린다', (() => {
     const mount = document.createElement('div')
@@ -2870,6 +2887,32 @@
     ok(`${name} 코치마크가 경어체다`, said.length > 0 && !plain.length, plain.join(' / '))
   }
 
+  /*
+   * 예시가 끝나면 끝이어야 합니다. 예전에는 세 화면이 예시를 마친 뒤 코치마크 넉 장을
+   * 이어 열어서, 「여기까지가 예시입니다」 를 읽고 끝났다고 생각한 사람에게 막이 한 번 더
+   * 덮였습니다. 예시가 이미 그 화면을 짚어 가며 다 보여준 뒤라 같은 설명이 두 번입니다.
+   *
+   * 코치마크 자체를 없앤 것이 아닙니다. 예시를 보지 않고 온 사람에게는 여전히 열립니다.
+   * 그래서 「afterDone 이 coach.skip 을 부르고 coach.start 는 부르지 않는다」 를 봅니다.
+   * skip 이 빠지면 다음에 그 화면을 열 때 스스로 열려서, 없앤 것이 미뤄지기만 합니다.
+   */
+  for (const [name, url, key] of [
+    ['키 비주얼', 'pages/key-visual.js', 'sb.kv.coach.v1'],
+    ['스토리 디벨롭', 'pages/story-graph.js', 'sb.dev.coach.v1'],
+    ['스토리보드', 'pages/board.js', 'sb.board.coach.v1'],
+  ]) {
+    const src = await (await fetch(`${url}?t=${Date.now()}`)).text()
+    const m = src.match(/afterDone:[^\n]*\n?[^\n]*/)
+    ok(`${name} 은 예시를 마친 뒤 코치마크를 열지 않는다`,
+      !!m && !/openCoach/.test(m[0]), m ? m[0].trim() : 'afterDone 을 못 찾음')
+    ok(`${name} 은 예시를 본 것을 봤다고 적는다`,
+      !!m && m[0].includes('coach.skip'), m ? m[0].trim() : '')
+    // 예시를 보지 않고 온 사람의 길은 남아 있어야 합니다
+    ok(`${name} 에 코치마크를 여는 길이 남아 있다`,
+      src.includes('coach.start') && src.includes(`coach.seen(COACH_KEY)`)
+      && src.includes(key))
+  }
+
   // ── net.js: AWSJSON 필드 풀기 ─────────────────────────────────────────────
   // 배포된 리졸버들은 JSON.stringify 한 문자열을 AWSJSON 으로 내보내고 AppSync 가 한 번 더
   // 감싼다. plan 응답이 '"{\"text\":...}"' 로 오던 자리다. 한 번만 풀면 문자열이 남는다.
@@ -2901,6 +2944,86 @@
       && parseField(JSON.stringify('true')) === 'true'
   })())
   ok('두 번째 파싱이 깨지면 문자열을 그대로 준다', parseField(JSON.stringify('{깨진 JSON')) === '{깨진 JSON')
+
+  // ── assets.js: 프로젝트 에셋 ───────────────────────────────────────────────
+  /*
+   * 대본·시놉시스·그래프·씬·키비주얼·콘티를 프로젝트마다 저장한다. 이것이 없던 동안
+   * 대본과 씬은 아무 곳에도 남지 않아서(key-visual.js 의 S.script · S.scenes) 새로고침
+   * 한 번에 사라졌고, 화면 사이를 사람이 손으로 복사해 옮겼다.
+   *
+   * 저장 자리는 op 와 같은 pk=BOARD#<id> 이고 sk 만 'ASSET#<kind>' 다. 그래서 여기서
+   * 가장 먼저 못 박아야 하는 것은 「기존 로그 읽기가 에셋을 집지 않는다」는 것이다.
+   * 이것이 깨지면 보드가 에셋을 op 로 읽어 applyOp 에 넣는다.
+   */
+  ok('ASSET# 은 OP# 보다 사전순 앞이다. listOps 가 에셋을 집지 않는 근거다', (() => {
+    // listOps.js 의 두 갈래: begins_with(sk,'OP#') 와 sk > 'OP#<since>#'
+    // ts 는 pad(13) 이라 since 의 최솟값이 'OP#0000000000000#' 이다
+    const floor = 'OP#0000000000000#'
+    return KIND_KEYS.every((k) => `ASSET#${k}` < floor && !`ASSET#${k}`.startsWith('OP#'))
+  })())
+
+  ok('에셋 종류는 여섯이고 key 가 겹치지 않는다', ASSET_KINDS.length === 6
+    && new Set(KIND_KEYS).size === 6
+    && ASSET_KINDS.every((k) => k.label && k.step && k.make))
+  ok('모르는 종류는 받지 않는다', isAssetKind('script') && !isAssetKind('legacy') && !isAssetKind(''))
+
+  /*
+   * 크기 제한. DynamoDB 항목 상한이 400KB 라 대본이 그 안에 들어가야 한다. 넘으면
+   * 자르지 않고 거부한다. 조용히 자르면 대본이 반토막인 것을 아무도 모른다.
+   */
+  ok('상한을 넘으면 자르지 않고 거부하며 이유를 말한다', (() => {
+    const r = fitsAsset('가'.repeat(ASSET_MAX_CHARS + 1))
+    return !r.ok && r.chars === ASSET_MAX_CHARS + 1 && /자까지/.test(r.why || '')
+  })())
+  ok('딱 상한까지는 담는다', fitsAsset('가'.repeat(ASSET_MAX_CHARS)).ok)
+  ok('빈 본문에서 터지지 않는다', fitsAsset('').ok && fitsAsset(null).ok && fitsAsset(undefined).ok)
+
+  ok('서랍에 적을 한 줄을 본문에서 만든다', (() => {
+    return summarize('script', '한 줄\n두 줄') === '7자 · 2줄'
+      && summarize('graph', { nodes: [1, 2], edges: [1] }) === '노드 2 · 관계 1'
+      && summarize('scenes', { scenes: [{ prompt: 'a' }, {}] }) === '2개 · 프롬프트 1/2'
+      && summarize('keyvisual', { shots: [1, 1, 1] }) === '3장'
+      && summarize('conti', { cuts: 8, approved: 3, eps: 2 }) === '컷 8개 · 승인 3/8 · 회차 2'
+  })())
+  ok('아직 없는 것은 null 이다. 서랍이 「만들기」를 내민다', (() => {
+    return summarize('script', null) === null && summarize('script', '   ') === null
+      && summarize('graph', { nodes: [], edges: [] }) === null
+      && summarize('conti', { cuts: 0 }) === null
+      && summarize('synopsis', {}) === null
+  })())
+  ok('본문 모양이 어긋나도 서랍이 멈추지 않는다', (() => {
+    return summarize('scenes', '문자열인데?') === null
+      && summarize('graph', {}) === null && summarize('nope', { a: 1 }) === null
+  })())
+
+  /*
+   * AWSJSON 봉투.
+   *
+   * 대본은 통째로 긴 「문자열」이다. 본문을 그대로 stringify 해서 보내면 돌아올 때
+   * parseField 가 풀지 못한다. 그 함수는 한 겹 더 싸여 온 것을 여는 괄호로 가려내는데
+   * (위의 '값이 진짜 문자열이면 다시 풀지 않는다' 검사가 그 규칙이다) 문자열은 따옴표로
+   * 시작하므로 걸러지지 않고 따옴표가 붙은 채로 나온다. 그래서 { v: <본문> } 한 겹을
+   * 씌워 인코딩된 값이 늘 '{' 로 시작하게 한다. 그러면 AppSync 가 한 겹을 싸든 두 겹을
+   * 싸든 같은 값이 나온다.
+   */
+  const envel = (body) => JSON.stringify({ v: body ?? null })
+  ok('봉투를 씌우면 대본 같은 문자열도 그대로 왕복한다', (() => {
+    const wire = JSON.stringify(envel('S#1. 빵집 - 낮\n가온이 문을 연다'))  // AppSync 가 한 겹 더
+    return parseField(wire).v === 'S#1. 빵집 - 낮\n가온이 문을 연다'
+  })())
+  ok("숫자만 적힌 대본('42')도 문자열로 남는다", (() => {
+    const got = parseField(JSON.stringify(envel('42'))).v
+    return got === '42' && typeof got === 'string'
+  })())
+  ok('봉투를 안 씌우면 따옴표가 붙어 온다. 봉투가 있는 이유다', (() => {
+    // 이 줄이 깨지는 날은 parseField 가 문자열도 풀게 바뀐 날이다. 그때 봉투를 걷어도 된다
+    return parseField(JSON.stringify(JSON.stringify('대본'))) === '"대본"'
+  })())
+  ok('객체 본문도 같은 봉투로 왕복한다', (() => {
+    const got = parseField(JSON.stringify(envel({ scenes: [{ id: 's1', prompt: 'x' }] }))).v
+    return got.scenes[0].id === 's1'
+  })())
+  ok('봉투는 늘 { 로 시작한다', envel('대본').startsWith('{') && envel(null).startsWith('{'))
 
   // ── net.js: 비동기 plan (30초 상한 우회) ──────────────────────────────────
   // AppSync 요청 실행 시간 상한은 30초이고 상향이 불가다. 그래서 plan 은 mutation 으로
@@ -3799,6 +3922,51 @@
     const r = await aiSplitScenes(fake, 'S#1. 방 / 밤\n어둡다.\n\nS#2. 카페 / 낮\n밝다.')
     return called === 0 && r.byAi === false && r.scenes.length === 2
   })())
+
+  // ── gpu-hours.js: 생성 서버를 켜 두는 시간 ─────────────────────────────────
+  /*
+   * GPU 는 평일 09:00–20:00 (한국 시간) 에만 켜집니다. 그 밖에서 /health 가 닿지 않는 것은
+   * 고장이 아니라 스케줄입니다. 화면이 「인스턴스가 꺼져 있을 수 있습니다」 라고만 적으면
+   * 읽는 사람이 기다릴지 고칠지 정하지 못해서, 시간표와 다음에 켜지는 때를 적습니다.
+   *
+   * 시각은 UTC 로 만들어 넣습니다. 검사를 도는 기계의 표준시가 서울이 아닐 수 있어서,
+   * 현지 시간으로 쓰면 기계에 따라 결과가 달라집니다.
+   */
+  const utc = (s) => new Date(`${s}Z`)
+  // 2026-09-07 은 월요일입니다. UTC 00:00 = KST 09:00
+  ok('평일 낮은 켜 두는 시간이다', gpuHoursOpen(utc('2026-09-07T02:00')) === true
+    && gpuHoursOpen(utc('2026-09-07T10:59')) === true)
+  ok('켜지는 시각 직전은 아직 아니다', gpuHoursOpen(utc('2026-09-06T23:59')) === false)
+  ok('켜지는 시각이 되면 켜 두는 시간이다', gpuHoursOpen(utc('2026-09-07T00:00')) === true)
+  ok('끄는 시각이 되면 더는 아니다', gpuHoursOpen(utc('2026-09-07T11:00')) === false)
+  ok('주말은 종일 아니다', gpuHoursOpen(utc('2026-09-12T02:00')) === false
+    && gpuHoursOpen(utc('2026-09-13T02:00')) === false)
+
+  // 월요일 KST 08:00 = 일요일 UTC 23:00. 요일이 넘어가는 자리라 여기서 자주 틀립니다
+  ok('평일 아침에는 오늘 켜진다고 알린다',
+    nextGpuOn(utc('2026-09-06T23:00')) === '오늘 오전 9시'
+    && nextGpuOn(utc('2026-09-07T23:00')) === '오늘 오전 9시')
+  ok('월~목 저녁에는 내일 켜진다고 알린다',
+    nextGpuOn(utc('2026-09-07T14:00')) === '내일 오전 9시')
+  // 금요일 밤에 「내일」 이라고 하면 토요일이 되어 거짓입니다. 주말을 건너뛰어야 합니다
+  ok('금요일 밤과 주말에는 월요일이라고 알린다',
+    nextGpuOn(utc('2026-09-11T14:00')) === '월요일 오전 9시'
+    && nextGpuOn(utc('2026-09-12T05:00')) === '월요일 오전 9시'
+    && nextGpuOn(utc('2026-09-13T05:00')) === '월요일 오전 9시')
+
+  ok('시간표 밖이면 스케줄이라고 적고 다음 때를 알린다', (() => {
+    const h = gpuDownHint(utc('2026-09-07T14:00'))
+    return h.includes('평일 09:00–20:00 (한국 시간)') && h.includes('내일 오전 9시')
+      && h.includes('그 시간이 아니어서')
+  })())
+  ok('시간표 안이면 볼 것이 있다고 적는다', (() => {
+    const h = gpuDownHint(utc('2026-09-07T02:00'))
+    // 이때는 「기다리면 켜집니다」 가 거짓이라 다음 때를 적지 않습니다
+    return h.includes('그 시간인데도 닿지 않습니다') && !h.includes('다시 켜집니다')
+  })())
+  ok('시간표 문구는 한 곳에서 나온다',
+    GPU_HOURS_TEXT === '평일 09:00–20:00 (한국 시간)'
+    && GPU_ON_HOUR === 9 && GPU_OFF_HOUR === 20)
 
   // ── graph-view.js: 엣지 라벨과 역기입 전후 비교 ────────────────────────────
   // 캔버스 그리기는 여기서 못 돌린다. 순수 함수인 라벨 표와 판 비교만 본다

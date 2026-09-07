@@ -25,7 +25,7 @@
  * Cognito 없이 화면만 보는 용도이고, 보드도 같은 조건에서 로그인을 건너뜁니다
  * (app/board.js 의 boot 이 configured 로 갈라지는 것과 같습니다).
  */
-import { NAV_TABS, navHref, newHref } from '../domain/routes.js'
+import { NAV_TABS, navHref, newHref, drawerHref } from '../domain/routes.js'
 import { configured, session, logout } from '../services/auth.js'
 import { showLogin, DEMO_USERS } from '../components/login-form.js'
 import { setHtml } from '../lib/dom.js'
@@ -35,6 +35,7 @@ import { paintTable } from '../components/history-list.js'
 import { emptyPanel } from '../components/empty-panel.js'
 import { list as listProjects, touch as touchProject } from '../services/projects.js'
 import { paintCards } from '../components/project-picker.js'
+import { mountBrand } from '../components/brand.js'
 import { wire as wireTour, startDemo, DEMO_BOARD, DEMO_NAME, DEMO_TOTAL } from '../../app-walkthrough/tour.js'
 import * as coach from '../components/coachmark.js'
 
@@ -201,9 +202,11 @@ function paintDone() {
  * 각 화면 앞에 서는 문(projects.pickProject)과 같은 목록·같은 모양입니다. 다른 것은
  * 여기서는 문이 아니라 목록이라는 것뿐입니다.
  *
- * 카드를 누르면 스토리보드로 갑니다. 프로젝트에서 마지막으로 한 일이 어느 단계였든
- * 컷이 모이는 곳은 보드이고, 다른 단계로는 거기서 상단 탭으로 갑니다. 그때 ?board=
- * 가 따라갑니다(navHref).
+ * 카드를 누르면 프로젝트 서랍으로 갑니다(app/project.html). 전에는 곧장 스토리보드로
+ * 보냈는데, 그러면 대본과 시놉시스만 들고 일하는 사람이 카드를 누를 때마다 자기 작업이
+ * 없는 컷 화면에 도착했습니다. 게다가 프로젝트가 무엇을 들고 있는지는 어느 화면에서도
+ * 보이지 않았습니다. 서랍이 그것을 먼저 펴 보이고, 거기서 원하는 에셋의 화면으로
+ * 갑니다. 그때 ?board= 가 따라갑니다(drawerHref · navHref).
  */
 let projects = []
 
@@ -221,7 +224,7 @@ function paintProjects() {
   const who = nameMap(rawOps)
   paintCards(byId('pjList'), projects, {
     who: (id) => who.get(id) || null,
-    onPick: (p) => { location.href = navHref('board', p.boardId) },
+    onPick: (p) => { location.href = drawerHref(p.boardId) },
     none: '아직 만든 프로젝트가 없습니다. 「새로 생성」에서 한 단계를 고르면 이름을 붙여 첫 판을 엽니다.',
   })
   setHtml(byId('pjNote'), projects.length
@@ -452,7 +455,8 @@ function openCoach() {
 /* ══ 시작 ══════════════════════════════════════════ */
 
 async function boot() {
-  byId('env').textContent = configured ? '배포' : '로컬'
+  // 여기는 홈이라 누를 곳이 없습니다. 누를 수 있게 보이면 눌러 보고 아무 일도 안 일어납니다
+  mountBrand('#brandMount', { home: true })
   paintSteps()
   wireDemo()
   paintDone()

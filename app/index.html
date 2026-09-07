@@ -41,17 +41,7 @@
     padding: 13px 22px; border-bottom: 1px solid var(--sb-line);
     background: var(--sb-panel);
   }
-  .top__mark {
-    width: 22px; height: 22px; border-radius: 5px; flex: none;
-    background: var(--sb-accent); color: #fff;
-    display: grid; place-items: center; font-size: 11px; font-weight: 700;
-  }
-  .top__name { font-size: 13.5px; font-weight: 600; letter-spacing: -.01em }
-  .top__env {
-    font-family: var(--sb-mono); font-size: 10px; letter-spacing: .1em;
-    color: var(--sb-ink-3); padding: 2px 7px; border: 1px solid var(--sb-line);
-    border-radius: 999px;
-  }
+  /* 브랜드(표식 + 이름)의 모양은 app/components/brand.js 가 들고 있습니다 */
   .top__me { margin-left: auto; display: flex; align-items: center; gap: 9px; font-size: 12.5px }
   .top__me[hidden] { display: none }
   .top__who { color: var(--sb-ink-2) }
@@ -294,9 +284,12 @@
 <body>
 
 <header class="top">
-  <span class="top__mark" aria-hidden="true">S</span>
-  <span class="top__name">여름 스튜디오</span>
-  <span class="top__env" id="env">로컬</span>
+  <!--
+    네 화면이 같은 것을 씁니다(app/components/brand.js). 여기는 홈이라 누를 수 없는
+    글씨입니다. 「배포 / 로컬」 배지는 없앴습니다. 보는 사람이 할 일과 상관없는 값이고,
+    배포인지 로컬인지가 실제로 갈리는 자리는 그 자리에서 말합니다.
+  -->
+  <div id="brandMount"></div>
   <div class="top__me" id="meBox" hidden>
     <span class="top__who" id="meWho"></span>
     <button class="top__out" id="meOut" type="button">로그아웃</button>
