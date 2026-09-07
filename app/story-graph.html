@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Story Graph · 대본에서 씨앗과 분기까지</title>
 <!-- 세 화면이 나눠 쓰는 색 한 벌. 아래 :root 가 이 값을 가리킨다 -->
-<link rel="stylesheet" href="./theme.css">
+<link rel="stylesheet" href="chrome/theme.css">
 <style>
   /*
    * 이 화면의 이름들은 그대로 두고 값만 공통 토큰(theme.css)을 가리킨다.
@@ -515,25 +515,38 @@
 //   대본화  planScript. 컷을 드라마·영화·웹드라마 대본 텍스트로 옮긴다
 // 조회는 전부 graph-engine.js 의 GraphStore 를 거친다. 배포에서는 같은 저장소가
 // Neptune 을 사실로 두고 돈다 (hasGraph). 이 화면이 아는 차이는 save·flush 뿐이다.
-import { createGraphStore, loadGraphStore } from './graph-engine.js'
-import { findSeeds, PROBES } from './graph-probes.js'
+import { createGraphStore, loadGraphStore } from './story/graph-engine.js'
+import { findSeeds, PROBES } from './story/graph-probes.js'
 import {
   planGraph, planBranches, planFreeBranches, localBranches, scriptToText,
   branchToSpec, planBranchOutline, planCuts,
   applyWriteback, validateWritebackBeforeApply,
   planScript, scriptBlob, scriptFileName, SCRIPT_FORMATS,
   GENRES, TONES, LENGTHS, CUTCOUNTS,
-} from './story.js'
-import { planClient, graphClient, opsClient } from './net.js'
-import { createGraphView, graphDelta, KIND_COLOR, KIND_LABEL } from './graph-view.js'
-import { configured, session, login, setNewPassword, logout } from './auth.js'
-import { DEMO_USERS } from './login.js'
-import { mountNav, navTabFromSearch, boardFromSearch } from './nav-tabs.js'
-import { entries, group, markOp, paintList } from './history.js'
-import { emptyPanel, guide as guideExample, guiding } from './onboard.js'
-import { demoActive, demoAdvance, demoSay, demoTitle } from './demo.js'
-import * as coach from './coach.js'
-import { pickProject, touch as touchProject } from './projects.js'
+} from './story/story.js'
+import { planClient, graphClient, opsClient } from './platform/net.js'
+import { createGraphView, graphDelta, KIND_COLOR, KIND_LABEL } from './story/graph-view.js'
+import { configured, session, login, setNewPassword, logout } from './platform/auth.js'
+import { DEMO_USERS } from './platform/login.js'
+import { NAV_TABS, navHref, mountNav, navTabFromSearch, boardFromSearch } from './chrome/nav-tabs.js'
+import { entries, group, markOp, paintList } from './chrome/history.js'
+import { emptyPanel } from './chrome/empty-panel.js'
+import { guide as guideExample, guiding } from '../app-walkthrough/guide.js'
+import { wire as wireTour, demoActive, demoAdvance, demoSay, demoTitle } from '../app-walkthrough/tour.js'
+import * as coach from './chrome/coach.js'
+import { pickProject, touch as touchProject } from './chrome/projects.js'
+
+/*
+ * 예시가 쓸 제품 쪽 함수를 넣습니다. app-walkthrough 는 app/ 을 import 할 수 없습니다.
+ * 배포에서 app/* 는 버킷 루트로 올라가서 상대 경로가 그쪽으로 닿지 않습니다
+ * (app-walkthrough/tour.js 의 머리글).
+ */
+wireTour({
+  navHref,
+  label: (id) => NAV_TABS.find((t) => t.id === id)?.label || id,
+  touch: touchProject,
+})
+
 
 const $ = (id) => document.getElementById(id)
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) =>

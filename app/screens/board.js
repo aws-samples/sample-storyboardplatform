@@ -6,20 +6,33 @@ import {
   sceneGroups, clock, startTimes, scrub, debounceBy, epLabel,
   lostEdit, isActionable, changedSince, touchedAt, workload, liveVer, deadVer,
   tally, stalls, retakes, flow, pace, actorPace, firstPass, reviewLag, fmtDur,
-} from './core.js'
-import { MODES, GENRES, TONES, LENGTHS, CUTCOUNTS, planOutline, planCuts } from './story.js'
-import { esc, setHtml } from './dom.js'
-import { srcOf, downscale } from './art.js'
-import { SEED_ART } from './seed-art.js'
-import { connect } from './net.js'
-import { configured, idToken, session, logout } from './auth.js'
-import { showLogin } from './login.js'
-import { mountNav, boardFromSearch } from './nav-tabs.js'
-import * as coach from './coach.js'
-import { emptyPanel, guide as guideExample, guiding } from './onboard.js'
-import { entries, group, paintList, toEntry } from './history.js'
-import { pickProject, touch as touchProject } from './projects.js'
-import { demoActive, demoAdvance, demoSay, demoTitle } from './demo.js'
+} from '../story/core.js'
+import { MODES, GENRES, TONES, LENGTHS, CUTCOUNTS, planOutline, planCuts } from '../story/story.js'
+import { esc, setHtml } from '../platform/dom.js'
+import { srcOf, downscale } from '../art/art.js'
+import { SEED_ART } from '../art/seed-art.js'
+import { connect } from '../platform/net.js'
+import { configured, idToken, session, logout } from '../platform/auth.js'
+import { showLogin } from '../platform/login.js'
+import { NAV_TABS, navHref, mountNav, boardFromSearch } from '../chrome/nav-tabs.js'
+import * as coach from '../chrome/coach.js'
+import { emptyPanel } from '../chrome/empty-panel.js'
+import { guide as guideExample, guiding } from '../../app-walkthrough/guide.js'
+import { entries, group, paintList, toEntry } from '../chrome/history.js'
+import { pickProject, touch as touchProject } from '../chrome/projects.js'
+import { wire as wireTour, demoActive, demoAdvance, demoSay, demoTitle } from '../../app-walkthrough/tour.js'
+
+/*
+ * 예시가 쓸 제품 쪽 함수를 넣습니다. app-walkthrough 는 app/ 을 import 할 수 없습니다.
+ * 배포에서 app/* 는 버킷 루트로 올라가서 상대 경로가 그쪽으로 닿지 않습니다
+ * (app-walkthrough/tour.js 의 머리글).
+ */
+wireTour({
+  navHref,
+  label: (id) => NAV_TABS.find((t) => t.id === id)?.label || id,
+  touch: touchProject,
+})
+
 
 const ROSTER = [
   { id: 'u1', name: '김하나', role: 'planner', color: '#E3A93C', job: '시나리오를 컷으로 쪼갭니다' },

@@ -11,17 +11,30 @@
  * 그때는 화면이 무엇이 없어서 못 하는지 그대로 말한다. 흉내내지 않는다.
  */
 
-import { ART_ROLES, orderKeyBetween } from './core.js'
-import { configured, idToken, session } from './auth.js'
-import { connect } from './net.js'
-import { showLogin } from './login.js'
-import { mountNav, boardFromSearch } from './nav-tabs.js'
-import * as coach from './coach.js'
-import { emptyPanel, guide as guideExample, guiding } from './onboard.js'
-import { makeArt } from './art.js'
-import { entries, group, markOp, paintList } from './history.js'
-import { pickProject, touch as touchProject } from './projects.js'
-import { demoActive, demoAdvance, demoSay, demoTitle } from './demo.js'
+import { ART_ROLES, orderKeyBetween } from '../story/core.js'
+import { configured, idToken, session } from '../platform/auth.js'
+import { connect } from '../platform/net.js'
+import { showLogin } from '../platform/login.js'
+import { NAV_TABS, navHref, mountNav, boardFromSearch } from '../chrome/nav-tabs.js'
+import * as coach from '../chrome/coach.js'
+import { emptyPanel } from '../chrome/empty-panel.js'
+import { guide as guideExample, guiding } from '../../app-walkthrough/guide.js'
+import { makeArt } from '../art/art.js'
+import { entries, group, markOp, paintList } from '../chrome/history.js'
+import { pickProject, touch as touchProject } from '../chrome/projects.js'
+import { wire as wireTour, demoActive, demoAdvance, demoSay, demoTitle } from '../../app-walkthrough/tour.js'
+
+/*
+ * 예시가 쓸 제품 쪽 함수를 넣습니다. app-walkthrough 는 app/ 을 import 할 수 없습니다.
+ * 배포에서 app/* 는 버킷 루트로 올라가서 상대 경로가 그쪽으로 닿지 않습니다
+ * (app-walkthrough/tour.js 의 머리글).
+ */
+wireTour({
+  navHref,
+  label: (id) => NAV_TABS.find((t) => t.id === id)?.label || id,
+  touch: touchProject,
+})
+
 
 const cfg = window.SB_CONFIG || {}
 const $ = (s, r = document) => r.querySelector(s)

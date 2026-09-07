@@ -461,11 +461,20 @@ class StoryboardStack extends Stack {
 
     /*
      * 버킷 배치는 저장소의 두 폴더를 그대로 옮긴 것입니다.
-     *   app/*             → 버킷 루트. 네 화면이 다 여기 있습니다
-     *   app-walkthrough/* → /app-walkthrough/. 예시가 읽는 목데이터입니다
+     *   app/*             → 버킷 루트. 아래 폴더 구조는 그대로 남습니다
+     *   app-walkthrough/* → /app-walkthrough/. 예시 코드와 목데이터입니다
      * 최종 구조:
      *   /aws-config.js  /index.html(홈)  /board.html  /story-graph.html
-     *   /key-visual.html  /core.js …  /app-walkthrough/data/graph.json …
+     *   /key-visual.html
+     *   /platform/…  /chrome/…  /story/…  /art/…  /screens/…
+     *   /app-walkthrough/tour.js  /app-walkthrough/guide.js
+     *   /app-walkthrough/steps/…  /app-walkthrough/data/graph.json …
+     *
+     * app/ 은 폴더째로 루트에 붙지만 app-walkthrough/ 는 자기 이름을 접두사로 답니다.
+     * 그래서 두 폴더의 깊이가 배포에서 한 칸씩 달라집니다. 화면(app/screens/x.js)에서
+     * '../../app-walkthrough/tour.js' 는 두 배치에서 같은 자리를 가리키지만, 반대
+     * 방향은 디스크에서만 맞고 배포에서는 404 입니다. 그래서 예시가 제품을 import
+     * 하지 않고 화면이 필요한 것을 넣어 줍니다 (app-walkthrough/tour.js 의 wire).
      *
      * 한때 키 비주얼만 자기 폴더에 따로 있었고, 그 화면이 옆 폴더의 공용 모듈을
      * import 해서 같은 파일을 버킷의 두 자리에 올려야 했습니다(배포가 셋이었습니다).
@@ -473,7 +482,7 @@ class StoryboardStack extends Stack {
      *
      * 아래 defaultRootObject 는 루트 '/' 에만 적용됩니다. 하위 디렉터리에는 적용되지
      * 않으므로 디렉터리로 끝나는 주소는 403 입니다. 그래서 탭 주소는 파일 이름까지
-     * 적습니다 (app/nav-tabs.js 의 NAV_TABS).
+     * 적습니다 (app/chrome/nav-tabs.js 의 NAV_TABS).
      */
     const webDeploy = new s3deploy.BucketDeployment(this, 'Web', {
       destinationBucket: site,
@@ -490,11 +499,12 @@ class StoryboardStack extends Stack {
     })
 
     /*
-     * 예시가 읽는 목데이터. destinationKeyPrefix 는 배포 단위로만 지정할 수 있어서
-     * 한 배포에 루트와 하위 폴더를 함께 담을 수 없습니다. 그래서 배포를 나눕니다.
+     * 예시. 안내를 끌고 가는 코드와 그 코드가 읽는 목데이터가 함께 있습니다.
+     * destinationKeyPrefix 는 배포 단위로만 지정할 수 있어서 한 배포에 루트와
+     * 하위 폴더를 함께 담을 수 없습니다. 그래서 배포를 나눕니다.
      *
      * screens/ 는 올리지 않습니다. 화면 스크린샷과 목업은 README 가 보는 문서용이고
-     * 브라우저가 읽지 않습니다.
+     * 브라우저가 읽지 않습니다. steps/ 는 브라우저가 읽으므로 올립니다.
      */
     const webWalkthrough = new s3deploy.BucketDeployment(this, 'WebWalkthrough', {
       destinationBucket: site,

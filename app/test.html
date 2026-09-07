@@ -19,33 +19,40 @@
     canGrantRole, workload, NEEDS, ROLES, ACTIONS,
     tally, stalls, retakes, flow, pace, actorPace, firstPass, reviewLag, fmtDur,
     normalizeGraph, validateAgainstCanon, mergeGraphs, normalizeStory, josa,
-  } = await import(`./core.js?t=${Date.now()}`)
-  const { GRAPH_SCHEMA, deriveEdges, romanizeId, edgeKey } = await import(`./graph-schema.js?t=${Date.now()}`)
-  const { createGraphStore, loadGraphStore } = await import(`./graph-engine.js?t=${Date.now()}`)
+  } = await import(`./story/core.js?t=${Date.now()}`)
+  const { GRAPH_SCHEMA, deriveEdges, romanizeId, edgeKey } = await import(`./story/graph-schema.js?t=${Date.now()}`)
+  const { createGraphStore, loadGraphStore } = await import(`./story/graph-engine.js?t=${Date.now()}`)
   const { findSeeds, PROBES, probeSecretLeverage, probeLoveTriangle, probeUnresolvedTension,
     probeChekovObject, probeStrangersSharedPast, probeSeveredBond, probeContestedGoal,
     probeBetrayalPotential, probeIdentityCrisis, probeForbiddenBond, probePowerVacuum,
-  } = await import(`./graph-probes.js?t=${Date.now()}`)
+  } = await import(`./story/graph-probes.js?t=${Date.now()}`)
   const { extractGraphPrompt, scriptToText, chunkText, contextPackPrompt, branchPrompt,
     summarizePrompt, summarizeForExtraction, planGraph, planCuts,
     freeDirectionPrompt, localBranches, planBranches, planFreeBranches, parseJson,
     branchToSpec, branchOutlinePrompt, planBranchOutline, localBranchOutline,
     applyWriteback, validateWritebackBeforeApply,
     scriptFormatPrompt, planScript, localScript, scriptBlob, scriptFileName, SCRIPT_FORMATS,
-  } = await import(`./story.js?t=${Date.now()}`)
-  const { edgeLabel, graphDelta, EDGE_LABELS_KR } = await import(`./graph-view.js?t=${Date.now()}`)
-  const { parseField, runPlanJob, PLAN_TIMEOUT_MS } = await import(`./net.js?t=${Date.now()}`)
+  } = await import(`./story/story.js?t=${Date.now()}`)
+  const { edgeLabel, graphDelta, EDGE_LABELS_KR } = await import(`./story/graph-view.js?t=${Date.now()}`)
+  const { parseField, runPlanJob, PLAN_TIMEOUT_MS } = await import(`./platform/net.js?t=${Date.now()}`)
   const { NAV_TABS, navTab, navHref, newHref, wantsNew, navTabFromSearch, mountNav,
-  } = await import(`./nav-tabs.js?t=${Date.now()}`)
+  } = await import(`./chrome/nav-tabs.js?t=${Date.now()}`)
   const { MARK, markOp, toEntry, entries, group, when, paintList, paintTable,
-  } = await import(`./history.js?t=${Date.now()}`)
+  } = await import(`./chrome/history.js?t=${Date.now()}`)
   const { newBoardId, store, touch, list, paintCards, pickProject,
-  } = await import(`./projects.js?t=${Date.now()}`)
-  const { DEMO_BOARD, DEMO_NAME, DEMO_STEPS, DEMO_TOTAL, demoActive, demoAt, demoSay, demoTitle,
-  } = await import(`./demo.js?t=${Date.now()}`)
-  const { emptyPanel, guide, guiding, guideAt, guideMarks, stop: stopGuide,
-  } = await import(`./onboard.js?t=${Date.now()}`)
-  const coach = await import(`./coach.js?t=${Date.now()}`)
+  } = await import(`./chrome/projects.js?t=${Date.now()}`)
+  const { wire: wireTour, DEMO_BOARD, DEMO_NAME, DEMO_STEPS, DEMO_TOTAL, demoActive, demoAt, demoSay, demoTitle,
+  } = await import(`../app-walkthrough/tour.js?t=${Date.now()}`)
+  const { guide, guiding, guideAt, guideMarks, stop: stopGuide,
+  } = await import(`../app-walkthrough/guide.js?t=${Date.now()}`)
+  const { emptyPanel } = await import(`./chrome/empty-panel.js?t=${Date.now()}`)
+  const coach = await import(`./chrome/coach.js?t=${Date.now()}`)
+
+  /*
+   * 예시(app-walkthrough)는 app/ 을 import 하지 않으므로 쓸 것을 넣어 줘야 한다.
+   * 화면이 하는 일과 같다(각 화면의 wireTour). 넣지 않으면 demoSay 가 던진다.
+   */
+  wireTour({ navHref, label: (id) => NAV_TABS.find((t) => t.id === id)?.label || id, touch })
 
   const out = document.getElementById('out')
   let failed = 0
@@ -2834,8 +2841,8 @@
    * 화면에서는 여러 장이 몇 분 걸리고 한 장은 실패하고 장비 한 대가 순서대로 그린다.
    * 카드가 그렇게 말하면 화면이 그 말을 곧 뒤집는다.
    */
-  for (const [name, url] of [['키 비주얼', './key-visual.js'], ['스토리보드', './board.js'],
-    ['홈', './home.js'], ['스토리 디벨롭', './story-graph.html']]) {
+  for (const [name, url] of [['키 비주얼', 'screens/key-visual.js'], ['스토리보드', 'screens/board.js'],
+    ['홈', 'screens/home.js'], ['스토리 디벨롭', './story-graph.html']]) {
     const src = await (await fetch(url)).text()
     const m = src.match(/const \w+_CARDS = \[([\s\S]*?)\n\]/)
     const words = ['빠르', '무한', '제작 기간', '단축'].filter((w) => m && m[1].includes(w))
