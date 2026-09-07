@@ -258,9 +258,15 @@ class StoryboardStack extends Stack {
       ],
     })
     images.grantPut(gpuRole)
+    // 손으로 한국어를 적은 프롬프트를 영어로 옮길 때만 쓴다(server.py 의 en).
+    // 예전에는 Amazon Translate 를 불렀다. 부르는 서비스를 Bedrock 하나로 모았다.
+    // GPU 는 퍼블릭 서브넷에 퍼블릭 IP 로 있어서 엔드포인트 없이 그냥 닿는다.
     gpuRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: ['translate:TranslateText'],
-      resources: ['*'],
+      actions: ['bedrock:InvokeModel'],
+      resources: [
+        'arn:aws:bedrock:*::foundation-model/anthropic.claude-*',
+        `arn:aws:bedrock:${this.region}:${this.account}:inference-profile/*`,
+      ],
     }))
 
     const serverPy = new s3assets.Asset(this, 'GpuServer', { path: path.join(HERE, '..', 'gpu', 'server.py') })

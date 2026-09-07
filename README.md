@@ -43,7 +43,7 @@ Browser ──┬─ CloudFront ─ S3               static files, no build step
 (HTTP calls, no SDK) · AWS AppSync GraphQL with JS resolvers · DynamoDB as an append-only log ·
 Amazon Bedrock (Claude Sonnet, called from a Lambda as an async job · see below) ·
 CloudFront + S3 · one EC2 `g6e.2xlarge` running FastAPI + PyTorch + 🤗 diffusers ·
-Amazon Translate for Korean prompts · AWS CDK (JavaScript) for all of it.
+AWS CDK (JavaScript) for all of it.
 
 **Story planning is two calls, not one.** The outline (title, logline, synopsis, characters, beats)
 comes back first and a person reads it; only then are the beats expanded into cuts, four beats per
@@ -376,9 +376,12 @@ demo environment that only trusted people can reach.
 
 **Image generation** · art is produced by open-weight models (Chroma1-Flash, FLUX.2 klein 4B,
 Chroma1-HD) running on our own EC2 instance. You are responsible for checking the license of
-each model and its weights and what you may do with the output. Korean prompts are translated to English with Amazon Translate · prompts
-leave for AWS Translate. Output may not match the prompt, and the same seed produces different images
-when the model or library versions change.
+each model and its weights and what you may do with the output. Bedrock writes the image prompts in
+English, so they reach the GPU untouched. A prompt line someone typed Korean into by hand is
+translated on the way in, and that call goes to Bedrock too (`en()` in `infra/gpu/server.py`, which
+skips any ASCII string): every model call in the project, planning and translation alike, is a
+Bedrock call. Output may not match the prompt, and the same seed produces different images when the
+model or library versions change.
 
 **Data** · board contents, uploaded sketches, and generated images are stored in this account's S3 and
 DynamoDB. Encryption is S3 default (AES256) only, with no separate KMS key. Do not put real
