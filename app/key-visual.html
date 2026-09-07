@@ -13,7 +13,7 @@
    흰 배경 · 시스템 서체 · 파란 한 가지 강조.
 
    이 톤이 네 화면 공통 토큰(app/theme.css)의 기준이 되었습니다. 그래서 값은 그대로고,
-   이제 여기 이름들은 그 토큰을 가리킵니다 — 색을 한 곳에서만 고치게 하려는 것입니다.
+   이제 여기 이름들은 그 토큰을 가리킵니다. 색을 한 곳에서만 고치게 하려는 것입니다.
    이름을 --sb-* 로 갈아치우지 않은 이유는 이 파일 규칙과 key-visual.js 가 짧은
    이름을 쓰고 있어서입니다. 값만 넘겨받습니다.
    ───────────────────────────────────────────────────────── */
@@ -65,7 +65,7 @@ header{
 
 /* ── 기능 탭 ───────────────────────────── */
 /* 모양은 app/nav-tabs.js 가 넣는다. 여기서는 이 머리 띠의 좌우 여백에만 맞춘다.
-   투명 배경 — 위의 .bar 와 같은 흐린 흰 판 위에 그대로 앉는다.
+   투명 배경. 위의 .bar 와 같은 흐린 흰 판 위에 그대로 앉는다.
    padding 을 세로 0 으로만 덮고 좌우는 그쪽 값(얇은 모양은 10px)을 그대로 쓴다 */
 #navMount .navbar{padding-top:0;padding-bottom:0;background:none}
 
@@ -291,13 +291,13 @@ aside{
 .histmine[aria-pressed=true]{color:var(--blue);border-color:var(--blue);background:var(--blue-w)}
 
 /* 코치마크 CSS 는 app/coach.js 가 넣는다. 예전에는 이 파일에 40줄이 있었는데,
-   같은 규칙이 보드와 홈에도 필요해지면서 엔진 쪽으로 옮겼다 — 베껴 두면 한 곳만
+   같은 규칙이 보드와 홈에도 필요해지면서 엔진 쪽으로 옮겼다. 베껴 두면 한 곳만
    고쳐도 나머지가 어긋난다. nav-tabs.js · history.js 도 같은 방식이다. */
 
 /* ── 로그인 ───────────────────────────────
    app/login.js 를 그대로 재사용하지만 스타일은 여기서 새로 쓴다.
    app/index.html 의 .gate 규칙은 어두운 테마 변수(--paper, --edge, --pencil)에
-   묶여 있고 이 화면에는 그 변수가 없다 — 그대로 가져오면 글자가 안 보인다. */
+   묶여 있고 이 화면에는 그 변수가 없다. 그대로 가져오면 글자가 안 보인다. */
 .gate{
   position:fixed;inset:0;z-index:100;background:rgba(15,20,30,.55);
   display:grid;place-items:center;padding:24px;
@@ -357,7 +357,7 @@ aside{
     <a class="ghost" id="toBoard" href="/board.html">보드로</a>
   </div>
   <!--
-    기능 탭 자리. 세 화면이 같은 바를 쓴다 — 모양은 app/nav-tabs.js 가 넣는다.
+    기능 탭 자리. 세 화면이 같은 바를 쓴다. 모양은 app/nav-tabs.js 가 넣는다.
     아래 #nav 는 이 화면 안쪽의 1~4 단계 탭이라 다른 것이다. 위는 "어느 기능",
     아래는 "그 기능의 몇 번째 단계" 로 층이 나뉜다.
   -->
@@ -377,7 +377,7 @@ aside{
       <ul id="feed"></ul>
     </div>
     <!--
-      지나간 일. 목록의 모양과 CSS 는 app/history.js 가 넣는다 — 보드와 홈이 같은
+      지나간 일. 목록의 모양과 CSS 는 app/history.js 가 넣는다. 보드와 홈이 같은
       목록을 쓰기 때문에 화면마다 베껴 두지 않는다.
     -->
     <div data-coach="histbox">
@@ -392,7 +392,7 @@ aside{
 
 <p class="sr" id="live" role="status" aria-live="polite"></p>
 
-<!-- 로그인 창. 배포 모드에서만 열립니다 — key-visual.js 의 boot() 이 채웁니다. -->
+<!-- 로그인 창. 배포 모드에서만 열립니다. key-visual.js 의 boot() 이 채웁니다. -->
 <div class="gate" id="gate" hidden></div>
 
 <script src="/aws-config.js" onerror="window.SB_CONFIG=null"></script>

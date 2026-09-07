@@ -9,11 +9,11 @@
  *   board.html       board 가 지금 화면입니다
  *   story-graph.html develop·script 가 지금 화면입니다(안쪽 탭만 갈아탑니다)
  *   key-visual.html  keyvisual 이 지금 화면입니다
- * 나머지 탭은 링크라서 그냥 눌러 이동합니다 — 새 탭이 아니라 같은 탭입니다.
+ * 나머지 탭은 링크라서 그냥 눌러 이동합니다. 새 탭이 아니라 같은 탭입니다.
  *
  * 홈(/)이 생긴 뒤로 이 바는 얇은 모양(compact)이 기본입니다. 네 단계를 설명까지
  * 붙여 보여주는 일은 홈이 맡고, 각 화면의 이 바는 "지금 어디에 있고 어디로 갈 수
- * 있는지"만 알려주면 됩니다. 설명 줄은 title 로 옮겨 두었습니다 — 지우지 않은 이유는
+ * 있는지"만 알려주면 됩니다. 설명 줄은 title 로 옮겨 두었습니다. 지우지 않은 이유는
  * 탭 이름만으로는 '스토리 디벨롭'과 '대본화'가 잘 구별되지 않기 때문입니다.
  */
 
@@ -22,12 +22,12 @@
  *
  * 네 탭 모두 갈 곳이 있습니다. 한때 '대본 번역'이 화면 없이 "준비 중" 안내만 띄우는
  * 다섯 번째 탭으로 있었는데, 없는 기능을 목록에 올려 두면 읽는 사람이 그것까지 이 앱의
- * 일부로 세게 됩니다. 그래서 탭과 안내 판을 함께 걷어냈습니다 — 단계를 다시 늘릴 때는
+ * 일부로 세게 됩니다. 그래서 탭과 안내 판을 함께 걷어냈습니다. 단계를 다시 늘릴 때는
  * 화면이 생긴 뒤에 이 배열에 한 줄 더하면 됩니다.
  *
  * 순서는 이야기가 만들어지는 순서입니다. 시놉시스에서 시작해 대본이 되고,
  * 그림이 나오고, 마지막에 그것들이 보드에 얹힙니다. 그래서 디벨롭이 맨 앞이고
- * 스토리보드가 맨 뒤입니다 — 보드가 가장 오래된 화면이라 처음에는 맨 앞에 있었는데,
+ * 스토리보드가 맨 뒤입니다. 보드가 가장 오래된 화면이라 처음에는 맨 앞에 있었는데,
  * 만들어진 순서와 쓰는 순서가 달라 사용자가 거꾸로 읽게 됐습니다.
  *
  * href 는 모두 루트 기준 절대경로이고 파일 이름까지 적습니다. 네 화면이 한 폴더
@@ -37,7 +37,7 @@
  *
  * 그리고 디렉터리가 아니라 파일 이름입니다. CloudFront 의 defaultRootObject 는
  * 루트 '/' 에만 적용되고 하위 디렉터리에는 적용되지 않아서, 디렉터리로 끝나는 주소는
- * 403 이 납니다 — 이것도 실제로 그랬습니다. 로컬 개발 서버도 배포와 같게
+ * 403 이 납니다. 이것도 실제로 그랬습니다. 로컬 개발 서버도 배포와 같게
  * 403 을 돌려줍니다(infra/scripts/serve-local.mjs).
  */
 export const NAV_TABS = [
@@ -53,15 +53,15 @@ export const navTab = (id) => NAV_TABS.find((t) => t.id === id) || null
  * 링크로 그릴 때 쓸 주소.
  *
  * 지금은 네 탭 모두 href 가 있어 이 함수는 그것을 그대로 돌려줍니다. 모르는 id 가
- * 들어오면 홈으로 보냅니다 — 이 갈래가 없으면 href 가 undefined 인 <a> 가 되어
+ * 들어오면 홈으로 보냅니다. 이 갈래가 없으면 href 가 undefined 인 <a> 가 되어
  * 눌렀을 때 /undefined 같은 곳으로 가 404 가 납니다. 실제로 그랬습니다.
  *
  * boardId 를 주면 ?board= 로 달아 줍니다. 고른 프로젝트가 화면을 옮겨도 따라가야 하기
- * 때문입니다 — net.js 는 이미 그 값을 읽고 있었는데(opsClient·awsTransport), 정작
+ * 때문입니다. net.js 는 이미 그 값을 읽고 있었는데(opsClient·awsTransport), 정작
  * 링크가 그것을 들고 가지 않아서 탭 한 번 누르면 기본 보드로 떨어졌습니다.
  *
  * 기본 보드도 생략하지 않고 답니다. 프로젝트 보드(app/projects.js)가 「주소에 board 가
- * 없으면 아직 고르지 않은 것」으로 보고 문을 세우기 때문입니다 — 생략하면 기본 보드를
+ * 없으면 아직 고르지 않은 것」으로 보고 문을 세우기 때문입니다. 생략하면 기본 보드를
  * 고른 사람이 탭을 누를 때마다 그 문을 다시 만납니다.
  *
  * @param {string} id - NAV_TABS 의 id
@@ -78,8 +78,7 @@ export function navHref(id, boardId) {
  * 「새로 생성」으로 들어가는 주소. 프로젝트를 새로 하나 만들며 시작한다는 뜻입니다.
  *
  * 홈의 단계 목록이 이것을 씁니다. 그냥 navHref 로 보내면 그 화면 앞의 문이 「어느
- * 프로젝트를 여시겠습니까?」를 띄우고 이미 있는 판의 카드까지 같이 내밀었습니다 —
- * 「새로 생성」을 누른 사람에게 기존 판을 열라고 권하는 셈이고, 그 판을 열면 이어서
+ * 프로젝트를 여시겠습니까?」를 띄우고 이미 있는 판의 카드까지 같이 내밀었습니다. * 「새로 생성」을 누른 사람에게 기존 판을 열라고 권하는 셈이고, 그 판을 열면 이어서
  * 할 화면인데 「처음 오셨나요?」가 뜨는 자리도 생겼습니다. 그래서 새로 만드는 길과
  * 이어서 하는 길을 주소에서 갈라 둡니다(app/projects.js 의 pickProject).
  *
@@ -100,12 +99,12 @@ export function wantsNew(search = typeof location === 'undefined' ? '' : locatio
 
 /**
  * 프로젝트를 고르지 않았을 때의 보드. net.js 의 opsClient·awsTransport 가 쓰는
- * 기본값과 같습니다 — 두 곳이 다르면 주소에 board 가 없을 때 서로 다른 로그를 봅니다.
+ * 기본값과 같습니다. 두 곳이 다르면 주소에 board 가 없을 때 서로 다른 로그를 봅니다.
  */
 export const DEFAULT_BOARD = 'demo'
 
 /**
- * 주소에 적힌 프로젝트. 없으면 null 입니다 — 「아직 고르지 않았다」와 「기본 보드를
+ * 주소에 적힌 프로젝트. 없으면 null 입니다. 「아직 고르지 않았다」와 「기본 보드를
  * 골랐다」를 가려야 하는 자리(프로젝트 보드의 문, 탭 링크)가 이것을 씁니다.
  * @param {string} [search] - location.search. 테스트에서 넣어 봅니다
  */
@@ -115,7 +114,7 @@ export function boardParam(search = typeof location === 'undefined' ? '' : locat
 
 /**
  * 지금 보고 있는 프로젝트. 주소의 ?board= 이고, 없으면 설정의 기본 보드입니다.
- * 실제로 로그를 읽고 쓰는 자리가 이것을 씁니다 — net.js 의 기본값과 같아야 합니다.
+ * 실제로 로그를 읽고 쓰는 자리가 이것을 씁니다. net.js 의 기본값과 같아야 합니다.
  * @param {string} [search] - location.search
  */
 export function boardFromSearch(search = typeof location === 'undefined' ? '' : location.search) {
@@ -163,7 +162,7 @@ const CSS = `
   display: block; font-size: 14px; font-weight: 600; line-height: 1.35; letter-spacing: -.01em;
 }
 .navtab__desc { display: block; font-size: 11.5px; line-height: 1.35; color: var(--sb-ink-3, #767f8c); }
-/* 켠 탭에서는 설명도 같이 파랑 쪽으로 당깁니다 — 두 줄이 한 덩어리로 읽힙니다 */
+/* 켠 탭에서는 설명도 같이 파랑 쪽으로 당깁니다. 두 줄이 한 덩어리로 읽힙니다 */
 .navtab[aria-current="page"] .navtab__desc { color: var(--sb-accent, #1a56db); opacity: .75; }
 
 /*
@@ -211,7 +210,7 @@ function injectCss(doc) {
  * @param {boolean} o.slim - 얇은 모양. 홈이 단계를 다 보여주므로 기본이 true 입니다
  * @param {boolean} o.home - 오른쪽 끝에 홈으로 가는 길을 둡니다
  * @param {string} o.board - 고른 프로젝트. 다른 화면으로 가는 링크에 ?board= 로 달립니다.
- *        기본값은 주소에서 읽습니다 — 화면마다 따로 챙기지 않아도 프로젝트가 따라갑니다
+ *        기본값은 주소에서 읽습니다. 화면마다 따로 챙기지 않아도 프로젝트가 따라갑니다
  * @returns {{ setActive: (id: string) => void, active: () => string }}
  */
 export function mountNav({
@@ -238,7 +237,7 @@ export function mountNav({
     else el.type = 'button'
     el.dataset.nav = t.id
     // 얇은 모양에서는 설명 줄이 감춰지므로 title 로도 남겨 둡니다
-    el.title = `${t.label} — ${t.desc}`
+    el.title = `${t.label} · ${t.desc}`
     el.innerHTML = `<span class="navtab__label">${esc(t.label)}</span>
       <span class="navtab__desc">${esc(t.desc)}</span>`
     if (mine.has(t.id)) {
@@ -253,7 +252,7 @@ export function mountNav({
     h.className = 'navhome'
     h.href = '/'
     h.dataset.navHome = '1'
-    h.title = '홈 — 전체 단계'
+    h.title = '홈 · 전체 단계'
     h.innerHTML = '<span aria-hidden="true">←</span><span>홈</span>'
     nav.appendChild(h)
   }

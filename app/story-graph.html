@@ -11,7 +11,7 @@
    * 이 화면의 이름들은 그대로 두고 값만 공통 토큰(theme.css)을 가리킨다.
    *
    * 예전에는 따뜻한 회색 배경에 보라 강조였다. 세 화면을 탭으로 오가게 되면서
-   * 여기만 강조색이 달라 다른 제품처럼 보였다 — 그래서 파랑 한 가지로 모았다.
+   * 여기만 강조색이 달라 다른 제품처럼 보였다. 그래서 파랑 한 가지로 모았다.
    * 이름을 바꾸지 않은 이유는 이 파일과 graph-view.js 규칙이 짧은 이름을 쓰기
    * 때문이다. 값만 갈아 끼우면 규칙은 그대로 따라온다.
    *
@@ -163,7 +163,7 @@
 
   /*
    * 처음 온 사람에게 뜨는 판. 모양은 app/onboard.js 가 넣고(.onb*) 여기서는 자리만
-   * 잡는다. 판 가운데가 아니라 대본 카드 오른쪽에 둔다 — 가운데에 놓으면 카드를 덮고,
+   * 잡는다. 판 가운데가 아니라 대본 카드 오른쪽에 둔다. 가운데에 놓으면 카드를 덮고,
    * 「직접 시작하기」가 가리키는 대본 칸이 그 아래에 가려진다. 카드를 접으면
    * (대본 입력 접기) 그 자리까지 넓게 쓴다.
    */
@@ -309,7 +309,7 @@
   .free-box h4 { font-size: 15.5px; font-weight: 800; color: var(--ink); margin-bottom: 9px; }
 
   /* ── 지나간 일 ────────────────────────────────────────────────────────────
-     목록 자체의 모양(.hist*)은 app/history.js 가 넣는다 — 홈·보드·키비주얼이 같은
+     목록 자체의 모양(.hist*)은 app/history.js 가 넣는다. 홈·보드·키비주얼이 같은
      목록을 쓰기 때문에 화면마다 베껴 두지 않는다. 여기 있는 것은 머리줄과 꼬리말이다. */
   .hist-head {
     display: flex; align-items: center; gap: 9px; margin-bottom: 12px;
@@ -434,9 +434,9 @@
       <div class="model-pick">
         <label for="modelSel">모델</label>
         <select id="modelSel">
-          <option value="haiku-4.5">Haiku 4.5 · 빠른 초안 — 구조와 뼈대를 빠르게 잡을 때</option>
-          <option value="sonnet-5" selected>Sonnet 5 · 균형잡힌 작업 — 대부분의 작업에 추천 (기본값)</option>
-          <option value="opus-4.8">Opus 4.8 · 깊이 있는 창작 — 캐릭터 심리와 대사에 강함, 느리고 비용 높음</option>
+          <option value="haiku-4.5">Haiku 4.5 · 빠른 초안 · 구조와 뼈대를 빠르게 잡을 때</option>
+          <option value="sonnet-5" selected>Sonnet 5 · 균형잡힌 작업 · 대부분의 작업에 추천 (기본값)</option>
+          <option value="opus-4.8">Opus 4.8 · 깊이 있는 창작 · 캐릭터 심리와 대사에 강함, 느리고 비용 높음</option>
         </select>
         <div class="hint" id="modelHint">추출 · 요약 · 분기 · 대본 생성에 모두 이 모델을 씁니다.</div>
       </div>
@@ -484,7 +484,7 @@
     </div>
     <!--
       지나간 일. 누가 · 어떤 단계에서 · 뭘 · 언제 했는지. 이 화면이 따로 쌓는 것이
-      아니라 보드의 op 로그 한 곳을 읽는다 — 그래서 다른 사람이 키비주얼에서 한 일도
+      아니라 보드의 op 로그 한 곳을 읽는다. 그래서 다른 사람이 키비주얼에서 한 일도
       여기 보인다. 옮기는 일은 app/history.js 가 한다.
     -->
     <div id="panel-hist" class="panel">
@@ -494,7 +494,7 @@
                   aria-pressed="false" title="내가 등록한 것만 봅니다">내 것만</button>
         </div>
         <div id="hist"></div>
-        <p class="hist-note">줄을 누르면 그 자리에서 이어서 합니다 — 회차는 대본화 탭이 열립니다.</p>
+        <p class="hist-note">줄을 누르면 그 자리에서 이어서 합니다. 회차는 대본화 탭이 열립니다.</p>
       </div>
     </div>
   </div>
@@ -545,12 +545,12 @@ const SEED_SRC = params.get('seeds') === 'mock' ? 'mock' : 'probes'
 const SEEDS_SHOWN = 12
 
 const NET = planClient()
-// 그래프 저장소. 배포에서 hasGraph 가 켜져 있을 때만 나온다 — 없으면 인메모리로 돈다
+// 그래프 저장소. 배포에서 hasGraph 가 켜져 있을 때만 나온다. 없으면 인메모리로 돈다
 const GRAPH_NET = graphClient()
 
 /**
  * 지금 고른 모델. 이 화면의 Bedrock 호출은 모두 이것을 실어 보낸다 (추출·요약·분기·대본).
- * 값은 infra/resolvers/plan.js 의 MODELS 키다 — 모르는 값이 가면 리졸버가 기본 모델로 내린다.
+ * 값은 infra/resolvers/plan.js 의 MODELS 키다. 모르는 값이 가면 리졸버가 기본 모델로 내린다.
  * 로컬 모드(NET 없음)에서는 드롭다운을 잠가 두고, 이 값은 아무 데도 쓰이지 않는다.
  *
  * @returns {string} 'haiku-4.5' | 'sonnet-5' | 'opus-4.8'
@@ -676,7 +676,7 @@ function paintHist() {
 /**
  * 목록에서 한 줄을 골라 이어서 하는 자리.
  *
- * 갈 수 있는 것만 간다 — 이 화면이 아는 것은 씨앗과 회차다. 패널 id (보드나 키비주얼이
+ * 갈 수 있는 것만 간다. 이 화면이 아는 것은 씨앗과 회차다. 패널 id (보드나 키비주얼이
  * 남긴 것) 를 여기서 열 방법은 없으므로 그때는 보드로 보낸다.
  */
 function pickHist(e) {
@@ -700,7 +700,7 @@ function pickHist(e) {
 }
 
 /** 지나간 일 목록 아래의 기본 한 줄 */
-const NOTE = '줄을 누르면 그 자리에서 이어서 합니다 — 회차는 대본화 탭이 열립니다.'
+const NOTE = '줄을 누르면 그 자리에서 이어서 합니다. 회차는 대본화 탭이 열립니다.'
 
 /** 그 한 줄을 바꾼다. 갈 수 없는 곳을 눌렀을 때 이유를 여기 남긴다 */
 function say(msg) {
@@ -716,7 +716,7 @@ async function loadJson(path) {
 }
 
 // 목데이터 셋. graph 는 ?graph= 로 갈아끼울 수 있고, seeds/stories 는 로컬 폴백용이다.
-// 없어도 화면은 돌아간다 — 탐지기가 씨앗을 만들고, 분기는 임시 분기로 채운다.
+// 없어도 화면은 돌아간다. 탐지기가 씨앗을 만들고, 분기는 임시 분기로 채운다.
 async function loadMock() {
   const graph = await loadJson(GRAPH_SRC)
   if (!Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) {
@@ -729,7 +729,7 @@ async function loadMock() {
     if (!Array.isArray(seeds) || !Array.isArray(stories)) throw new Error('seeds.json / stories.json: 배열이 아닙니다')
     if (seeds.length !== stories.length) throw new Error(`씨앗 ${seeds.length}개인데 스토리 ${stories.length}개입니다`)
   } catch (err) {
-    console.warn('[story-graph] 목 씨앗·스토리를 읽지 못했다 — 탐지기와 임시 분기로 돈다', err.message)
+    console.warn('[story-graph] 목 씨앗·스토리를 읽지 못했다. 탐지기와 임시 분기로 돈다', err.message)
     seeds = []
     stories = []
   }
@@ -738,7 +738,7 @@ async function loadMock() {
 
 /**
  * 그래프 JSON 으로 저장소를 만든다. Neptune 모드면 판을 그대로 저장소에 밀어 넣는다
- * — 새 대본을 뽑았거나 목데이터로 되돌렸다면 그것이 이제 사실이다.
+ *. 새 대본을 뽑았거나 목데이터로 되돌렸다면 그것이 이제 사실이다.
  */
 function newStore(graph) {
   const store = createGraphStore(graph, { net: GRAPH_NET, projectId: BOARD })
@@ -758,7 +758,7 @@ function build(store, { keepSeeds = null } = {}) {
   EPISODES = []
   SCRIPT = { ep: 0, format: SCRIPT.format, text: '', busy: false, err: '' }
   renderStats()
-  syncWelcome() // renderNetwork 보다 먼저다 — 판 가운데 안내를 띄울지가 이 결과에 달렸다
+  syncWelcome() // renderNetwork 보다 먼저다. 판 가운데 안내를 띄울지가 이 결과에 달렸다
   renderNetwork()
   renderSeeds()
   renderScriptPanel()
@@ -790,7 +790,7 @@ function renderNetwork() {
   const g = STORE.toJSON()
   const msg = $('canvasMsg')
   /*
-   * 판 가운데의 안내. 비어 있고 「처음 오셨나요?」 판이 없을 때만 띄운다 — 둘 다 띄우면
+   * 판 가운데의 안내. 비어 있고 「처음 오셨나요?」 판이 없을 때만 띄운다. 둘 다 띄우면
    * 같은 말이 두 번 겹치고, 안내 판이 이 글자 위에 앉는다. 예시를 다 보고 판을 지운
    * 뒤처럼 안내 판이 없는 경우에 이 줄이 남는다.
    */
@@ -850,7 +850,7 @@ const probeLabel = (id) => PROBES[id]?.label || id
 
 /**
  * 씨앗 하나를 알아보는 키. 탐지기 + 초점 노드다 (graph-probes.js 의 trim 이 쓰는 것과 같다).
- * 역기입 전후로 이 키를 견줘 새로 나온 씨앗을 가른다 — 씨앗에는 id 가 없다.
+ * 역기입 전후로 이 키를 견줘 새로 나온 씨앗을 가른다. 씨앗에는 id 가 없다.
  */
 const seedKey = (s) => `${s.probe}|${[...(s.focus || [])].sort().join(',')}`
 
@@ -881,7 +881,7 @@ function renderSeeds() {
       </div>
     </div>`
   }).join('')
-  // 새 씨앗이 잘린 자리 뒤에 있을 수 있다 — 몇 개가 숨어 있는지 버튼에 적어 준다
+  // 새 씨앗이 잘린 자리 뒤에 있을 수 있다. 몇 개가 숨어 있는지 버튼에 적어 준다
   const hiddenNew = SEEDS.slice(shown.length).filter((s) => NEW_SEEDS.has(seedKey(s))).length
   const more = SEEDS.length > shown.length
     ? `<button class="btn btn--line btn--wide" id="moreSeeds">더 보기 (+${SEEDS.length - shown.length}${
@@ -898,8 +898,7 @@ function renderSeeds() {
 }
 
 /**
- * 사이드바 안쪽 탭. 상단 기능 탭과는 별개지만 서로를 비추게 해 둡니다 —
- * 안쪽 [대본화] 는 상단 [대본화], 씨앗·스토리는 상단 [스토리 디벨롭] 입니다.
+ * 사이드바 안쪽 탭. 상단 기능 탭과는 별개지만 서로를 비추게 해 둡니다. * 안쪽 [대본화] 는 상단 [대본화], 씨앗·스토리는 상단 [스토리 디벨롭] 입니다.
  */
 const openTab = (name) => {
   document.querySelectorAll('.tabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name))
@@ -918,7 +917,7 @@ const curKey = () => (CUR.seed >= 0 ? String(CUR.seed) : 'free')
  *
  * @param {number} i - 씨앗 번호
  * @param {boolean} [local] - true 면 Bedrock 을 부르지 않고 미리 받아 둔 목데이터(POOL)로만
- *   분기를 세웁니다. 예시 안내가 이 길로 옵니다 — 안내 중에 10~30초짜리 왕복을 끼워 넣으면
+ *   분기를 세웁니다. 예시 안내가 이 길로 옵니다. 안내 중에 10~30초짜리 왕복을 끼워 넣으면
  *   배우는 시간이 아니라 기다리는 시간이 됩니다.
  */
 async function pickSeed(i, local = false) {
@@ -932,7 +931,7 @@ async function pickSeed(i, local = false) {
     ? localBranches(SEEDS[i], STORE, POOL)
     : planBranches(NET, SEEDS[i], STORE, { pool: POOL, onTry, model: MODEL() })),
   String(i), '분기를 만들고 있습니다')
-  // 씨앗 자체에는 id 가 없다 — seedKey 로 가리킨다. 이어서 하려면 그 씨앗을 다시 찾아야 한다
+  // 씨앗 자체에는 id 가 없다. seedKey 로 가리킨다. 이어서 하려면 그 씨앗을 다시 찾아야 한다
   const got = STORIES.get(String(i))
   if (got?.branches?.length) {
     mark(`씨앗 「${SEEDS[i].title}」에서 분기 ${got.branches.length}개를 만들었습니다`,
@@ -948,7 +947,7 @@ const busyLine = (text) => {
 
 /**
  * 분기 생성 한 번. 성공하면 캐시에 넣고 그린다. 실패하면 재시도 버튼을 남긴다.
- * run 은 (몇 번째, 전체) 를 받는 진행 콜백을 넘겨받는다 — 응답을 못 읽어 다시 물을 때
+ * run 은 (몇 번째, 전체) 를 받는 진행 콜백을 넘겨받는다. 응답을 못 읽어 다시 물을 때
  * 화면이 멈춘 것처럼 보이지 않게 같은 로딩 줄의 글자를 바꾼다.
  */
 async function generate(run, key, msg) {
@@ -972,7 +971,7 @@ async function generate(run, key, msg) {
 // ── 스토리 · 분기 ────────────────────────────────────────────────────────────
 const beatText = (b) => {
   if (typeof b === 'string') return b
-  const head = b.scene ? `${b.scene} — ` : ''
+  const head = b.scene ? `${b.scene} · ` : ''
   const tail = [b.secs ? `${b.secs}초` : null, (b.cast || []).join(', ') || null].filter(Boolean).join(' · ')
   return `${head}${b.action || ''}${tail ? ` (${tail})` : ''}`
 }
@@ -1189,7 +1188,7 @@ function expandToScript(seed, story, branch) {
 function wbPreview(x) {
   const p = x.check.preview
   const bad = x.check.warnings
-  return `<div class="wb-sum">역기입 미리보기 — + 노드 <b>${p.nodesAdded}</b> · + 엣지 <b>${p.edgesAdded}</b>
+  return `<div class="wb-sum">역기입 미리보기 · + 노드 <b>${p.nodesAdded}</b> · + 엣지 <b>${p.edgesAdded}</b>
       · − 엣지 <i>${p.edgesRemoved}</i></div>
     ${x.check.safe ? '' : '<div class="warn">넣을 수 없는 항목이 있습니다. 그 항목만 빼고 적용합니다.</div>'}
     ${bad.length ? `<details class="warns"><summary>역기입 점검 ${bad.length}건</summary>
@@ -1227,7 +1226,7 @@ const expandOptions = (x) => `
   ${wbPreview(x)}
   <div class="opt-grid">
     <label class="wide">형식${sel('exMode', ['next', 'spin'], x.opts.mode,
-      (v) => (v === 'next' ? '새 회차 — 인물과 앞 사건을 이어서' : '스핀오프 — 한 인물을 주인공으로 갈라'))}</label>
+      (v) => (v === 'next' ? '새 회차 · 인물과 앞 사건을 이어서' : '스핀오프 · 한 인물을 주인공으로 갈라'))}</label>
     <label>장르${sel('exGenre', GENRES, x.opts.genre)}</label>
     <label>톤${sel('exTone', TONES, x.opts.tone)}</label>
     <label>러닝타임${sel('exSecs', LENGTHS, x.opts.secs, secsLabel)}</label>
@@ -1243,7 +1242,7 @@ const expandOutline = (x) => {
   const o = x.outline
   const secs = o.beats.reduce((s, b) => s + (Number(b.secs) || 0), 0)
   return `
-    ${o.local ? '<div class="warn">로컬 모드 개요입니다 — 분기의 비트를 그대로 세운 뼈대입니다.</div>' : ''}
+    ${o.local ? '<div class="warn">로컬 모드 개요입니다. 분기의 비트를 그대로 세운 뼈대입니다.</div>' : ''}
     <h1>${esc(o.title || '제목 없음')}</h1>
     <div class="logline">${esc(o.logline)}</div>
     ${o.synopsis ? `<div class="branch-premise">${esc(o.synopsis)}</div>` : ''}
@@ -1251,7 +1250,7 @@ const expandOutline = (x) => {
       ${o.chars.map((c) => `<div class="beat"><span class="no">＋</span><span><b>${esc(c.name)}</b> ${esc(c.brief)}</span></div>`).join('')}` : ''}
     <div class="sec-label">비트 ${o.beats.length}개 · ${Math.round(secs)}초</div>
     ${o.beats.map((b, n) => `<div class="beat"><span class="no">${n + 1}</span>
-      <span>${esc(b.scene || `S${n + 1}`)} — ${esc(b.action)}${b.cast.length ? ` (${esc(b.cast.join(', '))})` : ''}</span></div>`).join('')}
+      <span>${esc(b.scene || `S${n + 1}`)} · ${esc(b.action)}${b.cast.length ? ` (${esc(b.cast.join(', '))})` : ''}</span></div>`).join('')}
     <div class="card__row">
       <button class="btn btn--wide" id="exCuts">이 개요로 컷 ${x.spec.cuts}개 만들기</button>
     </div>
@@ -1286,7 +1285,7 @@ const expandDone = (x) => {
   const a = x.applied.applied
   const n = x.applied.newSeeds.length
   return `
-    <div class="ok">${esc(x.outline.title || '새 회차')} 를 판에 붙였습니다 — 컷 ${x.cuts.length}개.</div>
+    <div class="ok">${esc(x.outline.title || '새 회차')} 를 판에 붙였습니다. 컷 ${x.cuts.length}개.</div>
     <div class="sec-label">그래프에 적용한 역기입</div>
     <div class="wb-sum">+ 노드 <b>${a.nodesAdded}</b> · + 엣지 <b>${a.edgesAdded}</b> · − 엣지 <i>${a.edgesRemoved}</i>
       ${a.derivedLost ? ` · 함께 사라진 추론 <i>${a.derivedLost}</i>` : ''}</div>
@@ -1401,7 +1400,7 @@ function stashEpisode() {
 async function applyToBoard() {
   const x = EXPAND
   stashEpisode()
-  // 무엇이 새로 생겼는지는 개수(applied)만으로는 알 수 없다 — 전후 판을 견줘 id 를 뽑는다
+  // 무엇이 새로 생겼는지는 개수(applied)만으로는 알 수 없다. 전후 판을 견줘 id 를 뽑는다
   const before = STORE.toJSON()
   const seedsBefore = new Set(SEEDS.map(seedKey))
   x.applied = applyWriteback(STORE, x.branch.writeback)
@@ -1567,7 +1566,7 @@ async function extract() {
 // ── 온보딩 ───────────────────────────────────────────────────────────────────
 /*
  * 이 화면은 처음에 비어 있다. 예전에는 start() 가 목데이터를 알아서 얹었고, 그래서
- * 처음 온 사람은 자기가 만든 것도 아닌 케데헌 그래프 앞에 앉았다 — 무엇이 예시이고
+ * 처음 온 사람은 자기가 만든 것도 아닌 케데헌 그래프 앞에 앉았다. 무엇이 예시이고
  * 무엇이 자기 것인지 가를 수 없었다. 이제 두 갈래를 먼저 묻는다.
  *
  *   예시 보기      loadMock 을 재생기에 태워 차근차근 얹는다 (아래 runExample)
@@ -1590,15 +1589,15 @@ function paintWelcome() {
     ownLabel: '직접 시작하기',
     /*
      * 직접 시작하는 사람에게는 안내를 열지 않습니다. 이미 쓰기로 정한 사람에게 막을
-     * 덮어 넉 장을 넘기게 하면 안내가 아니라 걸림돌입니다 — 커서만 대본 칸에 둡니다.
+     * 덮어 넉 장을 넘기게 하면 안내가 아니라 걸림돌입니다. 커서만 대본 칸에 둡니다.
      * 거절을 기억해 두는 이유는 coach.skip 에 적어 두었습니다. 다시 보고 싶으면
      * 헤더의 「안내 다시 보기」가 있습니다.
      */
     onOwn: () => { coach.skip(COACH_KEY); $('scriptIn')?.focus() },
     warn: NET
-      ? '직접 하실 때의 추출과 생성은 Bedrock 을 부릅니다 — 한 번에 10~30초씩 걸리고, 여기 남는 기록은 같은 보드를 보는 사람에게도 보입니다. '
+      ? '직접 하실 때의 추출과 생성은 Bedrock 을 부릅니다. 한 번에 10~30초씩 걸리고, 여기 남는 기록은 같은 보드를 보는 사람에게도 보입니다. '
         + '예시는 미리 받아 둔 데이터만 쓰므로 기다리지 않습니다.'
-      : '로컬 모드입니다 — 직접 하는 추출은 Bedrock 이 필요해 막혀 있습니다. 예시는 미리 받아 둔 데이터만 쓰므로 그대로 볼 수 있습니다.',
+      : '로컬 모드입니다. 직접 하는 추출은 Bedrock 이 필요해 막혀 있습니다. 예시는 미리 받아 둔 데이터만 쓰므로 그대로 볼 수 있습니다.',
   }))
   slot.hidden = false
   slot.classList.toggle('onbslot--wide', !!$('inputCard').hidden)
@@ -1621,8 +1620,7 @@ function syncWelcome() {
 }
 
 /**
- * 예시 안내. 목데이터를 한 번에 쏟지 않고 사람이 손으로 할 순서를 그대로 밟게 합니다 —
- * 대본을 넣고, 그래프를 얹고, 씨앗을 보고, 첫 씨앗의 분기를 만듭니다. 단계마다 누를
+ * 예시 안내. 목데이터를 한 번에 쏟지 않고 사람이 손으로 할 순서를 그대로 밟게 합니다. * 대본을 넣고, 그래프를 얹고, 씨앗을 보고, 첫 씨앗의 분기를 만듭니다. 단계마다 누를
  * 자리를 짚어 주고 그 자리를 눌러야 넘어갑니다. 다 본 사람은 이미 그 버튼들을 눌러
  * 본 사람입니다.
  *
@@ -1642,7 +1640,7 @@ function runExample() {
   const steps = [
     {
       say: '예시 시놉시스를 넣습니다',
-      sub: '케이팝 데몬 헌터스 — 세 사람이 노래로 결계를 붙잡고 있는 이야기입니다',
+      sub: '케이팝 데몬 헌터스. 세 사람이 노래로 결계를 붙잡고 있는 이야기입니다',
       spot: '#scriptIn', see: 'input',
       run: async () => {
         try {
@@ -1663,30 +1661,29 @@ function runExample() {
         : '로컬 모드에서는 추출이 막혀 있어 미리 뽑아 둔 결과를 얹습니다',
       spot: 'extract', see: 'input',
       /*
-       * 미리 뽑아 둔 그래프를 얹는 것이라 실제로는 즉시 끝납니다. 그래도 3초를 기다립니다 —
-       * 직접 할 때 이 버튼은 Bedrock 을 부르고 대본이 길면 먼저 요약까지 합니다. 예시가
+       * 미리 뽑아 둔 그래프를 얹는 것이라 실제로는 즉시 끝납니다. 그래도 3초를 기다립니다. * 직접 할 때 이 버튼은 Bedrock 을 부르고 대본이 길면 먼저 요약까지 합니다. 예시가
        * 즉시 끝나는 것으로 보여 주면 직접 하는 사람이 그 기다림을 고장으로 읽습니다.
        */
       wait: 3000, waitSay: `${modelLabel()} 로 그래프를 뽑고 있습니다`,
       /*
        * 여기서 값을 팝니다. 이 버튼이 문장 모델을 부르는 자리이고, 그 모델을 우리가
        * 띄우지 않는다는 것이 이 화면 구조의 절반입니다(나머지 절반은 키비주얼의 그림
-       * 모델입니다). 파란 안내와 색을 갈라 적습니다 — onboard.js 머리글의 note.
+       * 모델입니다). 파란 안내와 색을 갈라 적습니다. onboard.js 머리글의 note.
        */
       note: {
-        head: '문장을 다루는 모델은 맡깁니다',
-        body: '대본을 읽고 그래프를 뽑는 이 일은 *Amazon Bedrock* 이 합니다 — 서버도 GPU도 우리가 '
-          + '띄우지 않고 부른 만큼만 냅니다. 우리가 직접 띄우는 것은 *그림 모델 한 대*뿐입니다(키비주얼).',
+        head: '문장 모델은 부르기만 합니다',
+        body: '대본에서 그래프를 뽑는 것은 *Amazon Bedrock* 이 합니다. 서버도 GPU도 띄우지 않고 '
+          + '부른 만큼만 냅니다.',
       },
       run: async () => {
         await boot()
-        if (STORE) mark(`예시 그래프를 얹었습니다 — 노드 ${STORE.stats().nodes}개`)
+        if (STORE) mark(`예시 그래프를 얹었습니다. 노드 ${STORE.stats().nodes}개`)
       },
       /*
        * 3초를 기다리게 해 놓고 바로 다음 설명으로 넘어가면 그 3초가 만든 그래프가 막에
        * 덮입니다. 여기서 한 걸음 서서 그래프와 숫자 판을 같이 밝힙니다.
        *
-       * 씨앗 판도 같이 엽니다 — 그래프는 그 자체가 결과가 아니고 씨앗이 나오는 바탕입니다.
+       * 씨앗 판도 같이 엽니다. 그래프는 그 자체가 결과가 아니고 씨앗이 나오는 바탕입니다.
        * 그래프만 밝히면 「그림이 예쁘게 나왔다」로 끝나고, 다음 단계가 씨앗을 꺼낼 때
        * 그것이 어디서 나온 것인지가 끊깁니다.
        */
@@ -1705,7 +1702,7 @@ function runExample() {
         note: {
           head: '그래프로 두는 이유',
           body: '대본을 글로 두면 「미라가 무엇을 숨겼는지」를 사람이 다시 읽어야 압니다. '
-            + '그래프로 두면 *탐지기가 그것을 찾습니다* — 회차가 쌓일수록 이 판이 자라고, '
+            + '그래프로 두면 *탐지기가 그것을 찾습니다* · 회차가 쌓일수록 이 판이 자라고, '
             + '자란 판에서 다음 이야기가 나옵니다.',
         },
       },
@@ -1723,7 +1720,7 @@ function runExample() {
       wait: 3000, waitSay: '분기 세 개를 만들고 있습니다',
       run: () => (SEEDS.length ? pickSeed(0, true) : null),
       /*
-       * 기다려서 나온 스토리를 밝힙니다. 판(#storyPanel)까지 같이 냅니다 — 탭만 밝히면
+       * 기다려서 나온 스토리를 밝힙니다. 판(#storyPanel)까지 같이 냅니다. 탭만 밝히면
        * 「탭이 하나 켜졌다」로 보이고, 정작 3초가 만든 분기 · 비트 · 역기입 미리보기는
        * 막 아래에 그대로 남습니다.
        */
@@ -1740,13 +1737,13 @@ function runExample() {
         note: {
           head: '고르는 일은 사람이 합니다',
           body: '모델은 길을 *셋 내놓기만* 합니다. 어느 길로 갈지, 무엇을 판에 붙일지는 기획자가 '
-            + '고릅니다 — 붙이기 전에 역기입을 미리 보여 주는 것이 그래서입니다.',
+            + '고릅니다. 붙이기 전에 역기입을 미리 보여 주는 것이 그래서입니다.',
         },
       },
     },
     /*
      * 자유 입력을 짚습니다. 탐지기가 찾아 준 씨앗만으로 도는 화면으로 읽히면 기획자가
-     * 「내 생각을 넣을 자리」를 못 찾습니다 — 이 칸이 그 자리입니다. 예시는 방향 한 줄을
+     * 「내 생각을 넣을 자리」를 못 찾습니다. 이 칸이 그 자리입니다. 예시는 방향 한 줄을
      * 넣어 보이는 것까지만 하고 생성은 하지 않습니다(그것이 모델을 부르는 자리입니다).
      */
     {
@@ -1764,8 +1761,7 @@ function runExample() {
     /*
      * 끝은 말풍선의 버튼 하나로 냅니다. 예전에는 「지나간 일」을 짚고 그것을 누르게 했는데,
      * 짚어 준 자리를 누르는 것과 예시를 끝내는 것이 같은 동작이 되어 무엇이 끝나는지가
-     * 흐렸습니다. 나가는 일은 나가는 버튼으로 합니다. 지나간 일은 see 로 열어 둡니다 —
-     * 예시가 남긴 기록이 어디에 쌓이는지는 보여 주고 싶습니다.
+     * 흐렸습니다. 나가는 일은 나가는 버튼으로 합니다. 지나간 일은 see 로 열어 둡니다. * 예시가 남긴 기록이 어디에 쌓이는지는 보여 주고 싶습니다.
      */
     {
       say: demoActive() ? '스토리 디벨롭을 다 보셨습니다' : '여기까지가 예시입니다',
@@ -1792,7 +1788,7 @@ function runExample() {
 }
 
 /*
- * 코치마크. 가리키는 것은 이 화면에 실제로 있는 것뿐이다 — 앵커가 없는 장은
+ * 코치마크. 가리키는 것은 이 화면에 실제로 있는 것뿐이다. 앵커가 없는 장은
  * coach.js 가 조용히 건너뛴다. 그래서 판이 비어 있어도 같은 카드 묶음을 쓴다.
  */
 const DEV_CARDS = [
@@ -1805,7 +1801,7 @@ const DEV_CARDS = [
   {
     head: '그래프는 사실만 담습니다',
     body: '인물 · 장소 · 사건과 그 사이의 관계가 노드와 엣지가 됩니다.\n'
-      + '실선은 대본에 적힌 것, 점선은 규칙이 미뤄 낸 것입니다 — 두 개를 갈라 두는 이유는 '
+      + '실선은 대본에 적힌 것, 점선은 규칙이 미뤄 낸 것입니다. 두 개를 갈라 두는 이유는 '
       + '미뤄 낸 것이 틀릴 수 있기 때문입니다.',
     spot: ['stats'],
   },
@@ -1813,13 +1809,13 @@ const DEV_CARDS = [
     head: '씨앗 → 분기 → 컷 → 대본',
     body: '옆 탭이 그 순서입니다. 씨앗을 고르면 스토리 탭에 분기가 서고, '
       + '분기를 펼치면 개요와 컷이 나오고, 대본화 탭이 그것을 대본 텍스트로 옮깁니다.\n'
-      + '컷을 판에 붙이면 그래프가 자라고 씨앗이 다시 뽑힙니다 — 그게 이 화면의 고리입니다.',
+      + '컷을 판에 붙이면 그래프가 자라고 씨앗이 다시 뽑힙니다. 그게 이 화면의 고리입니다.',
     spot: ['tabs'],
     step: 'seeds',
   },
   {
     head: '누가 뭘 했는지 남습니다',
-    body: '이 화면에서 한 일이 보드와 같은 기록에 쌓입니다 — 그래서 홈에서도, 키비주얼에서도 같이 보입니다.\n'
+    body: '이 화면에서 한 일이 보드와 같은 기록에 쌓입니다. 그래서 홈에서도, 키비주얼에서도 같이 보입니다.\n'
       + '줄을 누르면 그 자리에서 이어서 합니다. 「내 것만」으로 내가 등록한 것만 볼 수 있습니다.',
     spot: ['histbox'],
     step: 'hist',
@@ -1840,7 +1836,7 @@ function openCoach() {
   coach.start({
     cards: DEV_CARDS, key: COACH_KEY, title: '스토리 디벨롭',
     /*
-     * 안 열린 탭 속의 앵커는 화면에 없는 것과 같다 — 판이 display:none 이라 좌표가
+     * 안 열린 탭 속의 앵커는 화면에 없는 것과 같다. 판이 display:none 이라 좌표가
      * 0 이고, 막 위로 올려도 보이지 않는다. 그래서 그 장의 탭을 대신 열어 준다.
      * 키비주얼이 단계를 옮기는 자리와 같은 손잡이다 (coach.js 의 host).
      */
@@ -1859,8 +1855,7 @@ document.querySelectorAll('.tabs .tab').forEach((t) => { t.onclick = () => openT
 {
   /*
    * 이 화면이 받지 못하는 탭 이름으로 들어오면 기본 탭으로 떨어뜨립니다.
-   * ?tab=board 나 ?tab=keyvisual 은 각자 자기 화면이 따로 있으므로 여기서 열 수 없습니다 —
-   * 그대로 두면 어느 판도 켜지지 않아 빈 화면이 됩니다.
+   * ?tab=board 나 ?tab=keyvisual 은 각자 자기 화면이 따로 있으므로 여기서 열 수 없습니다. * 그대로 두면 어느 판도 켜지지 않아 빈 화면이 됩니다.
    */
   const asked = navTabFromSearch(location.search, 'develop')
   const first = asked === 'board' || asked === 'keyvisual' ? 'develop' : asked
@@ -1907,14 +1902,14 @@ $('modeBadge').textContent = NET
 $('modeBadge').className = NET ? 'badge badge--live' : 'badge'
 $('srcBadge').textContent = `graph: ${GRAPH_SRC}${SEED_SRC === 'mock' ? ' · seeds: mock' : ''}`
 
-// 로컬 모드에서는 고를 것이 없다 — 생성이 전부 로컬 폴백으로 돌아 모델을 쓰지 않는다
+// 로컬 모드에서는 고를 것이 없다. 생성이 전부 로컬 폴백으로 돌아 모델을 쓰지 않는다
 if (!NET) {
   $('modelSel').disabled = true
   $('modelHint').textContent = '로컬 모드에서는 모델을 쓰지 않습니다. Bedrock 에 연결하면 여기서 고릅니다.'
 }
 
 function fail(err) {
-  // 안내를 넣으려면 판 자리를 비워야 합니다 — 캔버스를 걷어내고 VIS 를 다시 만들게 합니다
+  // 안내를 넣으려면 판 자리를 비워야 합니다. 캔버스를 걷어내고 VIS 를 다시 만들게 합니다
   if (VIS) { VIS.destroy(); VIS = null }
   $('network').innerHTML = `<div class="load-error">예시 데이터를 불러오지 못했습니다: ${esc(err.message)}<br>
     파일 경로가 아니라 HTTP 로 열어야 합니다. 예: node infra/scripts/serve-local.mjs<br>
@@ -1942,7 +1937,7 @@ async function boot() {
 /**
  * 첫 로드.
  *
- * Neptune 에 남아 있는 그래프가 있으면 그것으로 시작한다 — 새로고침해도 지난번에
+ * Neptune 에 남아 있는 그래프가 있으면 그것으로 시작한다. 새로고침해도 지난번에
  * 자란 판이 그대로 나온다. 저장된 것이 없으면 **비운 채로** 시작한다.
  *
  * 예전에는 여기서 목데이터를 얹었다. 그러면 처음 온 사람이 자기가 만들지 않은 케데헌
@@ -1954,7 +1949,7 @@ async function start() {
   try {
     stored = await loadGraphStore({ net: GRAPH_NET, projectId: BOARD })
   } catch (err) {
-    console.warn('[story-graph] Neptune 에서 그래프를 읽지 못했다 — 빈 판으로 시작한다', err)
+    console.warn('[story-graph] Neptune 에서 그래프를 읽지 못했다. 빈 판으로 시작한다', err)
   }
 
   // 목 씨앗·스토리는 로컬 폴백용이라 어느 쪽으로 시작하든 미리 읽어 둔다
@@ -1963,7 +1958,7 @@ async function start() {
     MOCK_SEEDS = d.seeds
     POOL = d.seeds.map((s, i) => ({ ...d.stories[i], probe: s.probe, focus: s.focus }))
   } catch (err) {
-    console.warn('[story-graph] 목 씨앗·스토리를 읽지 못했다 — 임시 분기로 돈다', err.message)
+    console.warn('[story-graph] 목 씨앗·스토리를 읽지 못했다. 임시 분기로 돈다', err.message)
   }
 
   if (!stored || !stored.stats().nodes) {
@@ -1977,7 +1972,7 @@ async function start() {
 }
 
 /**
- * 지나간 일을 읽어 온다. 화면을 세운 뒤에 부른다 — 로그를 못 읽어도 화면은 돌아야 한다.
+ * 지나간 일을 읽어 온다. 화면을 세운 뒤에 부른다. 로그를 못 읽어도 화면은 돌아야 한다.
  * 목록은 최근 30줄만 그리므로 다 들고 있을 이유가 없어 뒤쪽 300건만 남긴다.
  */
 async function loadHistory() {
@@ -2016,7 +2011,7 @@ function showGate() {
       <div class="gate__eyebrow">Story Graph</div>
       <h2 class="gate__title">로그인</h2>
       <p class="gate__sub">이 화면은 Bedrock·Neptune 을 직접 부릅니다. 등록된 팀원만 들어올 수 있습니다.</p>
-      <span class="lf__label">데모 계정 — 눌러서 바로 들어가기</span>
+      <span class="lf__label">데모 계정 · 눌러서 바로 들어가기</span>
       <div class="gate__list">
         ${DEMO_USERS.map((u) => `
           <button class="gate__who" type="button" data-demo="${esc(u.id)}">
@@ -2122,7 +2117,7 @@ $('histMine').onclick = () => { HIST_MINE = !HIST_MINE; paintHist() }
 $('coachBtn').onclick = openCoach
 renderLegend()
 if (configured && !session()) {
-  // 토큰이 없다 — 판을 시동하지 않고 문만 세운다 (호출이 401 로 떨어지지 않게)
+  // 토큰이 없다. 판을 시동하지 않고 문만 세운다 (호출이 401 로 떨어지지 않게)
   showGate()
 } else {
   showWho()
@@ -2130,7 +2125,7 @@ if (configured && !session()) {
    * 판을 세우기 전에 프로젝트 보드를 먼저 세운다. 주소에 ?board= 가 있으면 아무것도
    * 뜨지 않고 바로 start() 로 간다.
    *
-   * 고르면 그 주소로 화면을 다시 여는 것이라 이 약속은 해결되지 않는다 — Neptune 을
+   * 고르면 그 주소로 화면을 다시 여는 것이라 이 약속은 해결되지 않는다. Neptune 을
    * 읽지도, 목데이터를 미리 읽지도 않는다. 어느 프로젝트인지 모르는 채로 그래프를
    * 세우면 고른 뒤에 그것을 다 물려야 한다.
    */
@@ -2146,12 +2141,12 @@ if (configured && !session()) {
      *
      * 이 갈래가 없어서 홈의 파란 버튼이 먹지 않았다. 여기까지는 잘 왔는데 화면이
      * 「처음 오셨나요?」 판을 띄우고 서 버렸고, 예시를 보려면 그 판의 [예시 보기] 를
-     * 한 번 더 눌러야 했다 — 파란 버튼을 누른 사람에게는 아무 일도 안 일어난 것으로
+     * 한 번 더 눌러야 했다. 파란 버튼을 누른 사람에게는 아무 일도 안 일어난 것으로
      * 읽힌다. 실제로 그랬다.
      */
     if (demoActive()) { runExample(); return }
     /*
-     * 판이 비어 있으면 코치마크를 열지 않는다 — 그때는 화면에 「처음 오셨나요?」 판이
+     * 판이 비어 있으면 코치마크를 열지 않는다. 그때는 화면에 「처음 오셨나요?」 판이
      * 있고 그 판이 두 갈래를 이미 말해 준다. 막을 덮어 그것을 가릴 이유가 없다.
      * 예시를 보거나 직접 시작하면 그 뒤에 열린다.
      */

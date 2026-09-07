@@ -85,7 +85,7 @@ const gqlPost = async (cfg, query, variables) => {
  * AppSync 가 AWSJSON 을 내보낼 때 한 번 더 감싸기 때문에, 한 번 파싱하면 값이 아니라
  * JSON 문자열이 또 나온다 ('"{\"text\":...}"' → '{"text":...}' → {text:...}).
  * 그래서 문자열이 남아 있으면 한 번 더 푼다. 리졸버가 나중에 ctx.result 를 그대로
- * 돌려주도록 고쳐도 이 함수는 그대로 맞는다 — 그때는 첫 파싱에서 값이 나온다.
+ * 돌려주도록 고쳐도 이 함수는 그대로 맞는다. 그때는 첫 파싱에서 값이 나온다.
  *
  * @param {*} raw - json.data 의 AWSJSON 필드 값
  * @returns {*} 파싱한 값
@@ -115,9 +115,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 /**
  * plan 한 건을 띄우고 끝날 때까지 기다린다. 30초 상한을 우회하는 곳이다.
  *
- * 1) mutation 으로 잡을 띄운다 — Lambda 를 Event 로 부르고 jobId 만 즉시 온다 (1초 이내)
- * 2) planResult(jobId) 를 폴링한다. 결과는 잡을 띄운 사람만 읽을 수 있다 —
- *    브로드캐스트가 아니라 자기 jobId 를 직접 읽는 것이라 남의 화면에 새지 않는다
+ * 1) mutation 으로 잡을 띄운다. Lambda 를 Event 로 부르고 jobId 만 즉시 온다 (1초 이내)
+ * 2) planResult(jobId) 를 폴링한다. 결과는 잡을 띄운 사람만 읽을 수 있다. *    브로드캐스트가 아니라 자기 jobId 를 직접 읽는 것이라 남의 화면에 새지 않는다
  * 3) done 이면 {text, usage, stop} 을 돌려준다. 예전 동기 plan 과 같은 모양이라
  *    story.js 의 호출부는 그대로다
  *
@@ -159,7 +158,7 @@ export async function runPlanJob(post, spec, opts = {}) {
  * plan 만 쓰는 최소 클라이언트. story-graph.html 처럼 보드 동기화(구독·프레즌스)는
  * 필요 없고 Bedrock 호출만 하는 화면에서 쓴다.
  *
- * @returns {{plan: Function}|null} 설정이 없으면 null — 부르는 쪽은 로컬 모드로 내려간다
+ * @returns {{plan: Function}|null} 설정이 없으면 null. 부르는 쪽은 로컬 모드로 내려간다
  */
 export function planClient() {
   const cfg = window.SB_CONFIG
@@ -175,7 +174,7 @@ export function planClient() {
  * 그리면 끝입니다. 문 앞에서 소켓을 붙잡고 있을 이유가 없습니다.
  *
  * 쓰기(sendOp)도 하나 둡니다. 보드 화면 밖에서도 「누가 뭘 했다」를 같은 로그에 남길
- * 수 있어야 하기 때문입니다 — 키비주얼과 디벨롭이 그렇게 씁니다. connect() 쪽의
+ * 수 있어야 하기 때문입니다. 키비주얼과 디벨롭이 그렇게 씁니다. connect() 쪽의
  * sendOp 과 달리 실패하면 대기열에 넣지 않고 그대로 던집니다. 기록은 화면의 본 일이
  * 아니므로 부르는 쪽이 조용히 넘깁니다.
  *
@@ -227,7 +226,7 @@ const M_PUT_PROJECT = `mutation PutProject($boardId: ID!, $name: String, $actor:
  * 한 달 쉰 프로젝트는 이름까지 사라집니다. 카드는 pk='PROJECTS' 한 자리에 모으고
  * TTL 을 걸지 않습니다.
  *
- * @returns {{list: Function, put: Function}|null} 설정이 없으면 null — 부르는 쪽이
+ * @returns {{list: Function, put: Function}|null} 설정이 없으면 null · 부르는 쪽이
  *          브라우저 저장소로 내려갑니다
  */
 export function projectsClient() {
@@ -260,7 +259,7 @@ const M_UPDATE_GRAPH = `mutation UpdateGraph($spec: AWSJSON!) { updateGraph(spec
 
 /**
  * Neptune 그래프 저장소 클라이언트. graph-engine.js 가 인메모리 대신 이걸 쓴다.
- * 배포에서 hasGraph 가 켜져 있을 때만 나온다 — 로컬에서는 null 이라 인메모리로 돈다.
+ * 배포에서 hasGraph 가 켜져 있을 때만 나온다. 로컬에서는 null 이라 인메모리로 돈다.
  *
  * @returns {{load: Function, save: Function, query: Function, update: Function}|null}
  */
@@ -305,7 +304,7 @@ async function awsTransport(cfg, h) {
   const send = (query, variables) => {
     const go = () =>
       retry(() => post(query, variables)).catch((e) => {
-        console.warn('[net] op 전송 실패 — 대기열에 넣는다', e.message)
+        console.warn('[net] op 전송 실패. 대기열에 넣는다', e.message)
         outbox.push({ q: query, v: variables })
         h.onPending?.(outbox.length)
       })
@@ -452,9 +451,9 @@ class Realtime {
     this.h.onStatus('down')
     const wait = Math.min(8000, 400 * 2 ** this.tries++)
     /*
-     * 첫 connection_ack 전에도 계속 닫히는 경우가 있다 — 만료된 토큰, 네트워크.
+     * 첫 connection_ack 전에도 계속 닫히는 경우가 있다. 만료된 토큰, 네트워크.
      * ready() 는 ack 에서만 resolve 하므로 그대로 두면 호출자가 영구히 매달린다.
-     * reject 가 아니라 미해결이라서 try/catch 도 잡지 못한다 — key-visual 화면이
+     * reject 가 아니라 미해결이라서 try/catch 도 잡지 못한다. key-visual 화면이
      * 그 상태로 끝까지 비어 있었다. 몇 번 실패하면 일단 진행시킨다. 연결이 늦게
      * 열려도 구독은 그때 붙고, 그동안 onStatus('down') 이 화면에 상태를 알린다.
      * tries 는 ack 에서 0 으로 돌아가므로 연결된 뒤의 재시도에는 영향이 없다.

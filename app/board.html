@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>콘티 보드 — 여름 스튜디오</title>
+<title>콘티 보드 · 여름 스튜디오</title>
 <link rel="icon" href="data:,">
 
 <!-- 세 화면이 나눠 쓰는 색 한 벌. 아래 :root 가 이 값을 가리킨다 -->
@@ -13,14 +13,14 @@
  * 이 화면의 이름들(--paper, --edge, --tape …)은 그대로 두고 값만 공통 토큰을 가리킨다.
  *
  * 예전에는 어두운 슬레이트 책상 위에 종이를 얹은 톤이었다. 세 화면을 탭으로 오가게
- * 되면서 그 톤만 혼자 어두워 다른 제품처럼 보였다 — 그래서 키 비주얼의 흰 배경 ·
+ * 되면서 그 톤만 혼자 어두워 다른 제품처럼 보였다. 그래서 키 비주얼의 흰 배경 ·
  * 파란 강조에 맞췄다.
  *
  * 이름을 바꾸지 않은 이유는 CSS 규칙 400곳이 이 이름을 쓰고, app/board.js 가
  * stroke="var(--tape)" 처럼 이름을 문자열로 박아 SVG 를 만들기 때문이다. 값만 갈면
  * 규칙도 그 SVG 도 그대로 따라온다.
  *
- * 뜻이 달라진 이름 셋 —
+ * 뜻이 달라진 이름 셋.
  *   --slate  머리 띠. 이제 어두운 판이 아니라 흰 바탕이다.
  *   --table  화면 바탕. 책상이 아니라 흰 면이다.
  *   --tape   진행중 · 지금 고른 것. 노란 테이프 대신 호박색으로, 파랑과 안 부딪힌다.
@@ -286,7 +286,7 @@ dialog#keys::backdrop { background: rgba(17,19,24,.5); }
 .btn:disabled { opacity: .38; cursor: not-allowed; }
 .btn--ghost { background: transparent; border-color: var(--edge); color: var(--pencil); }
 .btn--ghost:hover:not(:disabled) { background: var(--paper-2); color: var(--ink); }
-/* 주 버튼은 이제 잉크 검정이 아니라 파랑이다 — 키비주얼의 주 버튼과 같은 색 */
+/* 주 버튼은 이제 잉크 검정이 아니라 파랑이다. 키비주얼의 주 버튼과 같은 색 */
 .btn--solid { background: var(--stamp-blue); color: #fff; }
 .btn--solid:hover:not(:disabled) { background: var(--sb-accent-ink); }
 .btn--approve { background: var(--stamp-blue); color: #fff; }
@@ -347,7 +347,7 @@ dialog#keys::backdrop { background: rgba(17,19,24,.5); }
 .histmine[aria-pressed="true"] {
   color: var(--stamp-blue); background: var(--sb-accent-soft); border-color: var(--sb-accent-line);
 }
-/* .h 는 ::after 로 남는 자리를 채운다 — 토글이 그 선 오른쪽으로 밀리지 않게 순서를 뒤집는다 */
+/* .h 는 ::after 로 남는 자리를 채운다. 토글이 그 선 오른쪽으로 밀리지 않게 순서를 뒤집는다 */
 .h .histmine { order: 3; }
 .h::after { order: 2; }
 
@@ -640,7 +640,7 @@ dialog#keys::backdrop { background: rgba(17,19,24,.5); }
 .tl__cut[data-tone="approve"] { background: var(--stamp-blue); border-color: var(--stamp-blue); color: #fff; }
 .tl__cut[data-tone="reject"] { background: var(--stamp-red); border-color: var(--stamp-red); color: #fff; }
 .tl__cut[data-tone="work"] { background: var(--tape); border-color: var(--tape); color: #fff; }
-/* 대기는 채우지 않고 회색 테로만 둔다 — 채운 칸(진행·승인·반려)과 한눈에 갈린다.
+/* 대기는 채우지 않고 회색 테로만 둔다. 채운 칸(진행·승인·반려)과 한눈에 갈린다.
    .stamp--wait, .detail__status[data-tone=wait] 도 같은 회색을 쓴다 */
 .tl__cut[data-tone="wait"] { background: var(--paper); border-color: var(--pencil-2); color: var(--pencil); }
 .tl__cut[data-on="1"] { outline: 2px solid var(--ink); outline-offset: 1px; }
@@ -651,7 +651,7 @@ dialog#keys::backdrop { background: rgba(17,19,24,.5); }
 }
 .tl__name span { color: var(--ink); }
 
-/* 그림을 크게 보는 판. 뒤는 어둡게 깔아 그림만 남긴다 — 여기만 어두운 채로 둔다 */
+/* 그림을 크게 보는 판. 뒤는 어둡게 깔아 그림만 남긴다. 여기만 어두운 채로 둔다 */
 .vwrap { position: fixed; inset: 0; z-index: 80; background: rgba(17,19,24,.88); display: grid; }
 .vwrap[hidden] { display: none; }
 .vw { display: grid; grid-template-rows: auto minmax(0,1fr); min-height: 0; }
@@ -1051,7 +1051,7 @@ dialog.plan { width: min(680px, 95vw); }
 
     <!--
       지나간 일. 누가 · 어떤 단계에서 · 뭘 · 언제 했는지가 남는다. 줄을 누르면 그 컷으로
-      가서 이어서 한다. 목록의 모양과 문구는 app/history.js 가 들고 있다 — 홈과 세
+      가서 이어서 한다. 목록의 모양과 문구는 app/history.js 가 들고 있다. 홈과 세
       화면이 같은 목록을 쓴다.
     -->
     <div data-coach="histbox">
@@ -1085,7 +1085,7 @@ dialog.plan { width: min(680px, 95vw); }
     <dt class="mono">Home / End</dt><dd>첫 컷 / 마지막 컷</dd>
     <dt class="mono">Enter</dt><dd>컷 열기</dd>
     <dt class="mono">A</dt><dd>승인</dd>
-    <dt class="mono">R</dt><dd>수정 요청 — 이유를 쓰는 칸으로 갑니다</dd>
+    <dt class="mono">R</dt><dd>수정 요청 · 이유를 쓰는 칸으로 갑니다</dd>
     <dt class="mono">S</dt><dd>리뷰 요청</dd>
     <dt class="mono">I</dt><dd>알림함 열기</dd>
     <dt class="mono">G</dt><dd>보드로 이동</dd>

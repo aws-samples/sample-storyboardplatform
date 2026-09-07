@@ -133,7 +133,7 @@ const rivalsOf = (store, id) => store.getEdgesByPredicate('rival_of')
   .filter((e) => e.s === id || e.o === id)
   .map((e) => ({ id: e.s === id ? e.o : e.s, edge: e }))
 
-/** 이 인물을 지키거나 이 인물이 매인 쪽 — 금지된 관계·배신 판정의 기준점 */
+/** 이 인물을 지키거나 이 인물이 매인 쪽 · 금지된 관계·배신 판정의 기준점 */
 const guardiansOf = (store, id) => uniq([
   ...store.getEdgesFrom(id).filter((e) => e.p === 'serves' || e.p === 'mentor_of').map((e) => e.o),
   ...store.getEdgesTo(id).filter((e) => e.p === 'mentor_of').map((e) => e.s),
@@ -171,8 +171,8 @@ export function probeSecretLeverage(store) {
     const desc = [
       knowers.length ? `${namesOf(store, knowers)}${josa(namesOf(store, knowers), '은', '는')} 알고` : null,
       hidden.length ? `${namesOf(store, hidden)}${josa(namesOf(store, hidden), '은', '는')} 모른다` : null,
-      claim ? `— "${claim}"` : null,
-    ].filter(Boolean).join(', ').replace(', —', ' —')
+      claim ? `"${claim}"` : null,
+    ].filter(Boolean).join(', ')
     out.push(mk(store, 'secret_leverage', raw, title, desc, [...holders, ...knowers, s.id]))
   }
   return trim(out, 6)
@@ -424,7 +424,7 @@ export function probeBetrayalPotential(store) {
       const raw = 0.65 + 0.35 * Math.max(ten(sv), ten(bond), ten(rival, 0))
       out.push(mk(store, 'betrayal_potential', raw,
         `안에서 갈라지는 충성: ${nameOf(store, sv.s)}`,
-        `${nameOf(store, sv.s)}${josa(nameOf(store, sv.s), '은', '는')} ${nameOf(store, sv.o)}${josa(nameOf(store, sv.o), '을', '를')} 섬기는데, 그 적인 ${nameOf(store, foe)}${josa(nameOf(store, foe), '과', '와')} 이미 얽혀 있다 — ${BOND[bond.p]}`,
+        `${nameOf(store, sv.s)}${josa(nameOf(store, sv.s), '은', '는')} ${nameOf(store, sv.o)}${josa(nameOf(store, sv.o), '을', '를')} 섬기는데, 그 적인 ${nameOf(store, foe)}${josa(nameOf(store, foe), '과', '와')} 이미 얽혀 있다. ${BOND[bond.p]}`,
         [sv.s, sv.o, foe]))
     }
   }
@@ -464,7 +464,7 @@ export function probeIdentityCrisis(store) {
       const hidden = store.getEdgesFrom(secret.id).filter((x) => x.p === 'hidden_from').length
       out.push(mk(store, 'identity_crisis', 0.65 + 0.1 * Math.min(2, hidden),
         `자기를 숨기는 인물: ${c.name}`,
-        `${claim ? `"${claim}" — ` : ''}자기에 관한 것을 자기가 감추고 있다`,
+        `${claim ? `"${claim}" · ` : ''}자기에 관한 것을 자기가 감추고 있다`,
         [c.id, secret.id]))
     }
   }
@@ -570,7 +570,7 @@ export function findSeeds(store, { limit = 40 } = {}) {
       all.push(...asList(probe(store)))
     } catch (err) {
       // 탐지기 하나가 이상한 데이터에 걸려 죽어도 나머지는 돌아야 한다
-      console.warn('[probes] 탐지기 실패 — 건너뛴다', probe.name, err?.message)
+      console.warn('[probes] 탐지기 실패. 건너뛴다', probe.name, err?.message)
     }
   }
   all.sort((a, b) => b.score - a.score || a.probe.localeCompare(b.probe) || a.title.localeCompare(b.title))

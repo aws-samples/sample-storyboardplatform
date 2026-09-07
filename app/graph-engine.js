@@ -8,7 +8,7 @@
 // (story.js 가 net 을 인자로 받는 것과 같은 방식이다. 이 파일은 통신을 모른다).
 //   인메모리  net 이 없을 때. 로컬·테스트. 그래프가 이 파일 안에서만 산다
 //   Neptune   net 이 있을 때. 조회는 그대로 색인에서 답하고, 바뀐 것만 뒤에서 흘려보낸다
-// 어느 쪽이든 조회와 변경은 전부 동기다 — 탐지기 한 바퀴가 수백 번을 물어보므로
+// 어느 쪽이든 조회와 변경은 전부 동기다. 탐지기 한 바퀴가 수백 번을 물어보므로
 // 그때마다 왕복하면 화면이 멈춘다. 저장이 끝났는지는 flush() 로 확인한다.
 
 import { deriveEdges, edgeKey } from './graph-schema.js'
@@ -232,7 +232,7 @@ class GraphStore {
       const prev = this.nodeById.get(n.id)
       if (prev) {
         prev.props = { ...asProps(n.props), ...asProps(prev.props) }
-        g.warnings.push(`${n.name}: 이미 있는 id "${n.id}" — props 만 합쳤습니다`)
+        g.warnings.push(`${n.name}: 이미 있는 id "${n.id}". props 만 합쳤습니다`)
         continue
       }
       this.nodes.push(n)
@@ -256,7 +256,7 @@ class GraphStore {
     const added = []
     for (const e of g.edges) {
       const k = edgeKey(e)
-      if (have.has(k)) { g.warnings.push(`${k}: 이미 있는 엣지 — 넣지 않습니다`); continue }
+      if (have.has(k)) { g.warnings.push(`${k}: 이미 있는 엣지. 넣지 않습니다`); continue }
       have.add(k)
       this.suppressed.delete(k)
       if (isDerived(e)) this.given.push(e)
@@ -310,7 +310,7 @@ export const DEFAULT_PROJECT = 'default'
 /**
  * Neptune 을 사실로 두는 저장소.
  *
- * 조회는 부모(GraphStore)의 색인을 그대로 쓴다 — 씨앗 탐지기 12종은 한 번 도는 데
+ * 조회는 부모(GraphStore)의 색인을 그대로 쓴다. 씨앗 탐지기 12종은 한 번 도는 데
  * 수백 번을 물어보므로, 그때마다 Neptune 을 왕복하면 화면이 멈춘다. 그래서 판은
  * 브라우저에 두고, Neptune 에는 바뀐 것만 뒤에서 흘려보낸다.
  *
@@ -331,7 +331,7 @@ class NeptuneGraphStore extends GraphStore {
   /** Neptune 왕복을 줄에 세운다. 실패는 삼키지 않고 flush 가 돌려줄 자리에 쌓는다 */
   queue(label, run) {
     this.pending = this.pending.then(run).catch((err) => {
-      const msg = `Neptune ${label} 실패 — 화면은 그대로지만 저장되지 않았습니다: ${err.message}`
+      const msg = `Neptune ${label} 실패 · 화면은 그대로지만 저장되지 않았습니다: ${err.message}`
       this.failures.push(msg)
       this.warnings.push(msg)
     })
@@ -432,7 +432,7 @@ export function createGraphStore(graphJson, { normalize = true, net = null, proj
  * @param {Object} [opts]
  * @param {Object|null} [opts.net] net.js 의 graphClient()
  * @param {string} [opts.projectId]
- * @returns {Promise<NeptuneGraphStore|null>} net 이 없으면 null — 부르는 쪽은
+ * @returns {Promise<NeptuneGraphStore|null>} net 이 없으면 null · 부르는 쪽은
  *          목데이터로 판을 채운다. 저장된 것이 없으면 노드 0개인 저장소가 나온다
  */
 export async function loadGraphStore({ net = null, projectId = DEFAULT_PROJECT } = {}) {

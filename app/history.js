@@ -1,5 +1,5 @@
 /*
- * 히스토리 — 누가 · 어떤 단계에서 · 뭘 · 언제 했는지.
+ * 히스토리 · 누가 · 어떤 단계에서 · 뭘 · 언제 했는지.
  *
  * 사실은 한 곳에 있습니다. 보드의 op 로그(DynamoDB, AppSync 의 listOps)입니다.
  * 그 로그를 세 화면이 다 남기고 다 읽습니다.
@@ -11,7 +11,7 @@
  * 새 종류를 만들지 않고 step.mark 하나만 더한 이유는, 로그를 읽는 쪽(app/board.js 의
  * applyOp)이 모르는 kind 를 만나도 그냥 지나가게 되어 있어서입니다. 즉 디벨롭이
  * 남긴 줄이 보드의 판을 흔들지 않습니다. 반대로 이 파일은 모든 kind 를 사람이 읽는
- * 한 줄로 옮깁니다 — 그래서 보드에서 한 일도 홈에서 같이 보입니다.
+ * 한 줄로 옮깁니다. 그래서 보드에서 한 일도 홈에서 같이 보입니다.
  *
  * 화면이 사실을 따로 쌓지 않는 것이 중요합니다. 화면마다 자기 localStorage 에 목록을
  * 들고 있으면 다른 사람 브라우저에서는 비어 있고, "누가 뭘 했는지"가 애초에 성립하지
@@ -33,7 +33,7 @@ export const MARK = 'step.mark'
  * @param {string} o.what - 한 일. "씬 9개로 나눴습니다" 처럼 완결된 한 줄
  * @param {string} [o.ref] - 이어서 하려면 필요한 것. 씬 id, 회차 번호, 프로젝트 …
  *                            무엇을 가리키는지는 refKind 로 따로 말합니다
- * @param {object} [o.data] - 이어서 할 때 되살릴 값. 작게 둡니다 — 로그는 대본 보관소가 아닙니다
+ * @param {object} [o.data] - 이어서 할 때 되살릴 값. 작게 둡니다. 로그는 대본 보관소가 아닙니다
  * @param {boolean} [o.example] - 예시 재생이 남긴 줄. 목록에서 갈라 보여줍니다
  * @returns {object} op
  */
@@ -52,11 +52,11 @@ export function markOp({ step, actor, what, ref = null, refKind = null, data = n
 /*
  * op 한 건 → 사람이 읽는 한 줄.
  *
- * 여기 없는 kind 는 null 을 돌려주고 목록에서 빠집니다. 일부러입니다 — 프레즌스나
+ * 여기 없는 kind 는 null 을 돌려주고 목록에서 빠집니다. 일부러입니다. 프레즌스나
  * 읽음 표시처럼 "한 일"이 아닌 것을 히스토리에 섞으면 목록이 금방 쓸모없어집니다.
  *
  * refKind 는 ref 가 무엇을 가리키는지입니다. 「이어서 하기」가 갈 곳을 정하는 데
- * 씁니다 — panel 이면 보드가 #cut= 으로 그 패널을 열 수 있지만, ep 나 scene 은
+ * 씁니다. panel 이면 보드가 #cut= 으로 그 패널을 열 수 있지만, ep 나 scene 은
  * 패널이 아니라서 그렇게 보내면 없는 패널을 찾다가 엉뚱한 화면에 도착합니다.
  */
 const SAY = {
@@ -94,7 +94,7 @@ const SAY = {
   }),
 
   'comment.add': (op) => ({
-    step: 'board', what: `의견을 남겼습니다 — ${short(op.comment?.body)}`,
+    step: 'board', what: `의견을 남겼습니다. ${short(op.comment?.body)}`,
     ref: op.comment?.panelId, refKind: 'panel',
   }),
 
@@ -173,7 +173,7 @@ export function entries(ops, { who, step, actor, example, limit = 60 } = {}) {
  * 같은 사람이 같은 단계에서 잇달아 한 일을 한 덩어리로 묶습니다.
  *
  * 묶지 않으면 컷 9개를 만든 것이 9줄이 되어 목록이 그것만으로 찹니다. 「이어서 하기」는
- * 덩어리의 가장 최근 ref 를 씁니다 — 그게 그 사람이 마지막으로 손댄 자리입니다.
+ * 덩어리의 가장 최근 ref 를 씁니다. 그게 그 사람이 마지막으로 손댄 자리입니다.
  *
  * @param {Array} list - entries() 의 결과 (최신이 앞)
  * @param {number} [gapMs] - 이만큼 안에 이어진 것만 묶습니다
@@ -213,7 +213,7 @@ export function when(ts, nowMs = Date.now()) {
 
 /*
  * 목록의 모양도 이 파일이 들고 있습니다. 홈과 세 화면이 같은 목록을 보여주는데
- * 화면마다 CSS 를 베껴 두면 한 곳만 고쳐도 나머지가 어긋납니다 — nav-tabs.js 와
+ * 화면마다 CSS 를 베껴 두면 한 곳만 고쳐도 나머지가 어긋납니다. nav-tabs.js 와
  * coach.js 가 같은 방식입니다.
  */
 const CSS = `
@@ -286,7 +286,7 @@ button.hist__row:hover { background: var(--sb-fill, #f8f9fb); }
 }
 .htab__go:hover { border-color: var(--sb-accent, #1a56db); background: var(--sb-accent-soft, #eef2ff); }
 @media (max-width: 720px) {
-  /* 좁은 화면에서는 「이어서」 칸과 단계 칸을 접습니다 — 남는 칸이 프로젝트·한 일·누가입니다 */
+  /* 좁은 화면에서는 「이어서」 칸과 단계 칸을 접습니다. 남는 칸이 프로젝트·한 일·누가입니다 */
   .htab th:nth-child(2), .htab td:nth-child(2) { display: none; }
   .htab th:last-child, .htab td:last-child { display: none; }
 }
@@ -312,7 +312,7 @@ const mk = (t, c, x) => {
 /**
  * 히스토리 목록을 그립니다.
  *
- * onPick 을 주면 각 줄이 버튼이 됩니다 — 「필요한 경우 그걸 선택해 이어서」 하는 자리
+ * onPick 을 주면 각 줄이 버튼이 됩니다. 「필요한 경우 그걸 선택해 이어서」 하는 자리
  * 입니다. 주지 않으면 읽기만 하는 목록입니다. 이어서 갈 수 없는 줄(ref 가 없는 것)은
  * onPick 이 있어도 버튼으로 만들지 않습니다. 눌러도 아무 일 없는 버튼을 두지 않습니다.
  *
@@ -362,7 +362,7 @@ export function paintList(mount, list, { onPick, none = '아직 기록이 없습
  * 이유는 여러 판이 섞여 있을 때 사람이 가장 먼저 묻는 것이 그것이기 때문입니다.
  *
  * <table> 을 쓴 것은 모양 때문이 아닙니다. 칸의 뜻이 머리줄에 적혀 있어서 화면
- * 읽기 프로그램이 각 칸을 「프로젝트: 여름 단편」처럼 읽어 줍니다 — div 를 격자로
+ * 읽기 프로그램이 각 칸을 「프로젝트: 여름 단편」처럼 읽어 줍니다. div 를 격자로
  * 늘어놓으면 그 연결이 사라집니다.
  *
  * @param {HTMLElement} mount
@@ -404,7 +404,7 @@ export function paintTable(mount, list, { onPick, none = '아직 기록이 없�
   for (const e of list) {
     const tr = mk('tr')
 
-    // 프로젝트 칸은 행의 머리입니다 — 나머지 칸이 「무엇에 대한 것인지」를 이것이 말합니다
+    // 프로젝트 칸은 행의 머리입니다. 나머지 칸이 「무엇에 대한 것인지」를 이것이 말합니다
     const pj = mk('th', 'htab__pj', e.pjName || e.boardId || '이름 없는 판')
     pj.scope = 'row'
     tr.append(pj)
@@ -422,7 +422,7 @@ export function paintTable(mount, list, { onPick, none = '아직 기록이 없�
 
     if (onPick) {
       const cell = mk('td')
-      // 이어서 갈 자리가 없는 줄에는 버튼을 두지 않습니다 — 눌러도 아무 일 없는 버튼입니다
+      // 이어서 갈 자리가 없는 줄에는 버튼을 두지 않습니다. 눌러도 아무 일 없는 버튼입니다
       if (e.ref != null || e.boardId) {
         const b = mk('button', 'htab__go', '열기')
         b.type = 'button'

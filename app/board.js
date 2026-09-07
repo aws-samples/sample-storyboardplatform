@@ -157,7 +157,7 @@ let lastTs = 0
  * 프로젝트 카드의 「마지막 손길」을 고칩니다.
  *
  * 무슨 일이었는지는 history.js 가 이미 한 줄로 옮기는 법을 알고 있으므로 그것을 그대로
- * 씁니다 — 카드에 적을 문장을 여기서 또 만들면 목록과 카드가 서로 다른 말을 합니다.
+ * 씁니다. 카드에 적을 문장을 여기서 또 만들면 목록과 카드가 서로 다른 말을 합니다.
  * 히스토리에 넣지 않는 op(프레즌스·읽음 표시 따위)는 toEntry 가 null 을 주고, 그런
  * 것으로는 카드를 건드리지 않습니다. 「본 일」이 아니라서입니다.
  *
@@ -265,7 +265,7 @@ async function resync() {
 
 /*
  * 지나간 op 를 그대로 들고 있는다. state 는 「지금 어떤 모양인지」만 남기고 「누가 뭘
- * 했는지」는 버리기 때문이다 — 판을 만들 때 op 를 접어 넣는 것이 그 일이다.
+ * 했는지」는 버리기 때문이다. 판을 만들 때 op 를 접어 넣는 것이 그 일이다.
  * 히스토리는 접기 전의 것을 봐야 한다. 서버의 로그가 사실이고 이건 그 사본이다.
  */
 const journal = []
@@ -427,7 +427,7 @@ function saveRead() {
 }
 
 /*
- * 로컬 모드의 판 저장 자리. 프로젝트마다 다릅니다 — 한때 'sb.state' 한 칸이었는데,
+ * 로컬 모드의 판 저장 자리. 프로젝트마다 다릅니다. 한때 'sb.state' 한 칸이었는데,
  * 프로젝트 보드가 생긴 뒤로는 그러면 A 를 열었다가 B 를 열면 A 의 컷이 B 에 그대로
  * 나타납니다. 배포 모드는 이 함수를 타지 않습니다(op 로그가 판입니다).
  */
@@ -549,7 +549,7 @@ function seedBuild(opAt = null, tag = 'sd') {
   const mark = (say, sub) => marks.push({ at: ops.length, say, sub })
 
   mark('시나리오를 넣습니다', '기획자 김하나가 15초 브랜드 필름 한 편을 엽니다')
-  add('u1', { kind: 'board.patch', fields: { title: '아침빵집 — 15초 브랜드 필름', scenario: SEED_SCENARIO } })
+  add('u1', { kind: 'board.patch', fields: { title: '아침빵집 · 15초 브랜드 필름', scenario: SEED_SCENARIO } })
 
   mark('인물과 구도를 만듭니다', '인물마다 정면·3/4·측면… 구도가 따로 관리됩니다')
   let ck = null
@@ -886,7 +886,7 @@ async function askGpu(body, path = '') {
   const json = await res.json().catch(() => ({}))
   if (!res.ok) {
     throw new Error(json.detail || (res.status >= 500
-      ? `생성 서버가 꺼져 있습니다 (${res.status}) — GPU를 켜면 그림 외의 기능은 그대로 씁니다`
+      ? `생성 서버가 꺼져 있습니다 (${res.status}). GPU를 켜면 그림 외의 기능은 그대로 씁니다`
       : `생성 서버 오류 (${res.status})`))
   }
   return json
@@ -1066,10 +1066,10 @@ function composerHtml(inputId, cmts = []) {
         ${people().filter((u) => u.id !== me.id)
           .map((u) => `<button class="tag tag--at" data-at="${esc(u.name)}">@${esc(u.name)}</button>`).join('')}
       </div>
-      ${rep ? `<p class="attach"><b>${esc(person(rep.author)?.name || '')}</b>에게 답글 —
+      ${rep ? `<p class="attach"><b>${esc(person(rep.author)?.name || '')}</b>에게 답글:
         ${esc(rep.body.slice(0, 24))}${rep.body.length > 24 ? '…' : ''}
         <button class="mini" data-unreply="1">취소</button></p>` : ''}
-      ${pending.pin || marks ? `<p class="attach">그림 위 표시 붙음 —
+      ${pending.pin || marks ? `<p class="attach">그림 위 표시 붙음:
         ${[pending.pin ? '핀 1' : '', marks ? `그리기 ${marks}` : ''].filter(Boolean).join(' · ')}
         <button class="mini" data-unpin="1">지우기</button></p>` : ''}
       <div class="cmt--new">
@@ -1168,8 +1168,8 @@ function renderHeader() {
     : `${many ? `${epLabel(ep)} · ` : ''}컷 ${list.length} · 승인 ${done}/${list.length}${secs ? ` · ${clock(secs)}` : ''}`
 
   byId('printHead').textContent = [
-    ch ? `${state.board.title} — ${ch.name}`
-      : (many ? `${state.board.title} — ${epLabel(ep)}` : state.board.title),
+    ch ? `${state.board.title} · ${ch.name}`
+      : (many ? `${state.board.title} · ${epLabel(ep)}` : state.board.title),
     ch ? `구도 ${list.length}` : `씬 ${sceneGroups(list).filter((g) => g.name).length || 1} · 컷 ${list.length}`,
     secs ? clock(secs) : '',
     new Date().toLocaleDateString('ko-KR'),
@@ -1362,7 +1362,7 @@ function assignHtml() {
     <h2 class="mono h" style="margin-top:22px">컷 스트립 <span class="count">${rows.length}</span></h2>
     <p class="adm__why">${can
       ? '담당을 바꾸면 그 사람에게 알림이 갑니다. 지금 접속하지 않은 사람에게도 맡길 수 있습니다.'
-      : `${ROLES[me.role] || me.role}는 담당을 지정할 수 없습니다 — ${ACTIONS.assign.roles.map((r) => ROLES[r]).join(' · ')}가 합니다.`}</p>
+      : `${ROLES[me.role] || me.role}는 담당을 지정할 수 없습니다. ${ACTIONS.assign.roles.map((r) => ROLES[r]).join(' · ')}가 합니다.`}</p>
     <div class="adm__filters">
       ${Object.entries(NEEDS).map(([k, f]) => `
         <button class="adm__tab" data-need="${k}" data-on="${k === adminNeed ? 1 : 0}">
@@ -1430,7 +1430,7 @@ function teamHtml() {
 
     <h2 class="mono h">사람 <span class="count">${list.length}</span></h2>
     <p class="adm__why">${grant
-      ? '역할을 바꾸면 그 사람 화면의 권한이 그 자리에서 바뀝니다 — 다시 로그인하지 않습니다.'
+      ? '역할을 바꾸면 그 사람 화면의 권한이 그 자리에서 바뀝니다. 다시 로그인하지 않습니다.'
       : `역할을 지정하는 것은 ${ROLES.admin}입니다. 누가 무엇을 들고 있는지는 아래에서 볼 수 있습니다.`}
       띠의 길이는 남은 일의 수이고, 가장 많이 든 사람이 <b>${rule}건</b>입니다.</p>
     <div class="crew">
@@ -1527,7 +1527,7 @@ function teamHtml() {
             <span class="ldg__bar" aria-hidden="true"><i style="width:${pct(r.n, most)}%"></i></span>
           </li>`).join('')}
       </ul>
-      <p class="adm__note">붉은 줄은 되돌아간 이동입니다 — ${f.back}회 되돌아갔고 ${f.fwd}회 앞으로 갔습니다.
+      <p class="adm__note">붉은 줄은 되돌아간 이동입니다. ${f.back}회 되돌아갔고 ${f.fwd}회 앞으로 갔습니다.
         누가 옮겼는지는 컷마다 기록에 남습니다.</p>`
       : '<p class="adm__note">아직 단계를 옮긴 기록이 없습니다.</p>'}`
 }
@@ -1540,7 +1540,7 @@ function addMember() {
   else if (scrub({ id }).id !== id) adminSay = '아이디에 쓸 수 없는 글자가 있습니다.'
   else {
     emit({ kind: 'member.set', member: { id, name, role, color: tint(id) } })
-    adminSay = `${name}(${id}) — ${ro(ROLES[role])} 명부에 올렸습니다.`
+    adminSay = `${name}(${id}). ${ro(ROLES[role])} 명부에 올렸습니다.`
     announce(adminSay)
   }
   renderAdmin()
@@ -1552,7 +1552,7 @@ function addMember() {
 /**
  * 비어 있을 때의 판. 예시를 보거나 직접 시작합니다.
  *
- * 예시 데이터는 서버에 남고 같은 보드를 보는 사람에게도 보입니다 — push() 가
+ * 예시 데이터는 서버에 남고 같은 보드를 보는 사람에게도 보입니다. push() 가
  * net.sendOp 을 부르기 때문입니다. 그 사실을 버튼 아래에 적어 둡니다. 되돌리려면
  * 관리 화면의 보드 비우기를 씁니다(board.reset).
  */
@@ -1568,7 +1568,7 @@ function welcomePanel() {
     onExample: () => runExample(),
     /*
      * 직접 시작하는 사람에게는 안내를 열지 않습니다. 이미 쓰기로 정한 사람에게 막을
-     * 덮으면 안내가 아니라 걸림돌입니다 — 커서만 시나리오 칸에 둡니다. 거절을 기억하는
+     * 덮으면 안내가 아니라 걸림돌입니다. 커서만 시나리오 칸에 둡니다. 거절을 기억하는
      * 이유는 coach.skip 에 적혀 있습니다.
      */
     onOwn: () => {
@@ -1585,14 +1585,14 @@ let exampleRun = null
 /*
  * 단계마다 짚을 자리. seedBuild 의 표시(marks)와 같은 순서입니다.
  *
- * 여기 적힌 자리는 모두 board.html 에 처음부터 있는 것들입니다 — render() 가 다시 그려도
+ * 여기 적힌 자리는 모두 board.html 에 처음부터 있는 것들입니다. render() 가 다시 그려도
  * 사라지지 않아야 테가 남습니다. 자리를 못 찾으면 onboard 가 테 없이 넘어갑니다.
  */
 const EXAMPLE_SPOTS = ['scenario', '#newChar', '#breakdown', 'board']
 
 /*
  * 그 단계에서 기다릴 초와, 기다려서 나온 것을 보여 줄 걸음. 모델을 부르는 자리에만
- * 답니다 — 「컷으로 분해」가 그렇습니다. 예시는 미리 만들어 둔 op 를 밀어 넣으므로
+ * 답니다. 「컷으로 분해」가 그렇습니다. 예시는 미리 만들어 둔 op 를 밀어 넣으므로
  * 실제로는 즉시 끝나지만, 그렇게 보여 주면 직접 할 때의 기다림을 고장으로 읽게 됩니다.
  * 그리고 기다린 것을 보지 못한 채 다음 설명으로 넘어가면 그 3초가 헛것이 됩니다
  * (app/onboard.js 머리글의 wait 와 done).
@@ -1603,14 +1603,14 @@ const EXAMPLE_WAITS = {
     waitSay: '시나리오를 컷으로 나누고 있습니다',
     done: {
       say: '컷이 만들어졌습니다',
-      sub: '빈 줄이 컷 경계였습니다. 컷은 씬으로 묶이고 시간이 매겨집니다 — 컷을 눌러 '
+      sub: '빈 줄이 컷 경계였습니다. 컷은 씬으로 묶이고 시간이 매겨집니다. 컷을 눌러 '
         + '오른쪽에서 대사와 지시를 고칩니다',
       see: 'board',
       // 인물 구도도 같은 panels 에 삽니다(charId 가 붙습니다). 컷만 셉니다
       got: () => `컷 ${Object.values(state.panels).filter((p) => !p.charId).length}개`,
       /*
        * 이 화면의 값은 모델이 아니라 판 자체입니다. 컷이 서는 것을 본 자리에서 한 번
-       * 적어 둡니다 — 앞의 두 화면에서 「무엇을 맡기고 무엇을 직접 드는지」를 말했으니
+       * 적어 둡니다. 앞의 두 화면에서 「무엇을 맡기고 무엇을 직접 드는지」를 말했으니
        * 여기서는 「만든 것이 어디에 쌓이는지」를 말합니다(onboard.js 의 note).
        */
       note: {
@@ -1628,7 +1628,7 @@ const EXAMPLE_WAITS = {
  *
  * 부르는 곳이 세 군데(빈 화면의 버튼·코치마크·직접)라 눌린 자리의 원래 동작은 onboard 가
  * 막습니다. 예를 들어 「컷으로 분해」를 짚었을 때 눌러도 진짜 분해가 도는 게 아니라 아래
- * run 이 돕니다 — 예시가 실제 대본을 건드리지 않게 하려는 것입니다.
+ * run 이 돕니다. 예시가 실제 대본을 건드리지 않게 하려는 것입니다.
  */
 function runExample() {
   if (exampleRun) return
@@ -1647,14 +1647,14 @@ function runExample() {
       },
     }
   })
-  // 끝은 말풍선의 버튼으로 냅니다 — 나가는 일과 짚은 자리를 누르는 일을 가릅니다
+  // 끝은 말풍선의 버튼으로 냅니다. 나가는 일과 짚은 자리를 누르는 일을 가릅니다
   steps.push({
     say: demoActive() ? '스토리보드까지 다 보셨습니다' : '여기까지가 예시입니다',
     sub: demoActive()
       ? demoSay('board')
       : '이제 컷을 눌러 오른쪽에서 고치거나, 관리 화면에서 보드를 비우고 직접 시작할 수 있습니다',
     see: 'histbox',
-    // 보드가 마지막 걸음이라 여기서는 두 갈래가 같은 곳으로 갑니다 — 홈으로 돌아갑니다
+    // 보드가 마지막 걸음이라 여기서는 두 갈래가 같은 곳으로 갑니다. 홈으로 돌아갑니다
     go: demoActive() ? '예시를 마치고 홈으로' : '예시 마치기',
     leaves: demoActive(),
     run: () => { pickView(); render() },
@@ -1665,7 +1665,7 @@ function runExample() {
       exampleRun = null
       render()
       /*
-       * 예시 프로젝트를 밟고 있으면 다음 화면으로 넘어간다 — 보드는 마지막 단계라
+       * 예시 프로젝트를 밟고 있으면 다음 화면으로 넘어간다. 보드는 마지막 단계라
        * 홈으로 돌아간다(demo.js 의 DEMO_STEPS). 그때는 코치마크를 열지 않는다.
        * 화면을 떠나는 중에 막을 덮으면 한 번 반짝하고 사라진다.
        */
@@ -1678,7 +1678,7 @@ function runExample() {
 }
 
 /*
- * 코치마크 넉 장. 지금 화면에 실제로 있는 것만 가리킨다 — 앵커가 없는 장은 coach.js 가
+ * 코치마크 넉 장. 지금 화면에 실제로 있는 것만 가리킨다. 앵커가 없는 장은 coach.js 가
  * 조용히 건너뛴다. 그래서 비어 있을 때 열면 시나리오 칸과 탭만 나오고, 예시를 본
  * 뒤에 열면 컷과 상세까지 넉 장이 다 나온다.
  */
@@ -1720,7 +1720,7 @@ let histMine = false
 
 /**
  * 히스토리. 「내 것만」으로 좁히면 이 화면에서 내가 등록한 목록이 되고, 줄을 누르면
- * 그 컷으로 갑니다 — 이어서 하는 자리입니다.
+ * 그 컷으로 갑니다. 이어서 하는 자리입니다.
  */
 function renderHist() {
   const box = byId('hist')
@@ -1762,13 +1762,13 @@ function renderBoard() {
 
   /*
    * 보드가 통째로 비어 있는 것과, 인물 하나에 구도가 없는 것은 다른 상황이다.
-   * 앞쪽만 「처음 오셨나요?」를 띄운다 — 뒤쪽은 이미 판이 있고 한 칸이 빈 것이라
+   * 앞쪽만 「처음 오셨나요?」를 띄운다. 뒤쪽은 이미 판이 있고 한 칸이 빈 것이라
    * 온보딩이 아니라 짧은 안내가 맞다.
    *
    * 아래 keep 루프가 board--empty 를 list 가 찼을 때 지우므로 이 판도 같은 클래스를
    * 달고 있어야 예시가 들어오는 순간 알아서 사라진다.
    */
-  // 예시 프로젝트로 들어온 것이면 「처음 오셨나요?」 판을 띄우지 않는다 — 같은 것을
+  // 예시 프로젝트로 들어온 것이면 「처음 오셨나요?」 판을 띄우지 않는다. 같은 것을
   // 두 번 묻는 셈이고, render 가 runExample 보다 먼저 지나 한 프레임 깜빡인다
   const blank = !Object.keys(state.panels).length && !Object.keys(state.chars).length && !demoActive()
   if (!list.length) {
@@ -1900,8 +1900,8 @@ function renderPeers() {
   const alone = peers.size === 0
   const off = link === 'down'
   byId('liveFlag').textContent = unsent
-    ? `저장 대기 ${unsent}건 — 다시 보내는 중`
-    : off ? '연결 끊김 — 재연결 중' : alone ? '나 혼자' : `${peers.size + 1}명 접속`
+    ? `저장 대기 ${unsent}건 · 다시 보내는 중`
+    : off ? '연결 끊김 · 재연결 중' : alone ? '나 혼자' : `${peers.size + 1}명 접속`
   byId('liveFlag').className = `mono tape${unsent ? ' tape--warn' : alone || off ? ' tape--off' : ''}`
 }
 
@@ -1929,7 +1929,7 @@ const planBase = () => planSpec.mode === 'new' && !hasStory()
 const planCtx = () => {
   const ep = state.eps[viewEp]
   return {
-    title: [state.board.title, ep?.title].filter(Boolean).join(' — '),
+    title: [state.board.title, ep?.title].filter(Boolean).join(' · '),
     scenario: (ep ? ep.scenario : state.board.scenario) || '',
     chars: charList().map((c) => ({ name: c.name, brief: c.brief })),
     centerName: state.chars[planSpec.center]?.name || '',
@@ -2008,7 +2008,7 @@ function renderPlan() {
     ${planMsg ? `<p class="why">${esc(planMsg)}</p>` : ''}
     <p class="adm__note">${net?.plan
       ? '개요는 10초쯤 걸립니다. 만들어진 뒤에 읽어보고 결정하세요.'
-      : '로컬 모드입니다 — 모델이 없어 프롬프트를 잘라 뼈대만 만듭니다. 진짜 기획은 배포된 판에서 됩니다.'}</p>`)
+      : '로컬 모드입니다. 모델이 없어 프롬프트를 잘라 뼈대만 만듭니다. 진짜 기획은 배포된 판에서 됩니다.'}</p>`)
 }
 
 function renderPlanReview(body) {
@@ -2056,7 +2056,7 @@ async function runPlan(step) {
     if (step === 'outline') {
       planOut = await planOutline(net, planSpec, planCtx())
       planStep = 'review'
-      planMsg = planOut.local ? '로컬 모드 예시입니다 — 문장을 잘라 만든 뼈대입니다.' : ''
+      planMsg = planOut.local ? '로컬 모드 예시입니다. 문장을 잘라 만든 뼈대입니다.' : ''
     } else {
       const cuts = await planCuts(net, planSpec, planOut)
       if (!cuts.length) throw new Error('컷을 받지 못했습니다. 다시 시도해 주세요.')
@@ -2163,7 +2163,7 @@ function renderBell() {
   byId('bell').dataset.unread = u ? '1' : '0'
   byId('bellN').textContent = u
   byId('bell').setAttribute('aria-label',
-    u ? `알림 ${u}건 — 확인이 필요합니다` : unread.length ? `알림 ${unread.length}건 — 읽지 않음` : '알림 없음')
+    u ? `알림 ${u}건. 확인이 필요합니다` : unread.length ? `알림 ${unread.length}건. 읽지 않음` : '알림 없음')
 }
 
 function renderNotifs() {
@@ -2228,7 +2228,7 @@ function lostRow(panelId, field) {
   const l = LOST.get(key)
   if (!l) return ''
   return `<div class="lost">
-    <span class="lost__head">${esc(person(l.by)?.name || '누군가')}의 편집이 이 칸을 덮었습니다 — 내가 쓴 문장:</span>
+    <span class="lost__head">${esc(person(l.by)?.name || '누군가')}의 편집이 이 칸을 덮었습니다. 내가 쓴 문장:</span>
     <span class="lost__text">${esc(l.text)}</span>
     <span class="lost__acts">
       <button class="cmt__resolve" data-lost="${key}" data-lostdo="restore">내 문장으로 되돌리기</button>
@@ -2367,7 +2367,7 @@ function renderViewer() {
           <p class="why">${tool === 'pin'
             ? '그림을 클릭하면 그 지점에 메모를 달 수 있습니다.'
             : '그림 위에 드래그하면 선이 그려집니다. 메모를 남길 때 함께 붙습니다.'}</p>
-          <p class="why">표시는 그때 보던 버전에 달립니다 — 다른 버전의 핀은 그 버전에서 보입니다.</p>
+          <p class="why">표시는 그때 보던 버전에 달립니다. 다른 버전의 핀은 그 버전에서 보입니다.</p>
         </aside>
       </div>
     </div>`)
@@ -2426,7 +2426,7 @@ function renderDetail() {
 
   const picked = modelOf(pickedModel) || modelOf(gpu.resident)
   const modelNote = !picked ? '' : `
-    <p class="why">지금 그리는 모델: ${esc(picked.label)} — ${esc(picked.note)}.${
+    <p class="why">지금 그리는 모델: ${esc(picked.label)} · ${esc(picked.note)}.${
   picked.id === gpu.resident ? ' 위쪽 모델 칩에서 바꿉니다.'
     : ` 아직 올라오지 않았습니다(약 ${mins(picked.wait)}분).`}</p>`
 
@@ -2445,7 +2445,7 @@ function renderDetail() {
     </div>
     ${modelNote}
     ${o.ref === 'none' ? '' : picked && picked.strength === false ? `
-      <p class="why">${esc(picked.label)}은 기반 이미지를 지우고 다시 그리지 않습니다 — 조건으로 받아서 인물을 그대로 살립니다. 그래서 변형 정도가 없습니다.</p>` : `
+      <p class="why">${esc(picked.label)}은 기반 이미지를 지우고 다시 그리지 않습니다. 조건으로 받아서 인물을 그대로 살립니다. 그래서 변형 정도가 없습니다.</p>` : `
       <div class="gen__row">
         <span class="mono gen__lab">변형 정도</span>
         <input type="range" id="genStrength" min="0.75" max="0.95" step="0.1" value="${o.strength}" ${editable ? '' : 'disabled'}>
@@ -2461,7 +2461,7 @@ function renderDetail() {
     ${p.genError ? `<p class="why why--bad">${esc(p.genError)}</p>` : hint ? `<p class="why">${esc(hint)}</p>` : ''}`
 
   const rmWhy = !ver ? '먼저 이미지가 있어야 합니다'
-    : !ver.vid ? '옛 캐시의 버전입니다 — 새로고침하면 지울 수 있습니다'
+    : !ver.vid ? '옛 캐시의 버전입니다. 새로고침하면 지울 수 있습니다'
       : !editable ? (p.status === 'approved' ? '승인된 컷은 먼저 승인을 해제해야 합니다' : `${ROLES[me.role]}는 지울 수 없습니다`)
         : ''
 
@@ -2542,7 +2542,7 @@ function renderDetail() {
         <span class="detail__status" data-tone="${st.tone}">${esc(st.label)}</span>
       </div>
       ${editable ? '' : `<p class="why why--why">${p.status === 'approved'
-        ? '승인된 컷입니다 — 내용을 고치려면 먼저 승인을 해제해야 합니다.'
+        ? '승인된 컷입니다. 내용을 고치려면 먼저 승인을 해제해야 합니다.'
         : `${ROLES[me.role]}는 내용을 고칠 수 없습니다. 의견은 아래 메모로 남겨주세요.`}</p>`}
 
       <label class="f">
@@ -3016,7 +3016,7 @@ detail.addEventListener('click', async (e) => {
     if (!cur || !cur.ver.vid) return
     if (!canEditContent(me.role, p)) {
       byId('actWhy').textContent = p.status === 'approved'
-        ? '승인된 컷입니다 — 이미지를 지우려면 먼저 승인을 해제해야 합니다.'
+        ? '승인된 컷입니다. 이미지를 지우려면 먼저 승인을 해제해야 합니다.'
         : `${ROLES[me.role]}는 이미지를 지울 수 없습니다.`
       return
     }
@@ -3027,7 +3027,7 @@ detail.addEventListener('click', async (e) => {
     if (!confirm([
       `v${n}을 보드에서 지웁니다. 되돌릴 수 없습니다.`,
       onIt ? `이 버전에 달린 메모 ${onIt}건은 남지만 가리킬 그림이 없어집니다.` : '',
-      isAnchor ? '이 인물의 기준 이미지가 없어집니다 — 다음 구도 생성이 얼굴을 참조하지 못합니다.' : '',
+      isAnchor ? '이 인물의 기준 이미지가 없어집니다. 다음 구도 생성이 얼굴을 참조하지 못합니다.' : '',
       left ? `남는 버전 ${left}개.` : '남는 버전이 없습니다.',
     ].filter(Boolean).join('\n'))) return
     emit({ kind: 'panel.version.remove', panelId: p.id, verId: cur.ver.vid })
@@ -3267,7 +3267,7 @@ function pickMe() {
   const gate = byId('gate')
   setHtml(gate, `
     <div class="gate__card">
-      <div class="gate__eyebrow">아침빵집 — 15초 브랜드 필름</div>
+      <div class="gate__eyebrow">아침빵집 · 15초 브랜드 필름</div>
       <h2 class="gate__title">누구로 참여하시겠어요?</h2>
       <p class="gate__sub">역할에 따라 할 수 있는 일이 다릅니다. 같은 보드를 함께 보고, 서로의 작업이 실시간으로 보입니다.</p>
       <div class="gate__list">
@@ -3331,8 +3331,7 @@ async function boot() {
    * 작업판 앞에 프로젝트 보드를 세웁니다. 주소에 ?board= 가 있으면(카드를 눌러 왔거나
    * 링크를 받았으면) 아무것도 뜨지 않고 그대로 지나갑니다.
    *
-   * 고르면 그 주소로 화면을 다시 여는 것이라, 여기서 await 이 끝나지 않습니다 —
-   * 아래의 net.connect 도 로그 재생도 시작하지 않습니다. 일부러입니다. 어느 보드인지
+   * 고르면 그 주소로 화면을 다시 여는 것이라, 여기서 await 이 끝나지 않습니다. * 아래의 net.connect 도 로그 재생도 시작하지 않습니다. 일부러입니다. 어느 보드인지
    * 모르는 채로 소켓을 열고 판을 세우면, 고른 뒤에 그것을 다 물려야 합니다.
    */
   await pickProject({ step: 'board', actor: me?.id, who: (id) => person(id) })
@@ -3382,14 +3381,14 @@ async function boot() {
   beat()
 
   /*
-   * 처음 온 사람에게 코치마크를 연다. 단, 보드가 비어 있으면 열지 않는다 — 그때는
+   * 처음 온 사람에게 코치마크를 연다. 단, 보드가 비어 있으면 열지 않는다. 그때는
    * 화면에 「처음 오셨나요?」 판이 있고, 그 판이 두 갈래를 이미 말해 준다. 막을 덮어
    * 그 판을 가릴 이유가 없다. 예시를 보거나 직접 시작하면 그 뒤에 코치마크가 열린다.
    */
   if (demoActive()) {
     /*
      * 예시 프로젝트가 이 화면으로 데려온 것이다. 사람이 「예시 보기」를 한 번 더 누를
-     * 이유가 없으므로 바로 시작한다. 판에 이미 컷이 있어도 시작한다 — 앞의 단계에서
+     * 이유가 없으므로 바로 시작한다. 판에 이미 컷이 있어도 시작한다. 앞의 단계에서
      * 넘어온 길이고, 예시는 예시 판에만 쌓인다(demo.js 의 DEMO_BOARD).
      */
     runExample()

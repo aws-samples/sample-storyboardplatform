@@ -1,11 +1,11 @@
 
 // 그래프 판 그리기. 외부 라이브러리 없이 캔버스 하나로 돈다.
 //
-// 노드는 구체로 그린다 — 왼쪽 위에서 빛이 들어오는 radial gradient, 위쪽의 반사 점,
+// 노드는 구체로 그린다. 왼쪽 위에서 빛이 들어오는 radial gradient, 위쪽의 반사 점,
 // 아래의 눌린 그림자. 떠 있는 것처럼 보이는 것이 목적이다. 엣지는 살짝 휜 곡선이고
 // 명시는 실선, 파생은 점선이다. 관계 라벨은 모든 엣지 위에 항상 띄운다 (한국어 서술로).
 //
-// 역기입으로 자란 자리는 markNew 로 표시한다 — 새 노드는 녹색 테두리가 반짝이고
+// 역기입으로 자란 자리는 markNew 로 표시한다. 새 노드는 녹색 테두리가 반짝이고
 // NEW 뱃지가 붙고, 새 엣지는 굵은 녹색, 끊긴 엣지는 붉은 점선으로 잠깐 남았다 사라진다.
 //
 // 좌표는 두 겹이다: 배치와 그리기는 월드 좌표에서 하고, 화면에는 {scale, tx, ty} 로
@@ -33,14 +33,13 @@ export const KIND_LABEL = {
   Event: '사건', Secret: '비밀', Object: '사물',
 }
 
-/** 종류별 반지름. 인물이 가장 크다 — 이야기의 무게가 인물에 있다 */
+/** 종류별 반지름. 인물이 가장 크다. 이야기의 무게가 인물에 있다 */
 const KIND_R = {
   Character: 25, Faction: 21, Location: 20, Event: 20, Secret: 19, Object: 17,
 }
 
 /*
- * 캔버스 색. 여기는 CSS 가 아니라 2D 컨텍스트라서 var(--sb-*) 를 쓸 수 없다 —
- * theme.css 의 값을 그대로 적어 둔다. 그쪽을 고치면 여기도 같이 고쳐야 한다.
+ * 캔버스 색. 여기는 CSS 가 아니라 2D 컨텍스트라서 var(--sb-*) 를 쓸 수 없다. * theme.css 의 값을 그대로 적어 둔다. 그쪽을 고치면 여기도 같이 고쳐야 한다.
  * 노드 구체 색(KIND_COLOR)만 예외로 남긴다. 여섯 종류를 서로 구별하는 색이라
  * 강조 한 가지로 모으면 그래프를 읽을 수 없다.
  */
@@ -65,9 +64,9 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
 // ── 엣지 라벨 ────────────────────────────────────────────────────────────────
 /**
  * 술어를 "A ─라벨→ B" 로 읽었을 때 자연스러운 한국어 서술로 옮긴다.
- * 조사는 목적어(B) 쪽에 붙는다 — "홍해인 ─을 은닉함→ 시한부 비밀",
+ * 조사는 목적어(B) 쪽에 붙는다. "홍해인 ─을 은닉함→ 시한부 비밀",
  * "윤은성 ─을 보좌함→ 홍해인" 처럼 화살표를 따라 그대로 읽힌다.
- * 여기 없는 술어는 원본 영문 그대로 보여 준다 — 어휘가 늘어도 라벨이 비지 않는다.
+ * 여기 없는 술어는 원본 영문 그대로 보여 준다. 어휘가 늘어도 라벨이 비지 않는다.
  */
 export const EDGE_LABELS_KR = {
   loves: '을 사랑함',
@@ -180,7 +179,7 @@ function layout(nodes, links, w, h, iterations) {
     return
   }
   const k = Math.sqrt((w * h) / n) * 0.62
-  // 자리가 없는 노드는 황금각 나선에 놓는다 — 난수를 안 써서 다시 그려도 같은 모양이다
+  // 자리가 없는 노드는 황금각 나선에 놓는다. 난수를 안 써서 다시 그려도 같은 모양이다
   let seq = 0
   for (const nd of nodes) {
     if (Number.isFinite(nd.x) && Number.isFinite(nd.y)) continue
@@ -398,8 +397,7 @@ export function createGraphView(host, opts = {}) {
   }
 
   /**
-   * 끊긴 엣지 자리. 붉은 점선으로 잠깐 남았다 페이드아웃한다 —
-   * 역기입에서 무엇이 사라졌는지 판에서 눈으로 확인할 자리다.
+   * 끊긴 엣지 자리. 붉은 점선으로 잠깐 남았다 페이드아웃한다. * 역기입에서 무엇이 사라졌는지 판에서 눈으로 확인할 자리다.
    */
   function paintGhost(g) {
     const t = clamp((tick - g.t0) / GHOST_MS, 0, 1)
@@ -457,12 +455,12 @@ export function createGraphView(host, opts = {}) {
   function placeLabel(e, placed) {
     const c = ctrl(e)
     const { p1, p2 } = endpoints(e, c)
-    // 곡선의 법선. 휜 쪽(bow) 바깥으로 띄운다 — 같은 쌍의 엣지끼리 라벨이 갈라 앉는다
+    // 곡선의 법선. 휜 쪽(bow) 바깥으로 띄운다. 같은 쌍의 엣지끼리 라벨이 갈라 앉는다
     const side = e.bow < 0 ? -1 : 1
 
     const on = e === hoverEdge
     const font = on ? LBL_FONT_ON : LBL_FONT
-    // 파생이라는 꼬리는 얹었을 때만 붙인다 — 평소에는 점선과 회색 글씨가 그 말을 한다
+    // 파생이라는 꼬리는 얹었을 때만 붙인다. 평소에는 점선과 회색 글씨가 그 말을 한다
     const text = on && !e.asserted ? `${e.label} · 추론` : e.label
     const w = measure(text, font) + LBL_PAD * 2
     const h = on ? LBL_H + 3 : LBL_H
@@ -489,7 +487,7 @@ export function createGraphView(host, opts = {}) {
   }
 
   /**
-   * 라벨이 피해야 하는 자리 — 구체와 노드 이름. 이름은 알약 위에 그려지기 때문에
+   * 라벨이 피해야 하는 자리 · 구체와 노드 이름. 이름은 알약 위에 그려지기 때문에
    * 여기서 미리 비켜 두지 않으면 글자가 겹쳐 읽히지 않는다.
    */
   function nodeObstacles() {
@@ -565,7 +563,7 @@ export function createGraphView(host, opts = {}) {
     const x = nd.x
     const y = nd.y
 
-    // 바닥 그림자 — 눌린 타원. 이것이 "떠 있다" 를 만든다
+    // 바닥 그림자 · 눌린 타원. 이것이 "떠 있다" 를 만든다
     ctx.save()
     ctx.translate(x, y + r * 0.95)
     ctx.scale(1, 0.3)
@@ -604,7 +602,7 @@ export function createGraphView(host, opts = {}) {
       ctx.stroke()
     }
 
-    // 구체 본체 — 빛은 왼쪽 위에서 든다
+    // 구체 본체. 빛은 왼쪽 위에서 든다
     const g = ctx.createRadialGradient(x - r * 0.4, y - r * 0.45, r * 0.05, x, y, r * 1.12)
     g.addColorStop(0, shade(base, 0.62))
     g.addColorStop(0.42, base)
@@ -630,7 +628,7 @@ export function createGraphView(host, opts = {}) {
     ctx.fill()
   }
 
-  /** 노드 이름. 이것도 화면 좌표다 — 흰 테두리를 깔아 판 위에서 또렷하게 읽힌다 */
+  /** 노드 이름. 이것도 화면 좌표다. 흰 테두리를 깔아 판 위에서 또렷하게 읽힌다 */
   function paintLabel(nd) {
     const r = nd.r * (1 + 0.1 * nd.hot)
     ctx.save()
@@ -695,13 +693,13 @@ export function createGraphView(host, opts = {}) {
     if (hoverNode) paintNode(hoverNode)
     ctx.restore()
 
-    // 라벨은 화면 좌표로 그린다 — 확대해도 글자 크기가 그대로 읽힌다.
+    // 라벨은 화면 좌표로 그린다. 확대해도 글자 크기가 그대로 읽힌다.
     // 엣지 라벨 → 노드 이름 순이다. 노드 이름이 알약에 가려지지 않게 나중에 그린다
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     const hoverPill = paintEdgeLabels(w, h)
     for (const nd of nodes) if (nd !== hoverNode) paintLabel(nd)
     if (hoverNode) paintLabel(hoverNode)
-    // 얹은 엣지의 라벨만 이름 위로 올린다 — 지금 읽으려는 것이 그것이다
+    // 얹은 엣지의 라벨만 이름 위로 올린다. 지금 읽으려는 것이 그것이다
     if (hoverPill && !hoverNode) paintPill(hoverPill)
     for (const nd of nodes) if (marks.nodes.has(nd.id)) paintNewBadge(nd)
   }
@@ -743,7 +741,7 @@ export function createGraphView(host, opts = {}) {
     }
     if (marks.t0) {
       if (now - marks.t0 < PULSE_MS) busy = true
-      // 반짝임이 끝났다 — 정지한 녹색 테두리로 한 번 더 그려 두고 멈춘다
+      // 반짝임이 끝났다. 정지한 녹색 테두리로 한 번 더 그려 두고 멈춘다
       else { marks.t0 = 0; dirty = true }
     }
     if (!dirty && !busy) return
@@ -931,7 +929,7 @@ export function createGraphView(host, opts = {}) {
 
     /**
      * 역기입으로 자란 자리를 판에 표시한다. graphDelta 의 결과를 그대로 받는다.
-     * render 다음에 부른다 — 판을 갈아 끼울 때 표시가 지워지기 때문이다.
+     * render 다음에 부른다. 판을 갈아 끼울 때 표시가 지워지기 때문이다.
      *
      * @param {{nodes?: Array<string>, edges?: Array<string>, removed?: Array<{s: string, o: string, p: string}>}} delta
      */

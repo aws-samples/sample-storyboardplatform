@@ -29,7 +29,7 @@ const JSON_ONLY = '오직 아래 모양의 JSON 하나만 출력한다. 설명·
 
 // 프롬프트 길이는 두 군데서 막힌다.
 //  1) infra/resolvers/plan.js 가 8000자를 넘는 프롬프트를 BadRequest 로 튕긴다.
-//  2) AppSync HTTP 데이터소스(Bedrock)는 30초 안에 끝나야 한다 — 넘으면 Execution timeout 이다.
+//  2) AppSync HTTP 데이터소스(Bedrock)는 30초 안에 끝나야 한다. 넘으면 Execution timeout 이다.
 // 아래 상한이 (1) 을 코드로 못 박는 자리고, 응답 토큰 상한이 (2) 를 잡는다.
 /** plan 리졸버가 받는 프롬프트 상한 */
 const PROMPT_MAX = 8000
@@ -38,7 +38,7 @@ const PROMPT_SAFE = PROMPT_MAX - 400
 
 /**
  * 머리말·꼬리말 사이에 길이가 들쭉날쭉한 본문(대본 조각·컨텍스트 팩)을 끼운다.
- * 프롬프트가 PROMPT_MAX 를 넘지 않도록 본문만 자른다 — 출력 모양과 규칙을 자르면
+ * 프롬프트가 PROMPT_MAX 를 넘지 않도록 본문만 자른다. 출력 모양과 규칙을 자르면
  * 응답이 깨지므로 건드리지 않는다.
  *
  * @param {Array<string>} head - 본문 앞에 오는 줄들
@@ -100,7 +100,7 @@ export function outlinePrompt(spec, ctx) {
 export function cutsPrompt(spec, outline, beats, from, per) {
   const secs = beats.reduce((a, b) => a + b.secs, 0)
   const lines = beats.map((b, i) =>
-    `${from + i + 1}. ${b.scene || `S${from + i + 1}`} — ${b.action} (${b.secs}초, 등장: ${b.cast.join(', ') || '없음'})`)
+    `${from + i + 1}. ${b.scene || `S${from + i + 1}`} · ${b.action} (${b.secs}초, 등장: ${b.cast.join(', ') || '없음'})`)
 
   return [
     '아래 이야기의 비트를 콘티 컷으로 펼친다.',
@@ -134,8 +134,8 @@ const GRAPH_MAX_CHUNKS = 12
 /** 프롬프트에 적는 기존 노드 줄 수 상한. 판이 커도 꼬리말이 본문을 밀어내지 않게 한다 */
 const KNOWN_MAX = 40
 
-const relLines = () => GRAPH_SCHEMA.assertableRels.map((p) => `  ${p} — ${GRAPH_SCHEMA.rels[p].desc}`).join('\n')
-const kindLines = () => GRAPH_SCHEMA.nodeKinds.map((k) => `  ${k} — ${GRAPH_SCHEMA.nodeKindDesc[k]}`).join('\n')
+const relLines = () => GRAPH_SCHEMA.assertableRels.map((p) => `  ${p} · ${GRAPH_SCHEMA.rels[p].desc}`).join('\n')
+const kindLines = () => GRAPH_SCHEMA.nodeKinds.map((k) => `  ${k} · ${GRAPH_SCHEMA.nodeKindDesc[k]}`).join('\n')
 const knownLines = (known) => {
   const list = known || []
   if (!list.length) return '(없음)'
@@ -306,8 +306,7 @@ export function summarizePrompt(text, opts = {}) {
 
 /**
  * 긴 대본을 그래프 추출에 넣을 요약본으로 줄인다. planGraph 의 1단계다.
- * 원문이 한 프롬프트에 들어가지 않으면 조각으로 나눠 요약하고 이어 붙인다 —
- * 조각마다 그래프를 뽑는 것보다 이쪽이 싸고, 이어 붙인 요약은 한 번에 추출된다.
+ * 원문이 한 프롬프트에 들어가지 않으면 조각으로 나눠 요약하고 이어 붙인다. * 조각마다 그래프를 뽑는 것보다 이쪽이 싸고, 이어 붙인 요약은 한 번에 추출된다.
  *
  * @param {Object} net - net.plan({prompt, maxTokens, think}) 를 가진 객체
  * @param {string} source - 대본 평문 (scriptToText 를 먼저 거친 것)
@@ -338,7 +337,7 @@ export async function summarizeForExtraction(net, source, ctx = {}) {
   got.forEach((r, i) => {
     const body = r.status === 'fulfilled' ? String(r.value?.text ?? '').trim() : ''
     if (!body) {
-      warnings.push(`${i + 1}/${parts.length} 조각 요약 실패 — 건너뛴다: ${r.reason?.message || ''}`)
+      warnings.push(`${i + 1}/${parts.length} 조각 요약 실패 · 건너뛴다: ${r.reason?.message || ''}`)
       return
     }
     out.push(body)
@@ -351,7 +350,7 @@ export async function summarizeForExtraction(net, source, ctx = {}) {
  * 텍스트에서 그래프를 뽑아 app-walkthrough/data/graph.json 과 같은 모양으로 돌려준다.
  * 뽑은 것(asserted)에 deriveEdges 의 파생 엣지를 붙여서 준다.
  *
- * 텍스트가 SUMMARY_MIN 자 이상이면 두 단계로 돈다 — 먼저 요약해서 줄이고, 그
+ * 텍스트가 SUMMARY_MIN 자 이상이면 두 단계로 돈다. 먼저 요약해서 줄이고, 그
  * 요약본에서 그래프를 뽑는다. 요약이 실패하면 예전처럼 원문을 조각내서 뽑는다.
  * 그보다 짧으면 요약 없이 바로 뽑는다.
  *
@@ -372,9 +371,9 @@ export async function planGraph(net, source, ctx = {}) {
   const warnings = []
   let body = text
   if (text.length >= SUMMARY_MIN) {
-    // 요약이 안 되면 추출까지 같이 죽이지 않는다 — 조각내서 뽑는 예전 길로 내려간다
+    // 요약이 안 되면 추출까지 같이 죽이지 않는다. 조각내서 뽑는 예전 길로 내려간다
     const sum = await summarizeForExtraction(net, text, ctx).catch((err) => {
-      warnings.push(`대본 요약 실패 — 원문을 조각내서 뽑는다: ${err.message || ''}`)
+      warnings.push(`대본 요약 실패 · 원문을 조각내서 뽑는다: ${err.message || ''}`)
       return null
     })
     if (sum) {
@@ -399,7 +398,7 @@ export async function planGraph(net, source, ctx = {}) {
   const raws = []
   got.forEach((r, i) => {
     if (r.status === 'rejected') {
-      warnings.push(`${i + 1}/${parts.length} 조각 추출 실패 — 건너뛴다: ${r.reason?.message || ''}`)
+      warnings.push(`${i + 1}/${parts.length} 조각 추출 실패 · 건너뛴다: ${r.reason?.message || ''}`)
       return
     }
     raws.push(r.value)
@@ -495,7 +494,7 @@ const edgeLine = (store, e) => {
   const arrow = GRAPH_SCHEMA.rels[e.p]?.dir === 'sym' ? '↔' : '→'
   const t = e.props?.tension
   const mark = e.asserted === false ? `추론${e.props?.derived_by ? ` ${e.props.derived_by}` : ''}` : '명시'
-  const why = e.props?.cause ? ` — ${e.props.cause}` : ''
+  const why = e.props?.cause ? ` · ${e.props.cause}` : ''
   return `- ${nm(store, e.s)} ${arrow} ${nm(store, e.o)} : ${e.p}`
     + `${t === undefined ? '' : ` (긴장 ${t})`} [${mark}]${why}`
 }
@@ -533,11 +532,11 @@ export function contextPackPrompt(seed, store, opts = {}) {
     const p = n.props || {}
     const head = [p.age ? `${p.age}세` : null, p.role].filter(Boolean).join(', ')
     const desc = oneLine(p.desc, CTX_DESC)
-    return `- ${n.name}${head ? ` (${head})` : ''}${desc ? ` — ${desc}` : ''}`
+    return `- ${n.name}${head ? ` (${head})` : ''}${desc ? ` · ${desc}` : ''}`
   })
   const groups = [...kind('Faction'), ...kind('Location'), ...kind('Object')].map((n) => {
     const desc = oneLine(n.props?.desc, CTX_DESC)
-    return `- ${n.name} (${n.kind})${desc ? ` — ${desc}` : ''}`
+    return `- ${n.name} (${n.kind})${desc ? ` · ${desc}` : ''}`
   })
 
   const isSide = (id) => ['Secret', 'Event'].includes(store.getNode(id)?.kind)
@@ -551,8 +550,8 @@ export function contextPackPrompt(seed, store, opts = {}) {
         .filter((e) => ['caused', 'enabled', 'resolves'].includes(e.p))
         .map((e) => `${e.p} ${nm(store, e.o)}`)
       const desc = oneLine(n.props?.desc, CTX_DESC)
-      // 빈 절은 아예 빼서 줄을 짧게 유지한다 — "(없음)" 은 모델에 주는 정보가 없다
-      return `- t=${tNum(n.props?.t)} ${n.name}${desc ? ` — ${desc}` : ''}`
+      // 빈 절은 아예 빼서 줄을 짧게 유지한다. "(없음)" 은 모델에 주는 정보가 없다
+      return `- t=${tNum(n.props?.t)} ${n.name}${desc ? ` · ${desc}` : ''}`
         + `${cast.length ? ` / 참여: ${cast.join(', ')}` : ''}${after.length ? ` / 결과: ${after.join(', ')}` : ''}`
     })
 
@@ -658,13 +657,13 @@ export function branchPrompt(seed, contextPack, existingGraph) {
  */
 export function freeDirectionPrompt(userInput, seed, contextPack, existingGraph) {
   const dir = String(userInput || '').trim().slice(0, DIR_MAX)
-  // 기획자의 방향은 머리말에 둔다 — 자리가 모자라면 컨텍스트 팩이 먼저 줄어든다
+  // 기획자의 방향은 머리말에 둔다. 자리가 모자라면 컨텍스트 팩이 먼저 줄어든다
   return withBody(
     [
       '아래 관계 그래프를 바탕으로 이야기 분기 3개를 만든다.',
       '방향은 기획자가 정했다. 탐지기가 찾은 씨앗보다 기획자의 지시가 먼저다.',
       '',
-      `[기획자의 방향]\n${dir || '(비어 있다 — 그래프에서 가장 큰 긴장을 골라 쓴다)'}`,
+      `[기획자의 방향]\n${dir || '(비어 있다. 그래프에서 가장 큰 긴장을 골라 쓴다)'}`,
       '',
     ],
     contextPack,
@@ -696,7 +695,7 @@ const hasEdge = (store, e) => !!findEdge(store, e)
  * 이 프롬프트에 얹을 컨텍스트 팩을 짠다. 예산은 두 상한 중 작은 쪽이다.
  *  - CTX_BUDGET: 자리가 남아도 이만큼만 넣는다. 팩이 길어지면 응답도 길어져 30초를 넘긴다
  *  - bodyRoom: 프롬프트 상한에서 머리말·규칙을 뺀 나머지. 자유 방향이 길면 이쪽이 좁다
- * 예산으로 미리 줄이면 문장 중간이 아니라 줄 단위로 접힌다 — withBody 의 가위는 보험이다.
+ * 예산으로 미리 줄이면 문장 중간이 아니라 줄 단위로 접힌다. withBody 의 가위는 보험이다.
  */
 const packFor = (seed, store, build) =>
   contextPackPrompt(seed, store, { limit: Math.min(CTX_BUDGET, bodyRoom(build)) })
@@ -708,7 +707,7 @@ function finishStory(raw, seed, store, { local = false } = {}) {
     const keep = []
     for (const e of b.writeback.remove_edges) {
       if (store && !hasEdge(store, e)) {
-        story.warnings.push(`${b.id} 역기입 삭제: 그래프에 없는 엣지 (${e.s} ${e.p} ${e.o}) — 뺀다`)
+        story.warnings.push(`${b.id} 역기입 삭제: 그래프에 없는 엣지 (${e.s} ${e.p} ${e.o}). 뺀다`)
         continue
       }
       keep.push(e)
@@ -732,7 +731,7 @@ function finishStory(raw, seed, store, { local = false } = {}) {
  * @param {Object} store - GraphStore
  * @param {Object} [opts]
  * @param {Array} [opts.pool] 로컬 폴백에 쓸 스토리 묶음 (app-walkthrough/data/stories.json)
- * @param {Function} [opts.onTry] 시도마다 (몇 번째, 전체) 를 받는다 — 화면에 진행을 남길 때 쓴다
+ * @param {Function} [opts.onTry] 시도마다 (몇 번째, 전체) 를 받는다. 화면에 진행을 남길 때 쓴다
  * @param {string} [opts.model] 쓸 모델 ('haiku-4.5' | 'sonnet-5' | 'opus-4.8')
  * @returns {Promise<Object>} app-walkthrough/data/stories.json 의 스토리 하나와 같은 모양 + {warnings, local}
  */
@@ -754,7 +753,7 @@ export async function planBranches(net, seed, store, opts = {}) {
  * @param {Object} store - GraphStore
  * @param {Object} [opts]
  * @param {Array} [opts.pool] 로컬 폴백에 쓸 스토리 묶음
- * @param {Function} [opts.onTry] 시도마다 (몇 번째, 전체) 를 받는다 — 화면에 진행을 남길 때 쓴다
+ * @param {Function} [opts.onTry] 시도마다 (몇 번째, 전체) 를 받는다. 화면에 진행을 남길 때 쓴다
  * @param {string} [opts.model] 쓸 모델 ('haiku-4.5' | 'sonnet-5' | 'opus-4.8')
  * @returns {Promise<Object>} planBranches 와 같은 모양
  */
@@ -791,7 +790,7 @@ const jsonBodies = (s) => [['{', '}'], ['[', ']']]
     const a = s.indexOf(open)
     if (a < 0) return null
     const b = s.lastIndexOf(close)
-    // 닫는 괄호가 없으면 잘려 온 것이다 — 끝까지 넘기고 repairJson 이 닫는다
+    // 닫는 괄호가 없으면 잘려 온 것이다. 끝까지 넘기고 repairJson 이 닫는다
     return { at: a, body: b > a ? s.slice(a, b + 1) : s.slice(a) }
   })
   .filter(Boolean)
@@ -803,7 +802,7 @@ const REPAIR_TRIES = 80
 
 /**
  * 잘려서 온 JSON 을 살린다. 값 하나가 온전히 끝난 자리까지만 남기고 그 시점에 열려 있던
- * 괄호를 닫는다. 응답이 상한에서 끊겨도 앞쪽 분기까지는 건진다 — 뒤는 normalizeStory 가
+ * 괄호를 닫는다. 응답이 상한에서 끊겨도 앞쪽 분기까지는 건진다. 뒤는 normalizeStory 가
  * 경고로 남긴다. 문자열 안의 괄호·이스케이프는 세지 않는다.
  *
  * @param {string} s - jsonBody 를 지난 텍스트
@@ -836,7 +835,7 @@ const repairJson = (s) => {
     try {
       return JSON.parse(s.slice(0, cuts[i].at) + cuts[i].tail)
     } catch {
-      // 이 자리로는 안 됐다 — 한 칸 더 앞으로 물러난다
+      // 이 자리로는 안 됐다. 한 칸 더 앞으로 물러난다
     }
   }
   return undefined
@@ -856,7 +855,7 @@ export function parseJson(text) {
     try {
       return JSON.parse(body)
     } catch {
-      // 그대로는 안 됐다 — 잘린 자리를 되짚어 본다
+      // 그대로는 안 됐다. 잘린 자리를 되짚어 본다
     }
     const fixed = repairJson(body)
     if (fixed !== undefined) return fixed
@@ -874,7 +873,7 @@ const SHORTER = '\n- 앞 요청의 답이 길어서 잘렸다. 같은 모양의 
 
 /**
  * net.plan 에 보내는 요청 하나. 모델 선택은 화면에서 오고 리졸버가 허용 목록으로 걸러 준다.
- * 고른 것이 없으면 model 을 아예 싣지 않는다 — 그때는 리졸버의 기본 모델로 간다.
+ * 고른 것이 없으면 model 을 아예 싣지 않는다. 그때는 리졸버의 기본 모델로 간다.
  *
  * @param {string} prompt - 보낼 프롬프트
  * @param {number} maxTokens - 응답 토큰 상한
@@ -952,7 +951,7 @@ export async function planCuts(net, spec, outline, opts = {}) {
     const cuts = r.status === 'fulfilled'
       ? normalizePlan(r.value, { maxChars: 0, maxCuts: batches[i].length * per + 2 }).cuts
       : []
-    if (r.status === 'rejected') console.warn('[story] 컷 묶음 실패 — 비트로 대체한다', r.reason?.message)
+    if (r.status === 'rejected') console.warn('[story] 컷 묶음 실패. 비트로 대체한다', r.reason?.message)
     out.push(...(cuts.length ? cuts : batches[i]))
   })
   return out.slice(0, Math.min(HARD_MAX, spec.cuts + 6))
@@ -974,7 +973,7 @@ function localOutline(spec, ctx) {
     chars,
     beats: Array.from({ length: nb }, (_, i) => ({
       scene: `S${i + 1}`,
-      summary: lines[i % Math.max(1, lines.length)] || `${spec.prompt} — 비트 ${i + 1}`,
+      summary: lines[i % Math.max(1, lines.length)] || `${spec.prompt} · 비트 ${i + 1}`,
       secs: spec.secs / nb,
       cast: [...cast, ...chars.map((c) => c.name)],
     })),
@@ -1020,7 +1019,7 @@ function dummyStory(seed, store, direction) {
   const anchor = seed?.title || dir || '그래프에서 가장 큰 긴장'
   // 비트에 넣을 짧은 말. 씨앗 제목의 콜론 뒤가 대개 대상 이름이다
   const core = (seed?.title ? String(seed.title).split(':').pop() : dir).trim() || '비어 있는 자리'
-  // C 분기에서 끊을 엣지 — 두 초점 인물 사이에 실제로 있는 명시 엣지 하나
+  // C 분기에서 끊을 엣지 · 두 초점 인물 사이에 실제로 있는 명시 엣지 하나
   const cut = a && b ? (store.getEdgesFrom(a).find((e) => e.o === b && e.asserted !== false) || null) : null
 
   return {
@@ -1033,7 +1032,7 @@ function dummyStory(seed, store, direction) {
         .filter(Boolean).join(' ') || '그래프에서 이 자리가 아직 정해지지 않았다.',
     },
     branches: LOCAL_BRANCHES.map((t, i) => {
-      const evName = `${core} — ${t.label}`.slice(0, 60)
+      const evName = `${core} · ${t.label}`.slice(0, 60)
       const edges = [a ? { s: nameA, p: 'participated_in', o: evName, note: '로컬 임시' } : null,
         a && b ? { s: nameA, p: t.p, o: nameB, note: '로컬 임시' } : null].filter(Boolean)
       return {
@@ -1100,7 +1099,7 @@ function localCuts(spec, outline) {
 const beatLine = (b) => {
   if (typeof b === 'string' || typeof b === 'number') return String(b).trim()
   const t = asObj(b)
-  const head = t.scene ? `${t.scene} — ` : ''
+  const head = t.scene ? `${t.scene} · ` : ''
   return `${head}${t.action || ''}`.trim()
 }
 
@@ -1130,7 +1129,7 @@ const BRANCH_OUTLINE_TOKENS = 4000
 const writebackLines = (writeback) => {
   const { nodes, edges, removes } = wbParts(writeback)
   return [
-    ...nodes.map((n) => `- 새 ${n?.kind || '노드'}: ${n?.name || ''}${n?.desc ? ` — ${n.desc}` : ''}`),
+    ...nodes.map((n) => `- 새 ${n?.kind || '노드'}: ${n?.name || ''}${n?.desc ? ` · ${n.desc}` : ''}`),
     ...edges.map((e) => `- 새 관계: ${e?.s} ${e?.p} ${e?.o}${e?.note ? ` (${e.note})` : ''}`),
     ...removes.map((e) => `- 끊기는 관계: ${e?.s} ${e?.p} ${e?.o}${e?.note ? ` (${e.note})` : ''}`),
   ].join('\n')
@@ -1182,7 +1181,7 @@ export function branchToSpec(branch, options = {}) {
 
 /**
  * 분기에서 출발하는 개요 생성 프롬프트. 기존 outlinePrompt 와 같은 구조·같은 출력이다.
- * 다른 것은 소재 자리다 — spec.prompt 대신 분기의 전개·장면·결과가 들어간다.
+ * 다른 것은 소재 자리다. spec.prompt 대신 분기의 전개·장면·결과가 들어간다.
  *
  * @param {Object} branch - 고른 분기
  * @param {Object} spec - branchToSpec 의 반환값
@@ -1212,7 +1211,7 @@ export function branchOutlinePrompt(branch, spec, ctx = {}) {
     head,
     '분기는 관계 그래프에서 찾은 씨앗이 갈라진 갈래다. 분기가 이미 정한 선택과 결과를 뒤집지 않는다.',
     '',
-    `[고른 분기] ${b.id ? `${b.id}. ` : ''}${b.label || '(제목 없음)'}${b.tone ? ` — ${b.tone}` : ''}`,
+    `[고른 분기] ${b.id ? `${b.id}. ` : ''}${b.label || '(제목 없음)'}${b.tone ? ` · ${b.tone}` : ''}`,
     b.premise ? `전개: ${b.premise}` : null,
     beats.length ? `장면 순서:\n${beats.map((t, i) => `${i + 1}. ${t}`).join('\n')}` : null,
     outcome ? `이 분기의 결과:\n${outcome}` : null,
@@ -1307,7 +1306,7 @@ export function localBranchOutline(branch, spec, ctx = {}) {
 // ── 그래프 역기입 ─────────────────────────────────────────────────────────────
 // 고른 분기의 writeback 을 그래프에 얹는다. 노드·엣지가 늘고, 끊은 명시 엣지에서
 // 나왔던 파생 엣지도 같이 사라진다 (graph-engine 의 rebuild 가 매번 다시 만든다).
-// 그래서 다음 회차의 탐침이 이전에는 없던 구멍을 찾는다 — 이 기능의 핵심이다.
+// 그래서 다음 회차의 탐침이 이전에는 없던 구멍을 찾는다. 이 기능의 핵심이다.
 
 const KIND_OK = new Set(GRAPH_SCHEMA.nodeKinds)
 const REL_OK = new Set(GRAPH_SCHEMA.edgeRels)
@@ -1360,21 +1359,21 @@ function planWriteback(store, writeback) {
   const warnings = []
   const errors = []
   if (!store?.getNode) {
-    errors.push('그래프 저장소가 없다 — 역기입을 적용할 수 없다')
+    errors.push('그래프 저장소가 없다. 역기입을 적용할 수 없다')
     return { nodes: [], edges: [], removes: [], warnings, errors, conflicts: [] }
   }
   const { nodes: rawNodes, edges: rawEdges, removes: rawRemoves } = wbParts(writeback)
 
-  // 1. 끊을 엣지. 실제로 있는 명시 엣지만 끊는다 — 파생은 근거를 지워야 사라진다
+  // 1. 끊을 엣지. 실제로 있는 명시 엣지만 끊는다. 파생은 근거를 지워야 사라진다
   const removes = []
   const cutKeys = new Set()
   for (const e of rawRemoves) {
     const src = asObj(e)
     const label = `${src.s ?? '없음'} ${src.p ?? '?'} ${src.o ?? '없음'}`
     const hit = findEdge(store, src)
-    if (!hit) { warnings.push(`역기입 삭제: 그래프에 없는 엣지 (${label}) — 건너뛴다`); continue }
+    if (!hit) { warnings.push(`역기입 삭제: 그래프에 없는 엣지 (${label}). 건너뛴다`); continue }
     if (hit.asserted === false) {
-      warnings.push(`역기입 삭제: 파생 엣지는 직접 삭제할 수 없습니다 (${label}) — 건너뛴다`)
+      warnings.push(`역기입 삭제: 파생 엣지는 직접 삭제할 수 없습니다 (${label}). 건너뛴다`)
       continue
     }
     const key = edgeKey(hit)
@@ -1389,9 +1388,9 @@ function planWriteback(store, writeback) {
     const src = asObj(n)
     const name = String(src.name ?? src.label ?? '').trim()
     const kind = String(src.kind ?? src.type ?? '').trim()
-    if (!name) { errors.push('역기입 노드: 이름이 없다 — 노드를 버린다'); continue }
+    if (!name) { errors.push('역기입 노드: 이름이 없다. 노드를 버린다'); continue }
     if (!KIND_OK.has(kind)) {
-      errors.push(`역기입 노드 "${name}": 모르는 kind "${kind || '없음'}" — 노드를 버린다`)
+      errors.push(`역기입 노드 "${name}": 모르는 kind "${kind || '없음'}". 노드를 버린다`)
       continue
     }
     okNodes.push(src)
@@ -1404,7 +1403,7 @@ function planWriteback(store, writeback) {
   for (const n of g.nodes) {
     const prev = store.getNode(n.id) || store.getNodes().find((x) => x.name === n.name)
     if (prev) {
-      warnings.push(`역기입 노드 "${n.name}": 이미 있는 노드(${prev.id}) — 새로 만들지 않는다`)
+      warnings.push(`역기입 노드 "${n.name}": 이미 있는 노드(${prev.id}). 새로 만들지 않는다`)
       fresh.set(n.id, prev.id)
       fresh.set(n.name, prev.id)
       continue
@@ -1425,19 +1424,19 @@ function planWriteback(store, writeback) {
     const src = asObj(e)
     const p = String(src.p ?? src.rel ?? src.pred ?? '').trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_')
     const label = `${src.s ?? '없음'} ${p || '?'} ${src.o ?? '없음'}`
-    if (!REL_OK.has(p)) { errors.push(`역기입 엣지: 어휘에 없는 술어 (${label}) — 버린다`); continue }
+    if (!REL_OK.has(p)) { errors.push(`역기입 엣지: 어휘에 없는 술어 (${label}). 버린다`); continue }
     if (DERIVED_ONLY.has(p)) {
-      warnings.push(`역기입 엣지: ${p} 는 파생 전용이라 직접 넣지 않는다 (${label}) — 추론이 다시 만든다`)
+      warnings.push(`역기입 엣지: ${p} 는 파생 전용이라 직접 넣지 않는다 (${label}). 추론이 다시 만든다`)
       continue
     }
     const s = ref(src.s ?? src.from ?? src.subject)
     const o = ref(src.o ?? src.to ?? src.object)
-    if (!s || !o) { errors.push(`역기입 엣지: 없는 노드를 가리킨다 (${label}) — 버린다`); continue }
-    if (s === o) { warnings.push(`역기입 엣지: 자기 자신을 가리킨다 (${label}) — 버린다`); continue }
+    if (!s || !o) { errors.push(`역기입 엣지: 없는 노드를 가리킨다 (${label}). 버린다`); continue }
+    if (s === o) { warnings.push(`역기입 엣지: 자기 자신을 가리킨다 (${label}). 버린다`); continue }
     const key = edgeKey({ s, p, o })
     if (addKeys.has(key)) { warnings.push(`역기입 엣지: 같은 엣지가 두 번 왔다 (${label})`); continue }
     if (!cutKeys.has(key) && store.getEdgesFrom(s).some((x) => x.p === p && x.o === o)) {
-      warnings.push(`역기입 엣지: 이미 있는 엣지 (${label}) — 넣지 않는다`)
+      warnings.push(`역기입 엣지: 이미 있는 엣지 (${label}). 넣지 않는다`)
       continue
     }
     addKeys.add(key)
@@ -1482,7 +1481,7 @@ export function validateWritebackBeforeApply(store, writeback) {
  * 파생 엣지는 GraphStore 가 매번 다시 만들기 때문에, 끊은 명시 엣지에서 나왔던
  * 파생도 함께 사라진다 (진우 serves 귀마 를 끊으면 귀마 rival_of 루미 도 사라진다).
  *
- * Neptune 판 저장소를 받아도 이 함수는 동기다 — 저장소가 판을 바로 고치고 Neptune
+ * Neptune 판 저장소를 받아도 이 함수는 동기다. 저장소가 판을 바로 고치고 Neptune
  * 왕복만 뒤로 미룬다. 저장까지 끝났는지 알아야 하는 화면은 뒤이어 store.flush() 를
  * 기다린다 (story-graph.html 의 applyToBoard).
  *
@@ -1611,7 +1610,7 @@ export function scriptFormatPrompt(cuts, options = {}) {
     ].filter(Boolean).join('\n')
   })
 
-  // 컷 목록만 잘릴 수 있게 withBody 로 감싼다 — 형식 가이드와 아래 규칙을 자르면
+  // 컷 목록만 잘릴 수 있게 withBody 로 감싼다. 형식 가이드와 아래 규칙을 자르면
   // 분량·묘사 지시가 사라져 예전처럼 두 줄짜리 대본이 돌아온다
   return withBody([
     part
@@ -1662,7 +1661,7 @@ export function scriptFormatPrompt(cuts, options = {}) {
 
 // 프롬프트로 "대본 텍스트만" 을 못 박아도 모델은 묶음의 뒤쪽에서 {"script": "S#5…"} 처럼
 // JSON 으로 감싸 보낼 때가 있다. 그대로 이어 붙이면 대본 중간부터 JSON 문자열이 보인다.
-// 아래 세 조각으로 벗긴다 — JSON 으로 의심되는 모양일 때만 손을 대고, 평문은 건드리지 않는다.
+// 아래 세 조각으로 벗긴다. JSON 으로 의심되는 모양일 때만 손을 대고, 평문은 건드리지 않는다.
 //   SCRIPT_JSON → 여는 모양으로 JSON 여부를 가린다
 //   scriptOf    → 파싱한 값에서 대본 문자열을 고른다
 //   unquote     → 상한에서 잘려 파싱조차 안 되는 경우 문자열 값만 손으로 벗긴다
@@ -1671,8 +1670,7 @@ export function scriptFormatPrompt(cuts, options = {}) {
 const SCRIPT_KEYS = ['script', 'text', 'content', 'body', '대본']
 
 /**
- * JSON 으로 감싸여 온 응답의 여는 모양. `{` 뒤 키 따옴표, `[` 뒤 객체·배열·문자열만 본다 —
- * webdrama 대본은 `[씬 1 - 빵집]` 으로 시작하므로 여는 괄호만으로 판단하면 평문을 건드린다.
+ * JSON 으로 감싸여 온 응답의 여는 모양. `{` 뒤 키 따옴표, `[` 뒤 객체·배열·문자열만 본다. * webdrama 대본은 `[씬 1 - 빵집]` 으로 시작하므로 여는 괄호만으로 판단하면 평문을 건드린다.
  */
 const SCRIPT_JSON = /^\{\s*["}]|^\[\s*[{["\]]/
 
@@ -1732,10 +1730,10 @@ const scriptText = (raw) => {
 
   let val
   try { val = JSON.parse(s) } catch { val = repairJson(s) }
-  // 파싱은 됐다 — 텍스트가 없으면 빈 문자열이다. 감싼 JSON 을 대본으로 내보내지 않는다
+  // 파싱은 됐다. 텍스트가 없으면 빈 문자열이다. 감싼 JSON 을 대본으로 내보내지 않는다
   if (val !== undefined) return scriptOf(val).trim()
 
-  // 상한에서 문자열 중간이 잘려 repairJson 도 못 살린 경우 — 값만 손으로 벗긴다
+  // 상한에서 문자열 중간이 잘려 repairJson 도 못 살린 경우. 값만 손으로 벗긴다
   const m = s.match(SCRIPT_OPEN)
   if (m) return unquote(s.slice(m[0].length)).trim()
   return s
@@ -1764,19 +1762,17 @@ export async function planScript(net, cuts, options = {}) {
   const out = []
   let failed = 0
   got.forEach((r, i) => {
-    // 뒤쪽 묶음이 {"script": "S#5…"} 로 감싸 오는 일이 있다 — 래핑을 벗겨 텍스트만 이어 붙인다
+    // 뒤쪽 묶음이 {"script": "S#5…"} 로 감싸 오는 일이 있다. 래핑을 벗겨 텍스트만 이어 붙인다
     const text = r.status === 'fulfilled' ? scriptText(r.value?.text) : ''
-    // 상한에서 잘려도 앞부분은 쓸 수 있다. 다만 뒤 컷이 사라진 것이므로 콘솔에 남긴다 —
-    // 자주 보이면 SCRIPT_BATCH 를 줄일 자리다
+    // 상한에서 잘려도 앞부분은 쓸 수 있다. 다만 뒤 컷이 사라진 것이므로 콘솔에 남긴다. // 자주 보이면 SCRIPT_BATCH 를 줄일 자리다
     if (text && r.value?.stop === 'max_tokens') {
       console.warn(`[story] 대본 ${i + 1}/${batches.length} 묶음이 응답 상한에서 잘렸다`
-        + ` — 컷 ${batches[i].length}개, ${text.length}자`)
+        + ` · 컷 ${batches[i].length}개, ${text.length}자`)
     }
     if (text) { out.push(text); return }
-    // 묶음 하나가 비어 오면 그 자리만 로컬 형식으로 메운다. 전부 비면 에러다 —
-    // 형식만 갖춘 대본을 모델이 쓴 것처럼 내놓지 않는다
+    // 묶음 하나가 비어 오면 그 자리만 로컬 형식으로 메운다. 전부 비면 에러다. // 형식만 갖춘 대본을 모델이 쓴 것처럼 내놓지 않는다
     failed++
-    console.warn('[story] 대본 묶음 실패 — 로컬 형식으로 채운다', r.reason?.message)
+    console.warn('[story] 대본 묶음 실패. 로컬 형식으로 채운다', r.reason?.message)
     out.push(localScript(batches[i], { ...options, from: i * SCRIPT_BATCH, whole: batches.length === 1 }))
   })
 

@@ -1,7 +1,7 @@
 /*
  * 로컬 개발 서버. 배포된 CloudFront 의 경로 구조를 그대로 재현합니다.
  *
- * 왜 `python -m http.server` 로 안 되는가 — 배포본의 파일 배치가 저장소와 다릅니다.
+ * 왜 `python -m http.server` 로 안 되는가. 배포본의 파일 배치가 저장소와 다릅니다.
  * CDK 는 app/* 를 버킷 루트에 올리고 app-walkthrough/* 는 그 이름의 폴더에 올립니다
  * (storyboard-stack.js 의 Web / WebWalkthrough 두 배포). 저장소 루트에는 index.html 이
  * 아예 없습니다. 그래서 저장소를 그냥 서빙하면
@@ -11,7 +11,7 @@
  *   - '/app-walkthrough/data/*'    → 있습니다 (예시가 목데이터를 여기서 읽습니다)
  * 즉 링크 수정이 맞는지 로컬에서 확인하려면 이 배치를 흉내내야 합니다.
  *
- * 디렉터리 index 를 흉내내지 않습니다 — 이게 중요합니다. CloudFront 의
+ * 디렉터리 index 를 흉내내지 않습니다. 이게 중요합니다. CloudFront 의
  * defaultRootObject 는 루트 '/' 에만 적용되고 하위 디렉터리에는 적용되지 않습니다.
  * 즉 배포에서 디렉터리로 끝나는 주소는 403 입니다. 예전 이 서버는 디렉터리를 보면
  * index.html 을 스스로 찾아줬는데, 그래서 디렉터리로 끝나던 탭 주소가 로컬에서는
@@ -20,10 +20,10 @@
  *
  * 그리고 aws-config.js 의 genUrl 은 '/gen' 이라는 상대경로입니다. 배포에서는
  * CloudFront 가 그 경로만 ALB 로 보냅니다. 로컬에는 그 CloudFront 가 없으므로
- * /gen* 을 배포된 CloudFront 로 넘깁니다 — 없으면 그림 그리기가 이 서버의 404 를 받습니다.
+ * /gen* 을 배포된 CloudFront 로 넘깁니다. 없으면 그림 그리기가 이 서버의 404 를 받습니다.
  *
  * ALB 를 직접 치지 않습니다. ALB 의 보안그룹은 CloudFront 관리형 prefix list
- * (pl-22a6434b) 에서 오는 80 포트만 받습니다 — storyboard-stack.js 의
+ * (pl-22a6434b) 에서 오는 80 포트만 받습니다. storyboard-stack.js 의
  * `albSg.addIngressRule(ec2.Peer.prefixList(CF_ORIGINS), ...)` 입니다. 그래서 여기서
  * ALB 주소로 보내면 SG 가 패킷을 버리고 연결이 그냥 타임아웃됩니다 (거절도 아닙니다).
  * 뚫으려면 내 IP 를 ALB 에 열어야 하는데, 그건 GPU 를 인터넷에 직접 노출시키는
@@ -57,19 +57,19 @@ const TYPES = {
 
 /*
  * URL 경로 → 디스크 경로. 배포의 두 버킷 배포와 같은 순서로 찾습니다.
- * 앞의 것이 이깁니다 — 배포에서도 루트 배포가 /aws-config.js 를 쥐고 있습니다.
+ * 앞의 것이 이깁니다. 배포에서도 루트 배포가 /aws-config.js 를 쥐고 있습니다.
  */
 function candidates(p) {
   const rel = p.replace(/^\/+/, '')
   if (rel === '') return ['app/index.html']
   return [
     rel,                                // /aws-config.js, /app-walkthrough/data/* 같은 그대로인 것
-    path.posix.join('app', rel),        // 루트에 올라간 app/* — /index.html, /core.js …
+    path.posix.join('app', rel),        // 루트에 올라간 app/* · /index.html, /core.js …
   ]
 }
 
 /*
- * 파일만 찾습니다. 디렉터리를 만나면 index.html 로 넘어가지 않습니다 — 위에 적은 대로
+ * 파일만 찾습니다. 디렉터리를 만나면 index.html 로 넘어가지 않습니다. 위에 적은 대로
  * 배포가 그렇게 동작하지 않기 때문입니다. 루트 '/' 만 candidates 가 미리
  * 'app/index.html' 로 바꿔 두므로 그 한 곳은 열립니다.
  */
@@ -90,13 +90,13 @@ async function findFile(urlPath) {
  * /gen* 과 /img/* 를 배포된 CloudFront 로 넘긴다. 거기서 ALB 로 간다.
  *
  * 한 장에 약 12초, 배치는 세 갈래로 열어 두므로 최악이 약 36초다. Node 의 기본
- * 소켓 타임아웃보다 길 수 있어 넉넉히 잡는다 — CloudFront 쪽 /gen* readTimeout
+ * 소켓 타임아웃보다 길 수 있어 넉넉히 잡는다. CloudFront 쪽 /gen* readTimeout
  * 60초가 실질적인 상한이다.
  */
 function proxyGen(req, res) {
   if (!ORIGIN) {
     res.writeHead(502, { 'content-type': 'application/json; charset=utf-8' })
-    res.end(JSON.stringify({ detail: 'SB_ORIGIN 이 없다 — CloudFront 도메인을 넣어야 /gen 이 넘어간다' }))
+    res.end(JSON.stringify({ detail: 'SB_ORIGIN 이 없다. CloudFront 도메인을 넣어야 /gen 이 넘어간다' }))
     return
   }
   // 원본 host 헤더를 그대로 넘기면 CloudFront 가 자기 배포를 못 찾는다
@@ -112,7 +112,7 @@ function proxyGen(req, res) {
   up.on('error', (e) => {
     if (res.headersSent) return res.destroy()
     res.writeHead(502, { 'content-type': 'application/json; charset=utf-8' })
-    res.end(JSON.stringify({ detail: `생성 서버에 닿지 못했다: ${e.message} — GPU 가 꺼져 있을 수 있다` }))
+    res.end(JSON.stringify({ detail: `생성 서버에 닿지 못했다: ${e.message}. GPU 가 꺼져 있을 수 있다` }))
   })
   req.pipe(up)
 }
@@ -125,13 +125,13 @@ createServer(async (req, res) => {
   if (!file) {
     /*
      * 디렉터리로 끝나는 주소는 403 으로 답합니다. 배포의 S3 오리진이 그렇게 답하기
-     * 때문입니다 — 404 로 답하면 "파일이 없다"로 읽히지만 실제 원인은 "디렉터리라서
+     * 때문입니다. 404 로 답하면 "파일이 없다"로 읽히지만 실제 원인은 "디렉터리라서
      * 못 준다"이고, 고칠 곳이 파일 위치가 아니라 링크 쪽입니다.
      */
     const dirish = url.split('?')[0].endsWith('/')
     res.writeHead(dirish ? 403 : 404, { 'content-type': 'text/plain; charset=utf-8' })
     res.end(dirish
-      ? `403 ${url}\n디렉터리에는 index 가 없습니다 — 배포도 같습니다. 파일 이름까지 적어야 합니다.\n`
+      ? `403 ${url}\n디렉터리에는 index 가 없습니다. 배포도 같습니다. 파일 이름까지 적어야 합니다.\n`
       : `404 ${url}\n찾아본 곳: ${candidates(url.split('?')[0]).join(', ')}\n`)
     return
   }

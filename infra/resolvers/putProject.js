@@ -3,7 +3,7 @@ import { util } from '@aws-appsync/utils'
 /*
  * 프로젝트 카드 한 장을 앉히거나 마지막 손길만 고친다.
  *
- * PutItem 이 아니라 UpdateItem 이다 — 두 사람이 같은 보드를 열고 있으면 나중에 저장한
+ * PutItem 이 아니라 UpdateItem 이다. 두 사람이 같은 보드를 열고 있으면 나중에 저장한
  * 쪽이 앞사람의 이름을 덮어쓴다. 이름·만든 사람·만든 시각은 if_not_exists 로 한 번만
  * 박고, 그 뒤 호출은 마지막 손길(updatedAt·lastActor·lastWhat)만 바꾼다.
  *

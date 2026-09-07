@@ -1,6 +1,6 @@
 #!/bin/bash
 # 관계 그래프(Neptune) 클러스터를 다시 켠다. 엔드포인트와 데이터는 세우기 전과 같다.
-# available 이 되기 전까지 graph Lambda 는 연결 오류를 낸다 — 몇 분 기다려라.
+# available 이 되기 전까지 graph Lambda 는 연결 오류를 낸다. 몇 분 기다려라.
 set -euo pipefail
 
 CLUSTER="${SB_NEPTUNE_CLUSTER:-storyboarddemo-graph}"

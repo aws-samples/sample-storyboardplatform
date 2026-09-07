@@ -13,7 +13,7 @@ export const DEMO_USERS = [
   { id: 'u5', name: '정민아', role: '관리', job: '팀원을 등록하고 역할을 정합니다', color: '#C77B62' },
 ]
 const DEMO_BLOCK = `
-  <span class="lf__label">데모 계정 — 눌러서 바로 들어가기</span>
+  <span class="lf__label">데모 계정 · 눌러서 바로 들어가기</span>
   <div class="gate__list">
     ${DEMO_USERS.map((u) => `
       <button class="gate__who" type="button" data-demo="${u.id}">

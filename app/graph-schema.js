@@ -51,7 +51,7 @@ const RELS = {
   last_seen_in: { desc: '마지막 목격 장소 (캐릭터 → 장소)', dir: 'out' },
   passes_through: { desc: '통과 (캐릭터 → 장소)', dir: 'out' },
   performs_at: { desc: '공연 (캐릭터·집단 → 장소)', dir: 'out' },
-  // 파생 전용 — 텍스트에서 직접 뽑지 않고 deriveEdges 가 만든다
+  // 파생 전용. 텍스트에서 직접 뽑지 않고 deriveEdges 가 만든다
   has_leverage_over: { desc: '약점을 쥠. 파생 전용', dir: 'out', derivedOnly: true },
   unrequited_love: { desc: '짝사랑당함. 파생 전용', dir: 'out', derivedOnly: true },
   potential_rival_of: { desc: '잠재 적대. 파생 전용', dir: 'out', derivedOnly: true },

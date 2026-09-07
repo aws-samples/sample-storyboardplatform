@@ -1,5 +1,5 @@
 /*
- * 프로젝트 보드 — 작업판을 열기 전에 먼저 뜨는 화면.
+ * 프로젝트 보드 · 작업판을 열기 전에 먼저 뜨는 화면.
  *
  * 네 화면은 모두 「지금 보고 있는 보드 하나」를 전제로 돌아갑니다. 그 보드가 무엇인지는
  * 주소의 ?board= 이 정하고(net.js 의 opsClient·awsTransport), 없으면 기본 보드로
@@ -16,14 +16,14 @@
  * 카드가 빈칸이 됩니다.
  *
  * 그래서 카드는 같은 테이블의 pk='PROJECTS' 한 자리에 모으고 TTL 을 걸지 않습니다.
- * 테이블을 새로 만들지 않은 것은 이것이 같은 사실의 색인이기 때문입니다 — 목록을
+ * 테이블을 새로 만들지 않은 것은 이것이 같은 사실의 색인이기 때문입니다. 목록을
  * 뽑기 위한 자리일 뿐이고, 무슨 일이 있었는지는 여전히 op 로그가 들고 있습니다.
  *
  * ══ 카드의 「마지막 손길」은 사본입니다
  *
  * lastWhat·lastActor 는 op 로그에서 온 것을 카드에 적어 둔 사본입니다. 카드 스무 장을
  * 그리려고 보드 스무 개의 로그를 다 읽을 수는 없습니다. 사본이 어긋날 수 있다는 뜻이고,
- * 어긋나도 됩니다 — 카드는 「여기였다」를 알려 주는 표지이고, 판을 열면 로그가 사실을
+ * 어긋나도 됩니다. 카드는 「여기였다」를 알려 주는 표지이고, 판을 열면 로그가 사실을
  * 말합니다.
  */
 
@@ -42,7 +42,7 @@ const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) =>
  * 프로젝트 이름 → 주소에 쓸 id.
  *
  * 한글 이름은 ASCII 로 남는 것이 없어 거의 늘 'p-…' 가 됩니다. 이름을 그대로 id 로
- * 쓰지 않는 이유는 두 가지입니다 — 주소가 퍼센트 인코딩으로 뒤덮이고, 같은 이름을 두
+ * 쓰지 않는 이유는 두 가지입니다. 주소가 퍼센트 인코딩으로 뒤덮이고, 같은 이름을 두
  * 번 만들면 두 팀이 한 판을 쓰게 됩니다. 뒤에 붙는 무작위 조각이 그것을 막습니다.
  */
 export function newBoardId(name) {
@@ -62,7 +62,7 @@ const localList = () => {
 }
 
 /*
- * 로컬 모드의 put. AppSync 쪽 putProject.js 와 같은 규칙을 지킵니다 — 이름은 처음
+ * 로컬 모드의 put. AppSync 쪽 putProject.js 와 같은 규칙을 지킵니다. 이름은 처음
  * 한 번만 박고, 그 뒤로는 마지막 손길만 고칩니다. 두 곳의 규칙이 다르면 로컬에서
  * 되던 것이 배포에서 다르게 돌아 읽는 사람이 헷갈립니다.
  */
@@ -104,7 +104,7 @@ export function store() {
 /**
  * 「누가 마지막으로 뭘 했는지」를 카드에 적어 둡니다.
  *
- * 기록이 화면의 본 일은 아니므로 실패를 던지지 않습니다 — op 로그가 이미 사실을 들고
+ * 기록이 화면의 본 일은 아니므로 실패를 던지지 않습니다. op 로그가 이미 사실을 들고
  * 있고, 이것은 목록에 보이는 한 줄입니다. 사실이 남았는데 표지가 못 붙었다고 작업을
  * 멈출 이유가 없습니다.
  *
@@ -142,7 +142,7 @@ export async function list() {
 /* ══ 그리기 ════════════════════════════════════════ */
 
 /*
- * 모양도 이 파일이 들고 있습니다 — nav-tabs.js · history.js · coach.js 와 같은 방식
+ * 모양도 이 파일이 들고 있습니다. nav-tabs.js · history.js · coach.js 와 같은 방식
  * 입니다. 네 화면이 같은 보드를 보는데 화면마다 CSS 를 베껴 두면 한 곳만 고쳐도
  * 나머지가 어긋납니다. 색은 공통 토큰(app/theme.css 의 --sb-*)에서 받고, 두 번째
  * 인자는 그 파일을 못 불러왔을 때의 기본값입니다.
@@ -155,7 +155,7 @@ const CSS = `
   font-family: var(--sb-sans, sans-serif); color: var(--sb-ink, #111318);
 }
 .pj {
-  /* 카드가 두 열로 서므로 문도 그만큼 넓힙니다 — 620px 에서는 두 열이 너무 좁습니다 */
+  /* 카드가 두 열로 서므로 문도 그만큼 넓힙니다. 620px 에서는 두 열이 너무 좁습니다 */
   width: 100%; max-width: 680px; background: var(--sb-panel, #fff);
   border: 1px solid var(--sb-line, #e4e7ec); border-radius: var(--sb-r, 6px);
   padding: 22px 22px 18px;
@@ -200,7 +200,7 @@ button.pj__card:hover .pj__open { color: var(--sb-accent, #1a56db); }
 /*
  * 「누가」와 「언제」는 테를 둘러 따로 세웁니다. 한 줄의 글로 흘려 두면 이름·한 일·
  * 시각이 한 문장으로 뭉쳐 읽는 사람이 어디까지가 사람 이름인지 짚어야 합니다.
- * 누르는 것은 카드 하나이므로 이 조각들은 span 입니다 — 버튼 안의 버튼이 되면
+ * 누르는 것은 카드 하나이므로 이 조각들은 span 입니다. 버튼 안의 버튼이 되면
  * 무엇을 누른 것인지 화면 낭독기가 말할 수 없습니다.
  */
 .pj__meta { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 5px; }
@@ -285,7 +285,7 @@ export function paintCards(mount, rows, { onPick, current, who, none = '아직 �
     const at = when(r.updatedAt, nowMs)
     /*
      * 한 일은 카드 본문에, 「누가」와 「언제」는 아래 테 두른 조각에 담습니다. 아직 아무
-     * 일도 없는 판에는 사람 조각을 달지 않습니다 — 없는 사실을 「알 수 없음」으로 적으면
+     * 일도 없는 판에는 사람 조각을 달지 않습니다. 없는 사실을 「알 수 없음」으로 적으면
      * 이름을 못 읽은 것처럼 보입니다.
      */
     const chips = [
@@ -304,8 +304,7 @@ export function paintCards(mount, rows, { onPick, current, who, none = '아직 �
 /**
  * 프로젝트 보드를 띄우고 하나 고르게 합니다. 작업판 앞에 서는 문입니다.
  *
- * 주소에 ?board= 가 이미 있으면 아무것도 띄우지 않고 그 값을 그대로 돌려줍니다 —
- * 카드를 눌러 들어온 사람이나 링크를 받은 사람에게 같은 문을 두 번 열지 않습니다.
+ * 주소에 ?board= 가 이미 있으면 아무것도 띄우지 않고 그 값을 그대로 돌려줍니다. * 카드를 눌러 들어온 사람이나 링크를 받은 사람에게 같은 문을 두 번 열지 않습니다.
  * 그래서 반환을 기다리는 것만으로 두 경우가 다 됩니다.
  *
  * 고르면 그 화면을 ?board= 로 다시 엽니다. 판을 열어 둔 채로 보드만 갈아 끼우지 않는
@@ -316,7 +315,7 @@ export function paintCards(mount, rows, { onPick, current, who, none = '아직 �
  * ══ 두 가지 문
  *
  * 홈의 「새로 생성」에서 온 것이면(?new=1) 이름 칸 하나만 냅니다. 예전에는 한 문이
- * 두 일을 다 했습니다 — 이미 있는 판의 카드를 먼저 늘어놓고 그 아래에 이름 칸을 두는
+ * 두 일을 다 했습니다. 이미 있는 판의 카드를 먼저 늘어놓고 그 아래에 이름 칸을 두는
  * 모양이었습니다. 그러면 「새로 생성」을 누른 사람에게 기존 판을 열라고 권하는 셈이고,
  * 실제로 그 카드를 눌러 이어서 할 판을 연 사람이 「처음 오셨나요?」를 만나는 자리도
  * 생겼습니다(그 화면은 비어 있는 판을 전제로 그 안내를 띄웁니다). 새로 만드는 길과
@@ -352,7 +351,7 @@ export function pickProject({ step = 'board', actor, who, mount, fresh = wantsNe
     <div id="pjList" data-coach="projects"></div>`}
     <form class="pj__new" id="pjNew">
       <input class="pj__in" id="pjName" type="text" maxlength="60" autocomplete="off"
-             placeholder="새 프로젝트 이름 — 예: 여름 스튜디오 파일럿" aria-label="새 프로젝트 이름">
+             placeholder="새 프로젝트 이름 · 예: 여름 스튜디오 파일럿" aria-label="새 프로젝트 이름">
       <button class="pj__go" id="pjMake" type="submit">만들어서 열기</button>
       ${fresh ? '' : '<button class="pj__skip" id="pjSkip" type="button">둘러보기</button>'}
     </form>
@@ -376,7 +375,7 @@ export function pickProject({ step = 'board', actor, who, mount, fresh = wantsNe
    * 치르는 일이고(배포에서는 AppSync 왕복입니다), 커서를 이름 칸에 먼저 둡니다.
    */
   if (fresh) {
-    note.textContent = '이름은 나중에 바꿀 수 없습니다 — 팀이 서로 알아볼 만한 것으로 붙이십시오. '
+    note.textContent = '이름은 나중에 바꿀 수 없습니다. 팀이 서로 알아볼 만한 것으로 붙이십시오. '
       + '이미 있는 판을 이어서 하시려면 홈의 「프로젝트」에서 여십시오.'
     q('pjName').focus()
   } else {
@@ -384,11 +383,11 @@ export function pickProject({ step = 'board', actor, who, mount, fresh = wantsNe
       paint(rows)
       note.textContent = rows.length
         ? `프로젝트 ${rows.length}개. 「둘러보기」는 이름을 붙이지 않은 기본 판을 엽니다.`
-        : '이름은 나중에 바꿀 수 없습니다 — 팀이 서로 알아볼 만한 것으로 붙이십시오.'
+        : '이름은 나중에 바꿀 수 없습니다. 팀이 서로 알아볼 만한 것으로 붙이십시오.'
     }).catch((e) => {
       // 목록을 못 읽어도 새로 만드는 길은 살려 둡니다. 여기서 막히면 아무 일도 못 합니다
       paint([])
-      note.textContent = `목록을 읽지 못했습니다 — ${e.message}. 새로 만드는 것은 됩니다.`
+      note.textContent = `목록을 읽지 못했습니다. ${e.message}. 새로 만드는 것은 됩니다.`
     })
   }
 
@@ -402,11 +401,10 @@ export function pickProject({ step = 'board', actor, who, mount, fresh = wantsNe
     await touch({ boardId, actor, name, what: '프로젝트를 만들었습니다' })
     open(boardId)
   }
-  // 「둘러보기」는 새로 만드는 문에는 없습니다 — 이름을 붙이러 온 사람의 길이 아닙니다
+  // 「둘러보기」는 새로 만드는 문에는 없습니다. 이름을 붙이러 온 사람의 길이 아닙니다
   const skip = q('pjSkip')
   if (skip) skip.onclick = () => open(DEFAULT_BOARD)
 
-  // 고르면 화면을 다시 엽니다. 그래서 이 약속은 일부러 해결되지 않습니다 —
-  // 부르는 쪽의 boot() 이 여기서 멈춰 서고, 작업판은 아직 그려지지 않습니다.
+  // 고르면 화면을 다시 엽니다. 그래서 이 약속은 일부러 해결되지 않습니다. // 부르는 쪽의 boot() 이 여기서 멈춰 서고, 작업판은 아직 그려지지 않습니다.
   return new Promise(() => {})
 }
