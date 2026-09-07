@@ -1586,11 +1586,26 @@ let exampleRun = null
 const EXAMPLE_SPOTS = ['scenario', '#newChar', '#breakdown', 'board']
 
 /*
- * 그 단계에서 기다릴 초. 모델을 부르는 자리에만 답니다 — 「컷으로 분해」가 그렇습니다.
- * 예시는 미리 만들어 둔 op 를 밀어 넣으므로 실제로는 즉시 끝나지만, 그렇게 보여 주면
- * 직접 할 때의 기다림을 고장으로 읽게 됩니다(app/onboard.js 머리글의 wait).
+ * 그 단계에서 기다릴 초와, 기다려서 나온 것을 보여 줄 걸음. 모델을 부르는 자리에만
+ * 답니다 — 「컷으로 분해」가 그렇습니다. 예시는 미리 만들어 둔 op 를 밀어 넣으므로
+ * 실제로는 즉시 끝나지만, 그렇게 보여 주면 직접 할 때의 기다림을 고장으로 읽게 됩니다.
+ * 그리고 기다린 것을 보지 못한 채 다음 설명으로 넘어가면 그 3초가 헛것이 됩니다
+ * (app/onboard.js 머리글의 wait 와 done).
  */
-const EXAMPLE_WAITS = { 2: { wait: 3000, waitSay: '시나리오를 컷으로 나누고 있습니다' } }
+const EXAMPLE_WAITS = {
+  2: {
+    wait: 3000,
+    waitSay: '시나리오를 컷으로 나누고 있습니다',
+    done: {
+      say: '컷이 만들어졌습니다',
+      sub: '빈 줄이 컷 경계였습니다. 컷은 씬으로 묶이고 시간이 매겨집니다 — 컷을 눌러 '
+        + '오른쪽에서 대사와 지시를 고칩니다',
+      see: 'board',
+      // 인물 구도도 같은 panels 에 삽니다(charId 가 붙습니다). 컷만 셉니다
+      got: () => `컷 ${Object.values(state.panels).filter((p) => !p.charId).length}개`,
+    },
+  },
+}
 
 /**
  * 예시를 클릭에 맞춰 안내합니다. op 를 한 번에 밀어 넣지 않고 seedBuild 의 표시(marks)

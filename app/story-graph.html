@@ -1666,6 +1666,20 @@ function runExample() {
         await boot()
         if (STORE) mark(`예시 그래프를 얹었습니다 — 노드 ${STORE.stats().nodes}개`)
       },
+      /*
+       * 3초를 기다리게 해 놓고 바로 다음 설명으로 넘어가면 그 3초가 만든 그래프가 막에
+       * 덮입니다. 여기서 한 걸음 서서 그래프와 숫자 판을 같이 밝힙니다.
+       */
+      done: {
+        say: '그래프가 만들어졌습니다',
+        sub: '인물 · 장소 · 사건이 노드가 되고 그 사이의 관계가 엣지가 됩니다. '
+          + '「명시 엣지」는 대본에 적혀 있던 것이고 「추론」은 그것에서 따라 나온 것입니다',
+        see: ['stats', '#network'],
+        got: () => {
+          const st = STORE?.stats()
+          return st ? `노드 ${st.nodes}개 · 명시 엣지 ${st.assertedEdges}개 · 추론 ${st.derivedEdges}개` : ''
+        },
+      },
     },
     {
       say: '탐지기 12종이 이야기 씨앗을 찾습니다',
@@ -1679,6 +1693,16 @@ function runExample() {
       spot: '[data-seed="0"]', see: 'tabs',
       wait: 3000, waitSay: '분기 세 개를 만들고 있습니다',
       run: () => (SEEDS.length ? pickSeed(0, true) : null),
+      done: {
+        say: '분기가 만들어졌습니다',
+        sub: '한 씨앗에서 갈 수 있는 길 셋입니다. 하나를 골라 [이 분기로 대본 생성] 을 누르면 '
+          + '개요 → 컷 → 대본으로 이어집니다',
+        see: 'tabs',
+        got: () => {
+          const n = STORIES.get('0')?.branches?.length || 0
+          return n ? `스토리 탭에 분기 ${n}개가 들어왔습니다` : '스토리 탭에 들어왔습니다'
+        },
+      },
     },
     /*
      * 자유 입력을 짚습니다. 탐지기가 찾아 준 씨앗만으로 도는 화면으로 읽히면 기획자가

@@ -2380,6 +2380,73 @@
     stopGuide()
     return none
   })())
+  /*
+   * ── 기다려서 나온 것을 보고 가는 걸음 (done) ────────────────────────────
+   *
+   * 3초를 기다리게 해 놓고 다 차는 순간 다음 설명으로 넘어가면, 그 3초가 만들어 낸 것은
+   * 다음 단계가 짚는 자리 밖이라 어두운 막에 덮인다. 기다린 사람이 무엇을 기다렸는지
+   * 못 보는 셈이다. 그래서 run 뒤에 결과를 밝히는 한 걸음이 선다.
+   */
+  ok('wait 뒤에 나온 것을 보여 주는 걸음이 선다', await (async () => {
+    const ran = []
+    guide({ steps: [
+      { say: 'A', spot: 'gone', wait: 30, run: () => ran.push(1),
+        done: { say: '그래프가 만들어졌습니다', sub: '노드가 섰습니다', see: 'gtwo', got: () => '노드 87개' } },
+      { say: 'B', spot: 'gone' },
+    ] })
+    gSpot('gone').click()
+    await new Promise((r) => setTimeout(r, 80))
+    const b = document.querySelector('.onbg__b')
+    const shown = b.querySelector('.onbg__h').textContent === '그래프가 만들어졌습니다'
+      && b.querySelector('.onbg__got').textContent === '노드 87개'
+      // 결과가 들어간 판을 밝힌다. 짚은 자리는 없다 — 여기서 할 일은 보는 것이다
+      && guideMarks().seen.join() === [gSpot('gtwo')].join()
+      && guideMarks().lit === null
+      && guideMarks().done
+      // 번호는 늘지 않는다. 같은 단계의 뒷얼굴이다
+      && b.querySelector('.onbg__n').textContent === '1 / 2'
+    stopGuide()
+    return ran.join() === '1' && shown
+  })())
+  /* 그 걸음의 버튼을 누르면 다음 단계로 간다. run 이 두 번 돌면 예시 데이터가 두 번 얹힌다 */
+  ok('그 걸음에서 넘어가면 run 을 다시 돌리지 않고 다음 단계로 간다', await (async () => {
+    const ran = []
+    guide({ steps: [
+      { say: 'A', spot: 'gone', run: () => ran.push('A'), done: { say: '됐습니다' } },
+      { say: 'B', spot: 'gtwo' },
+    ] })
+    gSpot('gone').click()
+    await painted()
+    document.querySelector('.onbg__next').click()
+    await painted()
+    const moved = guideAt() === 1 && !guideMarks().done
+      && document.querySelector('.onbg__h').textContent === 'B'
+    stopGuide()
+    return ran.join() === 'A' && moved
+  })())
+  /*
+   * 마지막 단계의 done 도 봐야 한다. 넘어갈 단계가 없다고 거기서 끝내 버리면 마지막
+   * 걸음이 만든 것은 아무도 못 본다.
+   */
+  ok('마지막 단계의 결과도 보여 주고 나서 끝난다', await (async () => {
+    guide({ steps: [{ say: 'A', spot: 'gone', done: { say: '다 됐습니다' } }] })
+    gSpot('gone').click()
+    await painted()
+    const held = guiding() && document.querySelector('.onbg__h').textContent === '다 됐습니다'
+    document.querySelector('.onbg__next').click()
+    await painted()
+    return held && !guiding() && !document.querySelector('.onbg')
+  })())
+  /* done 이 없는 단계는 예전처럼 곧바로 넘어간다 — 이 갈래를 지우면 그 동작으로 돌아간다 */
+  ok('done 이 없으면 곧바로 다음 단계로 간다', await (async () => {
+    guide({ steps: [{ say: 'A', spot: 'gone' }, { say: 'B', spot: 'gtwo' }] })
+    gSpot('gone').click()
+    await painted()
+    const r = guideAt() === 1 && !guideMarks().done
+      && document.querySelector('.onbg__h').textContent === 'B'
+    stopGuide()
+    return r
+  })())
   /* 기다리는 중에 그만두면 run 은 돌지 않는다 — 막을 걷었는데 화면이 바뀌면 안 된다 */
   ok('기다리는 중에 그만두면 그 단계는 돌지 않는다', await (async () => {
     const ran = []
@@ -2389,6 +2456,22 @@
     stopGuide()
     await new Promise((r) => setTimeout(r, 90))
     return !ran.length && !guiding() && !document.querySelector('.onbg')
+  })())
+  /*
+   * 기다리는 중에 그만두고 곧바로 다른 안내를 열 수 있다(다음 화면으로 넘어가는 길이 그렇다).
+   * 그때 앞 안내에서 잠들어 있던 걸음이 깨어나 뒤 안내의 단계를 밀면, 사람은 누르지도 않은
+   * 설명이 저절로 넘어가는 것을 본다. 깬 자리가 자기 안내인지 보고 아니면 물러나야 한다.
+   */
+  ok('기다리는 중에 그만둔 걸음은 새로 연 안내를 밀지 않는다', await (async () => {
+    guide({ steps: [{ say: '앞', spot: 'gone', wait: 60 }, { say: '앞 둘' }] })
+    gSpot('gone').click()
+    await new Promise((r) => setTimeout(r, 10))
+    stopGuide()
+    guide({ steps: [{ say: '뒤', spot: 'gtwo' }, { say: '뒤 둘' }] })
+    await new Promise((r) => setTimeout(r, 90))   // 앞 안내의 60ms 가 이 사이에 깬다
+    const held = guideAt() === 0 && document.querySelector('.onbg__h').textContent === '뒤'
+    stopGuide()
+    return held
   })())
   /* spot 을 CSS 선택자로도 준다 — data-coach 를 못 붙이는 자리가 있다 */
   ok('짚을 자리를 CSS 선택자로도 준다', (() => {

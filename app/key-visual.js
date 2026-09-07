@@ -1143,6 +1143,17 @@ function runExample() {
       // 이 칸을 문장 모델이 채운다. onboard.js 머리글의 wait 를 참고
       wait: 3000, waitSay: '씬마다 프롬프트를 쓰고 있습니다',
       run: () => fillPromptsFromSample(),
+      /*
+       * 3초 기다린 것을 보고 갑니다. 안 세우면 다음 단계가 [생성] 버튼을 짚는 사이
+       * 방금 채워진 프롬프트 칸이 막에 덮입니다(onboard.js 머리글의 done).
+       */
+      done: {
+        say: '프롬프트가 채워졌습니다',
+        sub: '씬의 장소 · 시간 · 인물이 한 줄의 그림 지시가 됩니다. 각 줄은 손으로 고칠 수 있고, '
+          + '고친 것이 그대로 생성에 들어갑니다',
+        see: 'prompts',
+        got: () => `씬 ${S.scenes.filter((s) => s.prompt).length}개의 프롬프트`,
+      },
     },
     {
       say: '씬마다 그림 한 장을 세웁니다', see: 'queue',
@@ -1155,6 +1166,13 @@ function runExample() {
         for (const s of S.scenes) if (s.prompt) drawSample(s)
         mark(`예시 그림 ${doneJobs().length}장을 세웠습니다`, { example: true })
         paint()
+      },
+      done: {
+        say: '그림이 나왔습니다',
+        sub: '씬마다 한 장씩 들어옵니다. 마음에 안 드는 씬은 프롬프트를 고쳐 그 씬만 다시 그리고, '
+          + '고른 장은 스토리보드의 컷으로 넘깁니다',
+        see: ['kvgrid', 'queue'],
+        got: () => `그림 ${doneJobs().length}장`,
       },
     },
     {

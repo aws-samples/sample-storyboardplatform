@@ -56,6 +56,17 @@
  * 기다리는지」를 적고 진행 띠가 돌고, 다 차면 run 이 돕니다. 기다리는 것은 흉내이고
  * 왕복은 없으므로 GPU 도 Bedrock 도 부르지 않습니다 — 시간의 모양만 진짜를 닮습니다.
  *
+ * ══ 기다려서 나온 것을 보고 갑니다 (done)
+ *
+ * 3초를 기다리게 해 놓고 다 차는 순간 다음 설명으로 넘어가면, 정작 그 3초가 만들어 낸
+ * 것은 다음 단계가 짚는 자리 밖에 있어서 어두운 막에 덮입니다. 기다린 사람이 무엇을
+ * 기다렸는지 못 보는 셈입니다.
+ *
+ * 그래서 run 뒤에 한 걸음을 더 둡니다(done). 결과가 들어간 판에 구멍을 뚫어 밝히고,
+ * 말풍선은 「무엇이 만들어졌는지」를 적고 넘어갈 버튼 하나를 냅니다. 넘어가는 시점은
+ * 사람이 정합니다 — 또 타이머로 넘기면 읽는 속도를 우리가 정하는 셈이고, 이 파일에
+ * 타이머가 없는 이유가 그것입니다.
+ *
  * 되돌리기가 없다는 사실은 말풍선에 적어 둡니다 — 예시 내용은 서버에 남고 같은 보드를
  * 보는 사람에게도 보입니다(app/board.js 의 push 가 net.sendOp 를 부릅니다). 그것을 모른
  * 채 누르게 두지 않습니다. 네 화면을 잇는 예시는 그래서 「예시 프로젝트」 한 판에만
@@ -242,6 +253,15 @@ body.onbguiding { overflow: hidden; }
 @media (prefers-reduced-motion: reduce) {
   .onbg__waitsay::before { animation: none; }
 }
+/*
+ * 기다린 것이 나왔다는 표시. 같은 단계의 뒷걸음이라 번호(1/6)는 그대로이므로, 말풍선이
+ * 앞으로 갔는지 결과를 보고 있는지를 이 한 줄이 가릅니다.
+ */
+.onbg__got {
+  display: flex; align-items: center; gap: 6px;
+  font: 600 11.5px/1.4 var(--sb-sans, sans-serif); color: var(--sb-ok, #0f7b5f);
+}
+.onbg__got::before { content: '✓'; font-size: 12px; }
 .onbg__x {
   position: absolute; top: 9px; right: 9px; width: 24px; height: 24px; padding: 0;
   display: grid; place-items: center; font: inherit; font-size: 15px;
@@ -342,7 +362,9 @@ export const guideAt = () => (live ? live.i : -1)
  * .onb-see)로 「무엇을 짚었나」를 확인할 수 있었는데, 이제 요소에 아무것도 붙이지
  * 않으므로(막에 구멍을 뚫습니다) 물어볼 자리가 하나 있어야 합니다.
  */
-export const guideMarks = () => ({ lit: live?.lit || null, seen: [...(live?.seen || [])] })
+export const guideMarks = () => ({
+  lit: live?.lit || null, seen: [...(live?.seen || [])], done: !!live?.done,
+})
 
 /*
  * 선택자 하나를 찾습니다. 못 찾으면 null 입니다.
@@ -386,7 +408,45 @@ function unspot() {
   live.lit = null
   live.seen = []
   live.wait = null
+  // live.done 은 건드리지 않습니다 — 결과를 보여 주는 뒷걸음도 showStep 을 한 번 지납니다
 }
+
+/*
+ * 지금 그릴 단계. 결과를 보여 주는 중이면(live.done) 같은 단계를 다른 얼굴로 돌려줍니다.
+ *
+ * 단계를 하나 더 늘리지 않고 한 단계의 두 얼굴로 둔 이유는 셋입니다. 번호(1/6)가 늘지
+ * 않아 예시의 길이가 결과 화면 수만큼 길어 보이지 않고, 각 화면의 steps 를 읽는 사람이
+ * 「기다린다 → 나온 것을 본다」를 한 자리에서 읽고, done 을 지우면 기다림만 남아
+ * 예전 동작으로 정확히 돌아갑니다.
+ */
+function viewOf(s) {
+  const d = s?.done
+  if (!live?.done || !d) return s || {}
+  return {
+    ...s,
+    say: val(d.say) || '만들어졌습니다',
+    sub: val(d.sub) || '',
+    /* 짚을 자리는 없습니다 — 이 걸음에서 할 일은 누르는 것이 아니라 보는 것입니다 */
+    spot: null,
+    see: d.see ?? s.see,
+    got: val(d.got) || '방금 만들어진 것입니다',
+    go: val(d.go) || '다음으로',
+    leaves: false,
+    wait: 0,
+  }
+}
+
+/*
+ * done 의 글자는 함수로도 줄 수 있습니다. 「노드 87개」처럼 run 이 돈 뒤에야 알 수 있는
+ * 숫자를 적으려면 그때 세야 하는데, steps 는 안내가 시작되기 전에 한 번 만들어집니다.
+ */
+const val = (v) => (typeof v === 'function' ? v() : v)
+
+/** 지금 단계의 원본. run·wait 을 읽는 자리(fire)가 씁니다 */
+const raw = () => live?.steps[live.i]
+
+/** 지금 그릴 얼굴. 그리는 자리(showStep·draw)가 씁니다 */
+const cur = () => viewOf(raw())
 
 /**
  * 한 단계를 화면에 올립니다. 실행하지는 않습니다 — 누를 자리를 짚고 기다립니다.
@@ -398,7 +458,7 @@ function unspot() {
 function showStep() {
   if (!live) return
   unspot()
-  const s = live.steps[live.i]
+  const s = cur()
   const el = spotOf(s)
   if (el) live.lit = el
   else if (s?.spot) console.warn('[onboard] 짚을 자리를 못 찾았습니다 —', s.spot)
@@ -428,7 +488,7 @@ const holeOf = (r, pad = 6) => ({
  */
 function draw() {
   if (!live) return
-  const s = live.steps[live.i]
+  const s = cur()
   const root = live.root
   root.textContent = ''
 
@@ -553,6 +613,8 @@ function bubble(s, boxes, lit) {
   const h = mk('h2', 'onbg__h', s?.say || '')
   b.append(h)
   if (s?.sub) b.append(mk('p', 'onbg__p', s.sub))
+  /* 기다려서 나온 것을 보고 있는 걸음이면 그렇다고 적습니다 — 번호는 그대로이므로 */
+  if (s?.got) b.append(mk('div', 'onbg__got', s.got))
 
   /*
    * 아래 셋 중 하나가 붙습니다.
@@ -635,11 +697,33 @@ function waitBar(s) {
  * 비웁니다). 안 걷으면 기다리는 동안 그 자리가 여전히 열려 있어서 두 번, 세 번 눌리고,
  * 사람은 「첫 번째 클릭이 안 먹었다」로 읽습니다.
  *
+ * done 이 붙은 단계는 run 뒤에 한 걸음을 더 섭니다 — 기다려 나온 것을 밝혀 보여 주는
+ * 걸음입니다. 그 걸음에서 다시 여기로 오면(버튼 하나뿐입니다) 다음 단계로 넘어갑니다.
+ *
  * run 이 비동기인 동안 버튼을 잠급니다. 안 잠그면 두 번 눌러 같은 단계가 두 번 돕니다.
+ *
+ * 기다리는 중에 안내가 멈출 수 있습니다(사람이 닫거나 다른 화면으로 갑니다). 그때 잠든
+ * 이 함수는 그대로 살아 있다가 깨어나므로, 깬 자리가 아직 「내가 시작한 그 안내」인지를
+ * 봐야 합니다. live 가 있는지만 보면 그 사이에 새로 시작된 다른 안내의 단계를 밀어
+ * 버립니다 — 안내를 잇달아 두 번 여는 화면에서 첫 안내의 잠꼬대가 두 번째를 흔듭니다.
  */
 async function fire() {
   if (!live || live.busy) return
-  const s = live.steps[live.i]
+  const me = live
+  const s = raw()
+
+  /*
+   * 결과를 보고 있던 걸음에서 온 것이면 run 을 다시 돌리지 않고 그냥 넘깁니다 —
+   * 같은 단계의 run 이 두 번 돌면 예시 데이터가 두 번 얹힙니다.
+   */
+  if (live.done) {
+    live.done = false
+    if (live.i >= live.steps.length - 1) { stop(); return }
+    live.i += 1
+    showStep()
+    return
+  }
+
   live.busy = true
 
   if (s?.wait > 0) {
@@ -647,7 +731,7 @@ async function fire() {
     live.wait = { ms: s.wait, until: now() + s.wait }
     draw()
     await sleep(s.wait)
-    if (!live) return
+    if (live !== me) return
     live.wait = null
   }
 
@@ -656,8 +740,19 @@ async function fire() {
   } catch (e) {
     console.warn('[onboard] 예시 단계에서 걸렸습니다', e)
   }
-  if (!live) return
+  if (live !== me) return
   live.busy = false
+
+  /*
+   * 나온 것을 보고 갑니다. 마지막 단계에도 붙일 수 있게 넘어갈지 여부보다 먼저 봅니다 —
+   * 여기서 끝내 버리면 마지막 단계의 결과는 아무도 못 봅니다.
+   */
+  if (s?.done) {
+    live.done = true
+    showStep()
+    return
+  }
+
   if (live.i >= live.steps.length - 1) { stop(); return }
   live.i += 1
   showStep()
@@ -670,7 +765,7 @@ async function fire() {
  * 자리에는 테 · 물결 · 마우스 표시 · 꼬리표 넉 장이 얹혀서 어디를 눌러야 하는지 한눈에
  * 보입니다. 누르면 그 자리의 원래 동작은 막고 run 이 대신 돌아 내용이 채워집니다.
  *
- * 각 단계는 { say, sub?, spot?, see?, do?, tag?, go?, leaves?, wait?, waitSay?, run? } 입니다.
+ * 각 단계는 { say, sub?, spot?, see?, do?, tag?, go?, leaves?, wait?, waitSay?, done?, run? } 입니다.
  *   say      말풍선의 큰 줄. 지금 무엇을 하는지
  *   sub      그 아래 설명 줄
  *   spot     누를 자리. data-coach 이름이거나 CSS 선택자
@@ -682,6 +777,9 @@ async function fire() {
  *   wait     run 전에 기다릴 밀리초. 모델을 부르는 자리의 단계에 답니다(머리글 참고)
  *   waitSay  기다리는 동안 적을 한 줄. 기본은 「만들고 있습니다」
  *   run      실제로 화면을 바꾸는 함수. 동기·비동기 둘 다 됩니다
+ *   done     run 뒤에 나온 것을 보여 줄 한 걸음. 없으면 바로 다음 단계로 갑니다
+ *            { say, sub?, see?, got?, go? } — see 를 주면 그 판만 밝힙니다(기본은 단계의 see).
+ *            네 글자는 함수로도 줄 수 있습니다. run 이 돈 뒤에야 아는 숫자를 적을 때 씁니다
  *
  * 원래 동작을 막는 것은 예시가 실수로 진짜 모델 호출에 닿지 않게 하려는 것입니다 —
  * 무슨 일이 일어나는지는 run 한 곳만 읽으면 됩니다. 자리에 커서를 두어야 하는
@@ -706,7 +804,9 @@ export function guide({ steps = [], title = '예시', onDone } = {}) {
   document.body.append(root)
   document.body.classList.add('onbguiding')
 
-  live = { i: 0, steps, root, title, lit: null, seen: [], busy: false, wait: null, onDone }
+  live = {
+    i: 0, steps, root, title, lit: null, seen: [], busy: false, wait: null, done: false, onDone,
+  }
 
   /*
    * 짚은 자리의 클릭을 document 의 캡처 단계에서 받습니다. 캡처는 target 보다 먼저
