@@ -246,17 +246,30 @@ class GraphStore {
 
   /**
    * 엣지를 얹는다. s·o 를 이름으로 줘도 노드 id 로 옮겨 준다(normalizeGraph).
-   * 같은 삼항이 이미 있으면 넣지 않는다.
+   * 같은 삼항이 명시로 이미 있으면 넣지 않고, 추론으로만 서 있었으면 명시로 올린다.
    * @param {Array} edges - [{s, p, o, props}]
    * @returns {{added: Array, warnings: Array<string>}}
    */
   addEdges(edges) {
     const g = normalizeGraph({ nodes: this.nodes, edges: asList(edges) })
     const have = new Set(this.edges.map(edgeKey))
+    const facts = new Set(this.asserted.map(edgeKey))
     const added = []
     for (const e of g.edges) {
       const k = edgeKey(e)
-      if (have.has(k)) { g.warnings.push(`${k}: 이미 있는 엣지. 넣지 않습니다`); continue }
+      if (have.has(k)) {
+        // 같은 삼항이 추론으로만 서 있었다면 명시로 올려 준다. 근거가 된 엣지가 뒤에
+        // 사라져도 사실은 남아야 한다 (mergeGraphs 의 "명시가 추론을 이긴다" 와 같은 규칙)
+        if (!isDerived(e) && !facts.has(k)) {
+          facts.add(k)
+          this.given = this.given.filter((x) => edgeKey(x) !== k)
+          this.asserted.push(e)
+          added.push(e)
+          continue
+        }
+        g.warnings.push(`${k}: 이미 있는 엣지. 넣지 않습니다`)
+        continue
+      }
       have.add(k)
       this.suppressed.delete(k)
       if (isDerived(e)) this.given.push(e)

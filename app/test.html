@@ -3867,9 +3867,11 @@
   })())
 
   // ── 그래프 역기입: validateWritebackBeforeApply / applyWriteback ────────────
+  // demoBranch 의 새 노드 둘은 엣지가 하나(가온 reveals 가게의 사정)뿐이라 둘 다 고립된다.
+  // 그래서 엣지 수는 역기입에 적힌 1개 + 고립을 이어 붙인 2개다 (graph-orphans.js)
   ok('유효한 역기입은 safe: true 와 미리보기 숫자를 낸다', (() => {
     const v = validateWritebackBeforeApply(wbStore(), demoBranch.writeback)
-    return v.safe === true && v.preview.nodesAdded === 2 && v.preview.edgesAdded === 1
+    return v.safe === true && v.preview.nodesAdded === 2 && v.preview.edgesAdded === 3
       && v.preview.edgesRemoved === 1
   })(), JSON.stringify(validateWritebackBeforeApply(wbStore(), demoBranch.writeback).preview))
   ok('검증은 그래프를 바꾸지 않는다', (() => {
@@ -3910,8 +3912,9 @@
     const before = st.stats()
     const r = applyWriteback(st, demoBranch.writeback)
     const after = st.stats()
-    return r.applied.nodesAdded === 2 && r.applied.edgesAdded === 1 && r.applied.edgesRemoved === 1
-      && after.nodes === before.nodes + 2 && after.assertedEdges === before.assertedEdges
+    // 엣지 3개(적힌 1 + 고립 연결 2)가 붙고 1개가 끊겼으니 명시 엣지는 둘 늘어난다
+    return r.applied.nodesAdded === 2 && r.applied.edgesAdded === 3 && r.applied.edgesRemoved === 1
+      && after.nodes === before.nodes + 2 && after.assertedEdges === before.assertedEdges + 2
   })(), JSON.stringify(applyWriteback(wbStore(), demoBranch.writeback).applied))
   ok('역기입 뒤의 씨앗은 역기입 전과 다르다', (() => {
     const st = wbStore()
@@ -4449,21 +4452,20 @@
   // 캔버스 그리기는 여기서 못 돌린다. 순수 함수인 라벨 표와 판 비교만 본다
   ok('엣지 라벨은 "A ─라벨→ B" 로 읽힌다', edgeLabel('conceals') === '을 은닉함'
     && edgeLabel('serves') === '을 보좌함' && edgeLabel('member_of') === '에 소속됨')
-  ok('표에 없는 술어는 원본 영문 그대로 둔다',
-    edgeLabel('reveals') === 'reveals' && edgeLabel('calls_true_name') === 'calls_true_name')
+  // 어휘에 있는 술어는 전부 표에 있다. 폴백은 어휘 밖의 것에만 남는다
+  ok('표에 없는 술어는 원본 그대로 둔다',
+    edgeLabel('reveals') === '을 폭로함' && edgeLabel('calls_true_name') === '의 참이름을 부름'
+    && edgeLabel('zzz_없는술어') === 'zzz_없는술어')
   ok('술어가 없으면 빈 문자열이다', edgeLabel(null) === '' && edgeLabel(undefined) === '')
   ok('kin_of 는 props.type 으로 부모·자녀·형제를 가른다',
     edgeLabel('kin_of', { type: 'parent' }) === '의 부모임'
     && edgeLabel('kin_of', { type: 'child' }) === '의 자녀임'
     && edgeLabel('kin_of', { type: 'sibling' }) === '의 형제임')
-  ok('kin_of 의 type 이 없으면 술어를 그대로 둔다',
-    edgeLabel('kin_of') === 'kin_of' && edgeLabel('kin_of', { type: '?' }) === 'kin_of')
+  ok('kin_of 의 type 이 없으면 기본 라벨로 읽는다',
+    edgeLabel('kin_of') === '과 혈연 관계임' && edgeLabel('kin_of', { type: '?' }) === '과 혈연 관계임')
   ok('파생 전용 술어에도 라벨이 있다', edgeLabel('has_leverage_over') === '의 약점을 쥠')
-  ok('라벨 표는 어휘의 실제 술어를 덮는다', (() => {
-    // 표에 있으면서 어휘에 없는 키는 kin_of 로 갈라 읽는 셋과 owns/wants 뿐이다
-    const extra = Object.keys(EDGE_LABELS_KR).filter((p) => !GRAPH_SCHEMA.edgeRels.includes(p))
-    return extra.every((p) => ['child_of', 'parent_of', 'sibling_of', 'owns', 'wants'].includes(p))
-  })())
+  ok('라벨 표에는 어휘에 없는 술어가 없다',
+    Object.keys(EDGE_LABELS_KR).every((p) => GRAPH_SCHEMA.edgeRels.includes(p)))
 
   ok('graphDelta 는 새 노드·엣지와 끊긴 엣지를 가른다', (() => {
     const before = {
@@ -4753,6 +4755,329 @@
   ok('묶음이 다르면 다른 시트다',
     await faceSheet([faceA, faceB], 64) !== await faceSheet([faceB, faceA], 64))
   ok('srcOf 는 버전의 주소를 그대로 돌려준다', srcOf({ src: '/img/x.png' }) === '/img/x.png')
+
+  // ══ 그래프의 말 → 사람의 말: graph-ko.js · seed-text.js · graph-orphans.js ══
+  // 씨앗 카드와 역기입 목록은 작가·PD 가 읽는 자리다. 거기에 영문 술어나 그래프 용어가
+  // 새면 읽는 사람이 뜻을 짚을 수 없다. 아래 검사가 그 자리를 전수로 훑는다.
+  const { PREDICATE_KO, KIN_KO, predicateLabel, predicateToKo, edgeToKo, tensionKo, whenKo,
+    NODE_KIND_KO, nodeKindKo, writebackCountsKo, writebackNotesKo, writebackKo,
+  } = await import(`./domain/graph-ko.js?t=${Date.now()}`)
+  const { SEED_TEXT } = await import(`./domain/seed-text.js?t=${Date.now()}`)
+  const { autoConnectOrphans, anchorFor, islandNodes, ORPHAN_LINK,
+  } = await import(`./domain/graph-orphans.js?t=${Date.now()}`)
+
+  // ── 술어 → 한국어 표 ───────────────────────────────────────────────────────
+  ok('어휘의 모든 술어에 한국어 라벨이 있다',
+    GRAPH_SCHEMA.edgeRels.every((p) => !!PREDICATE_KO[p]),
+    GRAPH_SCHEMA.edgeRels.filter((p) => !PREDICATE_KO[p]).join(','))
+  ok('라벨은 목적어 뒤에서 읽히도록 조사로 시작한다',
+    Object.values(PREDICATE_KO).every((v) => /^(을|과|은|이|으로|에|에게|의|에서)/.test(v)),
+    Object.entries(PREDICATE_KO).filter(([, v]) => !/^(을|과|은|이|으로|에|에게|의|에서)/.test(v))
+      .map(([k]) => k).join(','))
+  ok('친족은 네 갈래를 다 적는다',
+    ['parent', 'child', 'sibling', 'spouse'].every((t) => !!KIN_KO[t]))
+  ok('판의 엣지 라벨과 같은 표를 쓴다',
+    GRAPH_SCHEMA.edgeRels.every((p) => predicateLabel(p) === edgeLabel(p)))
+
+  ok('삼항을 한국어 문장으로 옮긴다',
+    predicateToKo('표선생', 'mentor_of', '재민의 아들') === '표선생이 재민의 아들을 가르침'
+    && predicateToKo('윤재민', 'targets', '재민의 아들') === '윤재민이 재민의 아들을 겨냥함')
+  ok('조사는 주어와 목적어의 받침을 보고 고른다',
+    predicateToKo('루미', 'loves', '진우') === '루미가 진우를 사랑함'
+    && predicateToKo('진우', 'loves', '루미') === '진우가 루미를 사랑함')
+  ok('과/와 로 갈리는 술어도 목적어를 본다',
+    predicateToKo('가온', 'rival_of', '노을') === '가온이 노을과 경쟁함'
+    && predicateToKo('노을', 'rival_of', '가온') === '노을이 가온과 경쟁함')
+  ok('으로/로 도 목적어를 본다',
+    predicateToKo('결계', 'dissolving', '침묵') === '결계가 침묵으로 해체되는 중임'
+    && predicateToKo('결계', 'dissolving', '연기') === '결계가 연기로 해체되는 중임')
+  ok('kin_of 의 type 은 문장에도 실린다',
+    predicateToKo('가온', 'kin_of', '노을', { type: 'parent' }) === '가온이 노을의 부모임')
+  ok('어휘에 없는 술어는 대시로 잇는다',
+    predicateToKo('가온', 'zzz', '노을') === '가온 — zzz — 노을')
+  ok('주어가 없으면 목적어 쪽만 읽는다', predicateToKo('', 'loves', '루미') === '루미를 사랑함')
+  ok('엣지 하나를 그대로 문장으로 받는다',
+    edgeToKo({ s: '표선생', p: 'mentor_of', o: '재민의 아들' }) === '표선생이 재민의 아들을 가르침')
+  ok('긴장 수치에는 "긴장도" 가 붙는다',
+    tensionKo(0.7) === ' (긴장도 0.7)' && tensionKo(0) === ' (긴장도 0)'
+    && tensionKo(undefined) === '' && tensionKo(null) === '' && tensionKo('') === '')
+  ok('상대 시점은 t 대신 사람의 말로 읽는다',
+    whenKo(0) === '지금' && whenKo(-3) === '3년 전' && whenKo(2) === '2년 뒤'
+    && whenKo(undefined) === '' && whenKo('아무말') === '')
+
+  // ── 씨앗 카드의 말 ─────────────────────────────────────────────────────────
+  ok('탐지기 12종에 문구가 다 있다', Object.keys(PROBES).every((p) => !!SEED_TEXT[p]),
+    Object.keys(PROBES).filter((p) => !SEED_TEXT[p]).join(','))
+  ok('문구 표에 탐지기가 아닌 키가 없다', Object.keys(SEED_TEXT).every((p) => !!PROBES[p]))
+
+  // 탐지기 12종을 한 판에 물린다. 아래 검사가 이 판의 모든 씨앗 문구를 훑는다
+  const koStore = createGraphStore(G([
+    N('gaon', 'Character', '가온', { role: '빵집 주인', want: '가게' }),
+    N('noeul', 'Character', '노을', { role: '단골', want: '가게' }),
+    N('bada', 'Character', '바다'), N('hangyeol', 'Character', '한결'),
+    N('s1', 'Secret', '가게의 사정', { claim: '가온은 가게를 넘길 생각이다' }),
+    N('e1', 'Event', '학부모 모임 폭로', { t: 0 }), N('e2', 'Event', '옛 화재', { t: -3 }),
+    N('f1', 'Faction', '상인회'), N('f2', 'Faction', '개발조합'),
+    N('loc', 'Location', '뒷골목'), N('obj', 'Object', '밀실 각서'),
+  ], [
+    E('gaon', 'conceals', 's1'), E('bada', 'knows', 's1'), E('s1', 'hidden_from', 'noeul'),
+    E('gaon', 'mentor_of', 'hangyeol', { tension: 0.7 }),
+    E('hangyeol', 'distrusts', 'gaon', { tension: 0.8 }),
+    E('gaon', 'loves', 'noeul', { tension: 0.6 }), E('bada', 'loves', 'noeul', { tension: 0.7 }),
+    E('gaon', 'member_of', 'f1'), E('gaon', 'member_of', 'f2'),
+    E('f1', 'rival_of', 'f2', { tension: 0.8 }), E('noeul', 'member_of', 'f2'),
+    E('bada', 'serves', 'gaon'), E('gaon', 'rival_of', 'bada'),
+    E('gaon', 'participated_in', 'e1', { tension: 0.9 }), E('noeul', 'participated_in', 'e1'),
+    E('bada', 'participated_in', 'e2'), E('hangyeol', 'participated_in', 'e2'),
+    E('gaon', 'manages', 'f1'), E('obj', 'located_in', 'loc'),
+  ]))
+  const koSeeds = findSeeds(koStore)
+  const koText = koSeeds.map((s) => `${s.title} ${s.desc}`).join('\n')
+
+  ok('씨앗 카드에 그래프 용어가 없다', (() => {
+    const bad = ['엣지', '노드', '술어', 't=', 'props', 'asserted', 'kind']
+    return koSeeds.length >= 6 && !bad.some((w) => koText.includes(w))
+  })(), ['엣지', '노드', '술어', 't=', 'props'].filter((w) => koText.includes(w)).join(','))
+  ok('씨앗 카드에 영문 술어가 없다',
+    koSeeds.length >= 6 && !GRAPH_SCHEMA.edgeRels.some((p) => koText.includes(p)),
+    GRAPH_SCHEMA.edgeRels.filter((p) => koText.includes(p)).join(','))
+  ok('씨앗 카드에 로마자가 섞이지 않는다', !/[A-Za-z]/.test(koText),
+    (koText.match(/[A-Za-z]+/g) || []).slice(0, 5).join(','))
+  // 마침표로 끝나거나, 감춰진 내용을 따옴표로 인용하고 끝난다
+  ok('씨앗 설명은 문장으로 끝난다', koSeeds.every((s) => /[.?"”]$/.test(s.desc.trim())),
+    koSeeds.filter((s) => !/[.?"”]$/.test(s.desc.trim())).map((s) => s.probe).join(','))
+  ok('숫자는 혼자 두지 않는다', (() => {
+    const withNum = koSeeds.filter((s) => /\d\.\d/.test(s.desc))
+    return withNum.length >= 1 && withNum.every((s) => s.desc.includes('긴장도'))
+  })())
+  ok('풀리지 않은 갈등은 관계를 한국어 문장으로 적는다', (() => {
+    const list = koSeeds.filter((x) => x.probe === 'unresolved_tension')
+    return list.length >= 1 && list.every((s) => /긴장도 0\.\d\)/.test(s.desc))
+      && list.some((s) => s.desc.startsWith('한결이 가온을 불신함 (긴장도 0.8)'))
+  })(), koSeeds.filter((x) => x.probe === 'unresolved_tension').map((s) => s.desc).join(' / '))
+  ok('치르지 않은 대가는 후속 전개가 없다고 적는다', (() => {
+    const s = koSeeds.find((x) => x.probe === 'dangling_consequence')
+    return !!s && s.desc.includes('사건 이후 아무런 후속 전개가 없습니다')
+      && !s.title.includes('t=')
+  })(), koSeeds.find((x) => x.probe === 'dangling_consequence')?.desc || '(없음)')
+  ok('지난 사건은 몇 해째인지 제목에 적는다',
+    SEED_TEXT.dangling_consequence.title({ event: '옛 화재', t: -3 }) === '3년째 값이 치러지지 않은 사건: 옛 화재')
+  ok('끊어진 사제는 무엇이 끊겼는지 문장으로 적는다', (() => {
+    const d = SEED_TEXT.severed_bond.desc({
+      edge: { s: '표선생', p: 'mentor_of', o: '재민의 아들' },
+      backlash: { s: '재민의 아들', p: 'distrusts', o: '표선생' },
+      broken: false,
+      tension: 0.7,
+    })
+    return d.startsWith('표선생이 재민의 아들을 가르침. 그러면서 재민의 아들이 표선생을 불신함')
+      && !d.includes('props')
+  })())
+
+  // ── 세계관 업데이트 패널의 말 ──────────────────────────────────────────────
+  // 이 패널이 마지막 관문이다. 여기까지 그래프 용어가 새면 작가·PD 는 무엇이 늘어나는지
+  // 모른 채 「반영」을 누른다. 아래 검사가 미리보기와 적용 뒤 기록의 문장을 전수로 훑는다.
+  ok('노드 종류마다 문장에 넣을 이름이 있다',
+    GRAPH_SCHEMA.nodeKinds.every((k) => !!NODE_KIND_KO[k]),
+    GRAPH_SCHEMA.nodeKinds.filter((k) => !NODE_KIND_KO[k]).join(','))
+  ok('모르는 종류도 문장은 선다', nodeKindKo('Vehicle') === '항목' && nodeKindKo() === '항목')
+
+  // 엣지 없이 온 새 노드 하나. 자동 연결이 끼는 자리를 이 아래 두 곳에서 같이 쓴다
+  const lonelyWb = { nodes: [{ name: '밀실 각서', kind: 'Object', desc: '누구도 못 본 문서' }], edges: [] }
+
+  const wbKoStore = wbStore()
+  const wbKoCheck = validateWritebackBeforeApply(wbKoStore, demoBranch.writeback)
+  const wbKoName = (id) => wbKoStore.getNode(id)?.name || id
+  const wbKoView = writebackKo(wbKoCheck.changes, wbKoName, { notices: wbKoCheck.notices })
+  const wbKoText = [...wbKoView.counts.map((p) => `${p.label} ${p.n}${p.tail}`), ...wbKoView.notes].join('\n')
+
+  ok('점검 결과가 개수 말고 무엇이 바뀌는지를 낸다', (() => {
+    const c = wbKoCheck.changes
+    return c.nodes.length === 2 && c.edges.length === 3 && c.removes.length === 1
+  })(), JSON.stringify(wbKoCheck.changes?.nodes?.map((n) => n.name)))
+  ok('개수는 종류별로 갈라 센다', (() => {
+    const said = wbKoView.counts.map((p) => `${p.label} ${p.n}${p.tail}`)
+    return said.includes('새 사건 1개 추가') && said.includes('새 등장인물 1명 추가')
+      && said.includes('새 관계 3개 추가') && said.includes('기존 관계 1개 변경')
+  })(), wbKoView.counts.map((p) => `${p.label} ${p.n}${p.tail}`).join(' · '))
+  ok('적용을 마친 뒤에는 같은 개수를 지난 일로 적는다', (() => {
+    const said = writebackCountsKo(wbKoCheck.changes, { done: true })
+      .map((p) => `${p.label} ${p.n}${p.tail}`)
+    return said.includes('새 사건 1개') && said.includes('변경된 관계 1개')
+      && !said.some((s) => s.includes('추가'))
+  })(), writebackCountsKo(wbKoCheck.changes, { done: true }).map((p) => p.label + p.tail).join(' · '))
+  ok('바뀌는 것이 없으면 조각도 없다',
+    writebackCountsKo({ nodes: [], edges: [], removes: [] }).length === 0
+    && writebackCountsKo(null).length === 0 && writebackCountsKo(undefined).length === 0)
+
+  ok('새 항목은 이름과 종류로 적는다',
+    wbKoView.notes.includes('"가게를 넘기는 날" 사건이 새로 추가됩니다')
+    && wbKoView.notes.includes('"바람" 등장인물이 새로 추가됩니다'),
+    wbKoView.notes.join(' | '))
+  ok('새 관계는 누구와 누구인지 적고 한국어 문장을 붙인다',
+    wbKoView.notes.some((w) => w === '가온과 가게의 사정의 관계가 추가됩니다: 가온이 가게의 사정을 폭로함'),
+    wbKoView.notes.filter((w) => w.includes('관계가 추가')).join(' | '))
+  ok('끊는 관계는 「변경」으로 적고 술어를 말하지 않는다',
+    wbKoView.notes.includes('가온과 노을의 관계가 변경됩니다'),
+    wbKoView.notes.filter((w) => w.includes('변경')).join(' | '))
+  ok('적용 뒤에는 같은 문장을 지난 일로 적는다', (() => {
+    const done = writebackNotesKo(wbKoCheck.changes, wbKoName, { done: true })
+    return done.includes('"가게를 넘기는 날" 사건이 새로 추가되었습니다')
+      && done.includes('가온과 노을의 관계가 변경되었습니다')
+  })())
+  ok('이름을 찾을 곳이 없으면 받은 값을 그대로 읽는다', (() => {
+    const n = writebackNotesKo({ edges: [{ s: '가온', p: 'loves', o: '노을' }] }, null)
+    return n.length === 1 && n[0] === '가온과 노을의 관계가 추가됩니다: 가온이 노을을 사랑함'
+  })(), writebackNotesKo({ edges: [{ s: '가온', p: 'loves', o: '노을' }] }, null).join(''))
+  ok('미리보기에서도 새 노드는 이름으로 불린다', (() => {
+    // 아직 판에 없는 노드다. nameOf 는 못 찾는다. changes.nodes 의 이름이 대신 선다
+    const n = writebackNotesKo({
+      nodes: [{ id: 'bareum', kind: 'Character', name: '바람' }],
+      edges: [{ s: 'gaon', p: 'remembers', o: 'bareum' }],
+    }, (id) => (id === 'gaon' ? '가온' : null))
+    return n.length === 2 && n[1] === '가온과 바람의 관계가 추가됩니다: 가온이 바람을 기억함'
+  })())
+  ok('빈 역기입에서는 적을 것이 없다',
+    writebackNotesKo({}, wbKoName).length === 0 && writebackKo(null, wbKoName).notes.length === 0)
+
+  // 차단 리스트. 이 패널에서 이 단어가 하나라도 보이면 읽는 사람이 뜻을 짚을 수 없다
+  const WB_BAN = ['노드', '엣지', '역기입', '그래프', '술어', 'props', 'tension', 'kind', 't=']
+  ok('세계관 업데이트 문장에 그래프 용어가 없다',
+    wbKoText.length > 40 && !WB_BAN.some((w) => wbKoText.includes(w)),
+    WB_BAN.filter((w) => wbKoText.includes(w)).join(','))
+  ok('세계관 업데이트 문장에 id 가 새지 않는다', (() => {
+    const ids = wbKoStore.toJSON().nodes.map((n) => n.id)
+    return !ids.some((id) => wbKoText.includes(id)) && !/\bid\b/.test(wbKoText)
+  })(), wbKoStore.toJSON().nodes.map((n) => n.id).filter((id) => wbKoText.includes(id)).join(','))
+  ok('세계관 업데이트 문장에 영문 술어가 없다',
+    !GRAPH_SCHEMA.edgeRels.some((p) => wbKoText.includes(p)),
+    GRAPH_SCHEMA.edgeRels.filter((p) => wbKoText.includes(p)).join(','))
+  ok('세계관 업데이트 문장에 로마자가 섞이지 않는다', !/[A-Za-z]/.test(wbKoText),
+    (wbKoText.match(/[A-Za-z]+/g) || []).slice(0, 5).join(','))
+  ok('사람에게 보일 알림과 개발자용 경고는 갈라져 있다', (() => {
+    // 모르는 kind 는 개발자가 고칠 것이다. 경고에는 남고 사람에게는 가지 않는다
+    const v = validateWritebackBeforeApply(wbStore(), { nodes: [{ name: '트럭', kind: 'Vehicle' }] })
+    return v.warnings.some((w) => w.includes('Vehicle')) && v.notices.length === 0
+  })())
+  ok('자동 연결은 사람에게도 알린다', (() => {
+    const v = validateWritebackBeforeApply(wbStore(), lonelyWb)
+    const said = writebackKo(v.changes, (id) => wbStore().getNode(id)?.name || id,
+      { notices: v.notices }).notes.join('\n')
+    return v.notices.length === 1 && said.includes('밀실 각서') && said.includes('자동 연결')
+      && !WB_BAN.some((w) => said.includes(w)) && !/[A-Za-z]/.test(said)
+  })(), validateWritebackBeforeApply(wbStore(), lonelyWb).notices.join(' | '))
+  ok('적용 결과도 같은 두 벌을 낸다', (() => {
+    const st = wbStore()
+    const r = applyWriteback(st, demoBranch.writeback)
+    const said = writebackKo(r.changes, (id) => st.getNode(id)?.name || id,
+      { done: true, notices: r.notices }).notes.join('\n')
+    return Array.isArray(r.notices) && r.changes.nodes.length === 2
+      && said.includes('새로 추가되었습니다') && !WB_BAN.some((w) => said.includes(w))
+  })())
+
+  // ── 역기입의 고립 노드 ─────────────────────────────────────────────────────
+  ok('노드 종류마다 이을 술어가 있다',
+    GRAPH_SCHEMA.nodeKinds.every((k) => typeof ORPHAN_LINK[k] === 'function'),
+    GRAPH_SCHEMA.nodeKinds.filter((k) => !ORPHAN_LINK[k]).join(','))
+  ok('이을 술어는 어휘 안에 있고 방향이 맞는다',
+    Object.values(ORPHAN_LINK).every((f) => GRAPH_SCHEMA.assertableRels.includes(f('a', 'b').p)))
+
+  const lonely = lonelyWb
+  ok('엣지 없이 온 새 노드는 기존 인물과 자동으로 이어진다', (() => {
+    const st = wbStore()
+    const r = applyWriteback(st, lonely)
+    return r.applied.nodesAdded === 1 && r.applied.edgesAdded === 1 && !islandNodes(st.toJSON()).length
+  })(), JSON.stringify(applyWriteback(wbStore(), lonely).applied))
+  ok('자동으로 이었으면 무엇을 이었는지 경고로 남긴다', (() => {
+    const r = applyWriteback(wbStore(), lonely)
+    return r.warnings.some((w) => w.includes('밀실 각서') && w.includes('자동 연결'))
+  })(), applyWriteback(wbStore(), lonely).warnings.filter((w) => w.includes('자동 연결')).join(' | '))
+  ok('자동 연결 경고에 영문 술어가 새지 않는다', (() => {
+    const w = applyWriteback(wbStore(), lonely).warnings.filter((x) => x.includes('자동 연결')).join(' ')
+    return w.length > 0 && !/[A-Za-z]/.test(w)
+  })())
+  ok('씨앗의 초점 인물이 있으면 그 인물과 잇는다', (() => {
+    const st = wbStore()
+    applyWriteback(st, lonely, { seed: { probe: 'chekhov_object', focus: ['bada'] } })
+    return st.getEdgesFrom('bada').some((e) => e.p === 'uses' && st.getNode(e.o)?.name === '밀실 각서')
+  })())
+  ok('초점이 없으면 역기입이 건드린 인물을 먼저 본다', (() => {
+    const st = wbStore()
+    return anchorFor(st, null, [{ s: 'noeul', p: 'knows', o: 's1' }]) === 'noeul'
+  })())
+  ok('kind 마다 방향이 맞는 술어로 잇는다', (() => {
+    const st = wbStore()
+    applyWriteback(st, {
+      nodes: [{ name: '창고 화재', kind: 'Event', t: 0 }, { name: '지워진 장부', kind: 'Secret' },
+        { name: '옛 동업자', kind: 'Character' }, { name: '조합', kind: 'Faction' },
+        { name: '뒷골목', kind: 'Location' }],
+      edges: [],
+    }, { seed: { focus: ['gaon'] } })
+    const has = (s, p, name) => st.getEdgesFrom(s).some((e) => e.p === p && st.getNode(e.o)?.name === name)
+    return !islandNodes(st.toJSON()).length && has('gaon', 'participated_in', '창고 화재')
+      && has('gaon', 'remembers', '옛 동업자') && has('gaon', 'member_of', '조합')
+      && has('gaon', 'last_seen_in', '뒷골목')
+      && st.getEdgesTo('gaon').some((e) => e.p === 'concerns' && st.getNode(e.s)?.name === '지워진 장부')
+  })(), islandNodes(wbStore().toJSON()).map((n) => n.name).join(','))
+  ok('엣지가 이미 붙은 새 노드는 건드리지 않는다', (() => {
+    const r = autoConnectOrphans(wbStore(), [{ id: 'k', kind: 'Object', name: '열쇠' }],
+      [{ s: 'gaon', p: 'uses', o: 'k' }])
+    return r.edges.length === 0 && r.warnings.length === 0
+  })())
+  ok('판에 인물이 없으면 억지로 잇지 않고 경고만 남긴다', (() => {
+    const st = createGraphStore({ nodes: [N('p1', 'Location', '빈 골목')], edges: [] })
+    const r = autoConnectOrphans(st, [{ id: 'x', kind: 'Object', name: '깨진 병' }], [])
+    return r.edges.length === 0 && r.warnings.some((w) => w.includes('깨진 병'))
+  })())
+  ok('저장소가 없어도 죽지 않는다', (() => {
+    const r = autoConnectOrphans(null, [{ id: 'x', kind: 'Object', name: '무엇' }], [])
+    return r.edges.length === 0 && r.warnings.length === 0
+  })())
+  ok('엣지를 제대로 적어 온 역기입은 자동 연결이 끼지 않는다', (() => {
+    const r = applyWriteback(wbStore(), {
+      nodes: [{ name: '가게를 넘기는 날', kind: 'Event', t: 0 }],
+      edges: [{ s: '가온', p: 'participated_in', o: '가게를 넘기는 날' }],
+    })
+    return r.applied.edgesAdded === 1 && !r.warnings.some((w) => w.includes('자동 연결'))
+  })())
+  ok('추론으로만 서 있던 삼항은 명시로 올라간다', (() => {
+    // 참여자 없는 현재 사건 옆의 비밀 보유자는 추론으로 participated_in 이 걸린다
+    const st = wbStore()
+    st.addNodes([{ id: 'ev', kind: 'Event', name: '한밤의 거래', props: { t: 0 } }])
+    const guessed = st.getEdgesFrom('gaon').find((e) => e.p === 'participated_in' && e.o === 'ev')
+    const r = st.addEdges([{ s: 'gaon', p: 'participated_in', o: 'ev', asserted: true }])
+    const now = st.getEdges({ asserted: true }).find((e) => e.p === 'participated_in' && e.o === 'ev')
+    return guessed?.asserted === false && r.added.length === 1 && !!now
+  })())
+  ok('목데이터의 역기입은 고립 노드를 만들지 않는다', await (async () => {
+    const grab = async (p) => (await fetch(`${p}?t=${Date.now()}`, { cache: 'no-store' })).json()
+    const [graph, stories] = await Promise.all([
+      grab('/app-walkthrough/data/graph.json'), grab('/app-walkthrough/data/stories.json'),
+    ])
+    return stories.every((st) => (st.branches || []).every((b) => {
+      const store = createGraphStore(graph)
+      applyWriteback(store, b.writeback, { seed: { focus: st.focus } })
+      return islandNodes(store.toJSON()).length === 0
+    }))
+  })())
+
+  // ── 프롬프트가 먼저 막는다 ─────────────────────────────────────────────────
+  const koSeed = koSeeds[0]
+  ok('분기 프롬프트는 고립 노드를 만들지 말라고 못 박는다', (() => {
+    const p = branchPrompt(koSeed, '', null)
+    return p.includes('최소 한 개의 엣지로') && p.includes('닿지 않는 노드는 만들지 않는다')
+      && p.includes('순서는 상관없다')
+  })())
+  ok('분기 프롬프트는 읽는 글에 그래프 용어를 쓰지 말라고 적는다', (() => {
+    const p = branchPrompt(koSeed, '', null)
+    return p.includes('작가가 읽는 글이다') && p.includes('그래프 용어')
+      && !p.includes('어느 엣지가 갈리는지')
+  })())
+  ok('자유 입력 프롬프트도 같은 규칙을 싣는다', (() => {
+    const p = freeDirectionPrompt('노을이 먼저 알아챈다', koSeed, '', null)
+    return p.includes('닿지 않는 노드는 만들지 않는다') && p.includes('작가가 읽는 글이다')
+  })())
+  ok('규칙이 늘어도 프롬프트는 상한 안에 있다',
+    branchPrompt(koSeed, contextPackPrompt(koSeed, koStore), koStore.toJSON()).length <= 8000)
 
   out.insertAdjacentHTML('beforeend',
     `\n<span class="${failed ? 'fail' : 'pass'}">${failed ? failed + '개 실패' : '전부 통과'}</span>\n`)

@@ -416,7 +416,7 @@ export function contextPackPrompt(seed, store, opts = {}) {
 
 const STORY_SHAPE = [
   '{"title":"제목","logline":"1~2문장 요약",',
-  ' "pivot":{"title":"무엇이 갈리는가","body":"그래프의 어느 엣지가 갈리는지 한 문장"},',
+  ' "pivot":{"title":"무엇이 갈리는가","body":"어느 인물의 어떤 관계가 갈리는지 한 문장"},',
   ' "branches":[{"id":"A","label":"짧은 제목","tone":"방식/결과 힌트","premise":"2문장 전개 요약",',
   '   "beats":["한 장면을 한 문장으로"],',
   '   "outcome":{"인물 이름":"이 분기에서 그 인물이 맞는 결과 한 줄"},',
@@ -442,6 +442,14 @@ const branchRules = (existingGraph) => {
     '- writeback edges 의 s·o 에는 위 컨텍스트에 나온 이름이나, 이 분기의 writeback.nodes 에서 새로 만든 이름만 쓴다.',
     '- remove_edges 에는 위 [관계]·[사건]에 실제로 있는 엣지만 넣는다. 끊을 것이 없으면 빈 배열로 둔다.',
     '- outcome 의 키는 인물 이름이다. 씨앗의 초점 인물은 빠뜨리지 않는다.',
+    // 노드만 적고 이을 엣지를 빠뜨리면 판에 섬 노드가 뜬다. 첫 겹은 여기서 막는다
+    '- writeback.nodes 에 넣은 새 노드는 하나도 빠짐없이 writeback.edges 에서 최소 한 개의 엣지로'
+      + ' 위 컨텍스트에 있는 노드와 잇는다. 어디에도 닿지 않는 노드는 만들지 않는다.',
+    '- 엣지의 s·o 가 같은 writeback 의 새 노드를 가리켜도 된다. nodes 와 edges 의 순서는 상관없다.',
+    // 이 글은 작가·PD 가 그대로 읽는다. 화면에 찍히는 자리에 그래프 용어가 새면 안 된다
+    '- title·logline·pivot·premise·beats·outcome 은 작가가 읽는 글이다. "엣지" · "노드" · "t=0" 같은'
+      + ' 그래프 용어나 영문 술어(loves, serves 같은 것)를 쓰지 않고, 인물과 사건의 말로 쓴다.'
+      + ' 술어는 writeback 안에서만 쓴다.',
     `- 지금 그래프는 노드 ${(g.nodes || []).length}개, 엣지 ${(g.edges || []).length}개다. 없는 인물이 필요하면 writeback.nodes 에 kind:"Character" 로 만든다.`,
     '- 한국어로 쓴다.',
   ].join('\n')

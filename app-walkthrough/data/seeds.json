@@ -26,7 +26,7 @@
     "probe": "dangling_consequence",
     "score": 1.18,
     "title": "결과가 기록되지 않은 사건: 혼문 균열 (t=0)",
-    "desc": "금이 갔다는 사실만 있고 caused 엣지가 없다",
+    "desc": "금이 갔다는 사실만 있고 그 뒤에 무엇이 따라왔는지가 없다",
     "focus": [
       "honmoon_crack",
       "honmoon",
@@ -38,7 +38,7 @@
     "probe": "dangling_consequence",
     "score": 1.04,
     "title": "400년째 값이 치러지지 않은 사건: 진우의 거래",
-    "desc": "t=-400. 이 사건에서 나가는 결과 엣지가 하나도 없다",
+    "desc": "400년 전 사건인데 그 뒤로 남은 결과가 하나도 없다",
     "focus": [
       "jinu_deal",
       "jinu",

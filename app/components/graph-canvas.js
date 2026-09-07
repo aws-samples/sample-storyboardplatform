@@ -15,6 +15,7 @@
 // 다시 그릴 때 이미 있던 노드는 지금 자리에서 시작해서, 판이 자라도 모양이 튀지 않는다.
 
 import { edgeKey } from '../domain/graph-schema.js'
+import { PREDICATE_KO, predicateLabel } from '../domain/graph-ko.js'
 
 const TAU = Math.PI * 2
 
@@ -62,66 +63,18 @@ const GHOST_MS = 2600
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
 
 // ── 엣지 라벨 ────────────────────────────────────────────────────────────────
-/**
- * 술어를 "A ─라벨→ B" 로 읽었을 때 자연스러운 한국어 서술로 옮긴다.
- * 조사는 목적어(B) 쪽에 붙는다. "홍해인 ─을 은닉함→ 시한부 비밀",
- * "윤은성 ─을 보좌함→ 홍해인" 처럼 화살표를 따라 그대로 읽힌다.
- * 여기 없는 술어는 원본 영문 그대로 보여 준다. 어휘가 늘어도 라벨이 비지 않는다.
- */
-export const EDGE_LABELS_KR = {
-  loves: '을 사랑함',
-  rival_of: '과 경쟁함',
-  child_of: '의 자녀임',
-  parent_of: '의 부모임',
-  sibling_of: '의 형제임',
-  mentor_of: '을 가르침',
-  serves: '을 보좌함',
-  member_of: '에 소속됨',
-  located_in: '에 위치함',
-  participated_in: '에 참여함',
-  knows: '을 알고 있음',
-  conceals: '을 은닉함',
-  hidden_from: '에게 숨겨짐',
-  owns: '을 소유함',
-  caused: '을 초래함',
-  wants: '을 원함',
-  performs_at: '에서 활동함',
-  manages: '을 관리함',
-  maintains: '을 유지함',
-  has_leverage_over: '의 약점을 쥠',
-  drawn_to: '에게 끌림',
-  distrusts: '을 불신함',
-  protects: '을 보호함',
-  targets: '을 겨냥함',
-  resolves: '을 해소함',
-}
+// 술어 → 한국어 표는 graph-ko.js 의 PREDICATE_KO 한 벌이다. 판의 알약과 씨앗 설명이
+// 서로 다른 표를 보면 같은 관계가 두 가지 말로 불린다. 아래 둘은 이 이름으로 가져다
+// 쓰던 자리를 그대로 두기 위한 별칭이다.
+
+/** @see PREDICATE_KO (graph-ko.js) */
+export const EDGE_LABELS_KR = PREDICATE_KO
 
 /**
- * 친족은 술어가 하나뿐이고 props.type 에 관계가 담긴다 (graph-schema.js 의 kin_of).
- * 위 표의 parent_of·child_of·sibling_of 는 그래서 술어가 아니라 여기로 이어진다.
+ * 엣지 하나에 얹을 라벨 한 줄. "A ─라벨→ B" 로 읽힌다.
+ * @see predicateLabel (graph-ko.js)
  */
-const KIN_LABELS_KR = {
-  parent: EDGE_LABELS_KR.parent_of,
-  child: EDGE_LABELS_KR.child_of,
-  sibling: EDGE_LABELS_KR.sibling_of,
-  spouse: '의 배우자임',
-}
-
-/**
- * 엣지 하나에 얹을 라벨 한 줄.
- *
- * @param {string} p - 술어
- * @param {Object} [props] - 엣지의 props. kin_of 의 type 을 여기서 본다
- * @returns {string} 한국어 서술. 표에 없는 술어는 원본 영문
- */
-export const edgeLabel = (p, props) => {
-  const key = String(p ?? '')
-  if (key === 'kin_of') {
-    const kin = KIN_LABELS_KR[String(props?.type ?? '').toLowerCase()]
-    if (kin) return kin
-  }
-  return EDGE_LABELS_KR[key] || key
-}
+export const edgeLabel = predicateLabel
 
 /**
  * 역기입 전후의 판을 견줘 새로 생긴 것과 사라진 것을 가른다. markNew 에 그대로 넣는다.

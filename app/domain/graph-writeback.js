@@ -7,6 +7,7 @@
 import { GRAPH_SCHEMA, edgeKey } from './graph-schema.js'
 import { findSeeds } from './graph-probes.js'
 import { normalizeGraph, validateAgainstCanon, mergeGraphs } from './graph-rules.js'
+import { autoConnectOrphans } from './graph-orphans.js'
 import { asObj, asList } from '../lib/guards.js'
 
 export function commitGraph(canon, next) {
@@ -93,12 +94,14 @@ const wbEdgeShape = (e, s, p, o) => {
  * errors 는 데이터가 어긋나 넣을 수 없는 것(모르는 kind·술어, 없는 노드, 정본 모순),
  * warnings 는 넣지 않고 넘어가도 되는 것(이미 있는 노드·엣지, 없는 엣지 삭제 시도).
  */
-function planWriteback(store, writeback) {
+function planWriteback(store, writeback, seed = null) {
   const warnings = []
   const errors = []
+  // 사람에게 보여도 되는 알림. warnings 는 대부분 개발자용이라 화면에 그대로 올릴 수 없다
+  const notices = []
   if (!store?.getNode) {
     errors.push('그래프 저장소가 없다. 역기입을 적용할 수 없다')
-    return { nodes: [], edges: [], removes: [], warnings, errors, conflicts: [] }
+    return { nodes: [], edges: [], removes: [], warnings, errors, notices, conflicts: [] }
   }
   const { nodes: rawNodes, edges: rawEdges, removes: rawRemoves } = wbParts(writeback)
 
@@ -181,7 +184,14 @@ function planWriteback(store, writeback) {
     edges.push(wbEdgeShape(src, s, p, o))
   }
 
-  // 4. 이미 확립된 그래프와 어긋나지 않는지. 끊기로 한 엣지는 빼고 견준다
+  // 4. 고립 노드. 어떤 엣지에도 닿지 않는 새 노드는 판에 섬으로 뜬다. 거부하지 않고
+  //    가장 관련 있는 인물과 이어 준다 (graph-orphans.js 의 머리글)
+  const fix = autoConnectOrphans(store, nodes, edges, seed)
+  for (const e of fix.edges) { addKeys.add(edgeKey(e)); edges.push(e) }
+  warnings.push(...fix.warnings)
+  notices.push(...(fix.notices || []))
+
+  // 5. 이미 확립된 그래프와 어긋나지 않는지. 끊기로 한 엣지는 빼고 견준다
   const canon = store.toJSON()
   const check = validateAgainstCanon(
     { nodes, edges },
@@ -189,8 +199,17 @@ function planWriteback(store, writeback) {
   )
   for (const c of check.conflicts) (c.level === 'error' ? errors : warnings).push(`역기입 모순: ${c.msg}`)
 
-  return { nodes, edges, removes, warnings, errors, conflicts: check.conflicts }
+  return { nodes, edges, removes, warnings, errors, notices, conflicts: check.conflicts }
 }
+
+/**
+ * 역기입에서 실제로 판에 들어가는 것만 추린 묶음. 화면이 개수 대신 이름을 적을 때
+ * 필요한 최소한이다 (graph-ko.js 의 writebackKo).
+ *
+ * s·o 는 노드 id 다. 이름은 저장소에서 찾는다. 여기서 이름까지 박아 두면 역기입 전후로
+ * 이름이 바뀐 노드를 옛 이름으로 부르게 된다.
+ */
+const wbChanges = (p) => ({ nodes: p.nodes, edges: p.edges, removes: p.removes })
 
 /**
  * 역기입을 적용하기 전에 안전한지 본다. store 는 바뀌지 않는다.
@@ -198,16 +217,24 @@ function planWriteback(store, writeback) {
  *
  * @param {Object} store - GraphStore
  * @param {Object} writeback - branch.writeback
- * @returns {{safe: boolean, warnings: Array<string>, conflicts: Array,
+ * @param {Object} [opts]
+ * @param {Object|null} [opts.seed] 이 분기를 만든 씨앗. 고립 노드를 이을 인물을 여기서 먼저 찾는다
+ * @returns {{safe: boolean, warnings: Array<string>, notices: Array<string>, conflicts: Array,
+ *            changes: {nodes: Array, edges: Array, removes: Array},
  *            preview: {nodesAdded: number, edgesAdded: number, edgesRemoved: number}}}
- *          safe 는 넣을 수 없는 항목이 하나도 없을 때만 true
+ *          safe 는 넣을 수 없는 항목이 하나도 없을 때만 true.
+ *          edgesAdded 에는 고립 노드를 잇느라 자동으로 만든 엣지도 들어간다.
+ *          changes 는 개수가 아니라 무엇이 들어가는지다. 화면은 이것으로 사람의 말을 만든다.
+ *          warnings 는 개발자용이고(로그), notices 는 사람에게 보여도 되는 알림이다
  */
-export function validateWritebackBeforeApply(store, writeback) {
-  const p = planWriteback(store, writeback)
+export function validateWritebackBeforeApply(store, writeback, opts = {}) {
+  const p = planWriteback(store, writeback, opts.seed)
   return {
     safe: p.errors.length === 0,
     warnings: [...p.errors, ...p.warnings],
+    notices: p.notices,
     conflicts: p.conflicts,
+    changes: wbChanges(p),
     preview: { nodesAdded: p.nodes.length, edgesAdded: p.edges.length, edgesRemoved: p.removes.length },
   }
 }
@@ -223,18 +250,29 @@ export function validateWritebackBeforeApply(store, writeback) {
  * 왕복만 뒤로 미룬다. 저장까지 끝났는지 알아야 하는 화면은 뒤이어 store.flush() 를
  * 기다린다 (story-graph.html 의 applyToBoard).
  *
+ * 새 노드가 어떤 엣지에도 닿지 않으면(모델이 nodes 만 채운 경우) 판에 섬으로 뜬다.
+ * 그런 노드는 autoConnectOrphans 가 기준 인물과 이어 주고 warnings 에 무엇을 이었는지 남긴다.
+ *
  * @param {Object} store - GraphStore. 이 함수가 직접 바꾼다
  * @param {Object} writeback - branch.writeback ({nodes, edges, remove_edges} 또는 add_* 스키마)
+ * @param {Object} [opts]
+ * @param {Object|null} [opts.seed] 이 분기를 만든 씨앗. 고립 노드를 이을 인물을 여기서 먼저 찾는다
  * @returns {{applied: {nodesAdded: number, edgesAdded: number, edgesRemoved: number, derivedLost: number},
- *            warnings: Array<string>, newSeeds: Array, before: Object, after: Object}}
- *          newSeeds 는 적용 뒤에 다시 돌린 findSeeds 의 결과다
+ *            warnings: Array<string>, notices: Array<string>,
+ *            changes: {nodes: Array, edges: Array, removes: Array},
+ *            newSeeds: Array, before: Object, after: Object}}
+ *          newSeeds 는 적용 뒤에 다시 돌린 findSeeds 의 결과다.
+ *          changes 는 실제로 얹은 것이다. 화면은 개수 대신 이것으로 사람의 말을 만든다
+ *          (graph-ko.js 의 writebackKo). warnings 는 개발자용, notices 는 사람용이다
  */
-export function applyWriteback(store, writeback) {
-  const p = planWriteback(store, writeback)
+export function applyWriteback(store, writeback, opts = {}) {
+  const p = planWriteback(store, writeback, opts.seed)
   if (!store?.addNodes) {
     return {
       applied: { nodesAdded: 0, edgesAdded: 0, edgesRemoved: 0, derivedLost: 0 },
       warnings: [...p.errors, ...p.warnings],
+      notices: p.notices,
+      changes: wbChanges(p),
       newSeeds: [],
       before: null,
       after: null,
@@ -258,6 +296,8 @@ export function applyWriteback(store, writeback) {
       derivedLost: Math.max(0, dropped - p.removes.length),
     },
     warnings,
+    notices: p.notices,
+    changes: wbChanges(p),
     newSeeds: findSeeds(store),
     before,
     after: store.stats(),
