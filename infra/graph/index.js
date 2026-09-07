@@ -9,6 +9,8 @@
 // Bedrock 호출. 대본·분기 생성이 쓴다. 이것만 Event(비동기)로 들어온다.
 //   plan         Converse 로 모델을 부르고 결과를 Ops 테이블에 적는다.
 //                브라우저는 planResult(jobId) 로 받아 간다. AppSync 30초 상한 우회.
+//   navigate     세계관 네비게이터 챗봇. plan 과 같은 비동기 패턴이고 같은 Ops 테이블을 쓴다.
+//                브라우저는 navigateResult(jobId) 로 받아 간다.
 //
 // 파생 엣지는 Neptune 에 넣지 않는다. 규칙은 graph-schema.js 의 deriveEdges 뿐이고
 // 그것은 브라우저에서만 돈다. 저장해 두면 규칙을 고친 뒤에도 낡은 파생이 남는다.
@@ -409,12 +411,212 @@ async function plan(payload) {
   return { jobId, status: 'accepted' }
 }
 
+// ── navigate 잡 ──────────────────────────────────────────────────────────────
+// 세계관 네비게이터 챗봇. plan 과 같은 비동기 패턴이고, 결과도 같은 Ops 테이블의
+// 같은 키(PLAN#jobId)에 적는다 — navigateResult 리졸버가 planResult 와 같은 것을 읽는다.
+// plan 과 다른 것은 세 가지뿐이다.
+//   1) 시스템 프롬프트가 JSON 이 아니라 자연어 답변을 요구한다
+//   2) 이전 대화를 messages 에 함께 넣는다 (plan 은 늘 한 턴이다)
+//   3) 그래프를 여기서 직렬화한다 — 대본 생성은 브라우저(story.js 의 contextPackPrompt)가 했다
+
+const NAVIGATE_SYSTEM = [
+  '당신은 스토리 세계관 네비게이터입니다.',
+  '사용자는 작가 또는 PD이며, 아래 캐릭터 관계 그래프를 기반으로 질문합니다.',
+  '',
+  '규칙:',
+  '1. 반드시 그래프 데이터에 근거하여 답변하세요.',
+  '2. 그래프에 없는 내용은 추측하지 말고 "현재 그래프에 해당 정보가 없습니다"라고 답하세요.',
+  '3. 캐릭터 간 관계를 설명할 때 구체적인 관계(엣지)를 인용하세요.',
+  '4. 추론 규칙으로 파생된 관계는 "[추론]"으로 표시하세요.',
+  '5. 비전문가가 이해할 수 있는 자연어로, 한국어로 답변하세요.',
+  '6. 답변은 간결하게 하되, 필요한 맥락은 빠뜨리지 마세요.',
+  '7. "## 최근 역기입 변경 사항" 블록이 있으면, 방금 무엇이 바뀌었는지 묻는 질문에는'
+    + ' 그 목록만 근거로 답하세요. 블록이 없으면 최근에 무엇이 바뀌었는지 알 수 없다고 답하세요.',
+].join('\n')
+
+/** 챗봇 답변 상한. 대본 생성(2000~4000)보다 짧다 */
+const NAVIGATE_MAX_TOKENS = 2000
+/** 프롬프트에 넣는 그래프 텍스트 상한. 넘치면 뒤를 자른다 */
+const GRAPH_CTX_MAX = 12000
+/** 모델에 다시 넣는 이전 대화 수. 오래된 턴은 버린다 */
+const HISTORY_MAX = 10
+
+/** AWSJSON 으로 온 문자열을 푼다. 깨졌으면 기본값 */
+function parseJson(raw, dflt) {
+  if (raw && typeof raw === 'object') return raw
+  if (typeof raw !== 'string' || !raw) return dflt
+  try {
+    const v = JSON.parse(raw)
+    return v === null || v === undefined ? dflt : v
+  } catch {
+    return dflt
+  }
+}
+
+/**
+ * 방금 판에 붙인 역기입 한 번의 변경을 텍스트로 편다. 브라우저가 graphData 에
+ * recentWriteback 으로 얹어 보낸다 (story-graph.html 의 writebackSummary) —
+ * 현재 스냅샷만으로는 무엇이 새것인지 알 수 없어서 "방금 뭐가 추가됐어?" 에 답할 수 없다.
+ *
+ * 역기입을 한 적이 없으면 빈 문자열이다. 그때는 이 블록이 아예 붙지 않는다.
+ *
+ * @param {Object} wb - {at, branch, addedNodes, addedEdges, removedEdges, counts}
+ * @param {Function} nm - id → 이름. graphContext 가 만든 표를 그대로 받는다
+ * @returns {string} 프롬프트에 붙이는 블록. 변경이 없으면 빈 문자열
+ */
+function writebackContext(wb, nm) {
+  if (!wb) return ''
+  const nodes = asList(wb?.addedNodes)
+  const added = asList(wb?.addedEdges)
+  const removed = asList(wb?.removedEdges)
+  if (!nodes.length && !added.length && !removed.length) return ''
+
+  const counts = wb?.counts || {}
+  /** 목록이 잘려 왔으면 개수를 앞세워 "이게 전부" 로 읽히지 않게 한다 */
+  const head = (name, list, total) => {
+    const n = Number(total) >= list.length ? total : list.length
+    return `${name} ${n}개${n > list.length ? ` (아래는 그중 ${list.length}개)` : ''}:`
+  }
+  const edgeLine = (e) => `- ${nm(e?.s)} --${str(e?.p) || '관계'}--> ${nm(e?.o)}${e?.derived ? ' [추론]' : ''}`
+
+  const out = ['## 최근 역기입 변경 사항']
+  if (wb?.branch) out.push(`붙인 분기: ${str(wb.branch)}`)
+  if (wb?.at) out.push(`붙인 시각: ${str(wb.at)}`)
+  out.push('이 목록이 이 그래프에서 가장 최근에 바뀐 것 전부다. 그 앞의 변경은 알 수 없다.')
+  if (nodes.length) out.push(head('추가된 노드', nodes, counts?.addedNodes), ...nodes.map((id) => `- ${nm(id)}`))
+  else out.push('추가된 노드: 없다')
+  if (added.length) out.push(head('추가된 엣지', added, counts?.addedEdges), ...added.map(edgeLine))
+  else out.push('추가된 엣지: 없다')
+  if (removed.length) out.push(head('제거된 엣지', removed, counts?.removedEdges), ...removed.map(edgeLine))
+  else out.push('제거된 엣지: 없다')
+  return out.join('\n')
+}
+
+/**
+ * 그래프 하나를 사람이 읽는 텍스트로 편다. 엣지 이름은 s/p/o 로 오지만
+ * source/predicate/target 으로 오는 경우도 받는다.
+ *
+ * 최근 역기입 요약(recentWriteback)이 함께 왔으면 블록 하나를 뒤에 붙인다. 그래프를
+ * 상한에서 자른 뒤에 붙이므로, 판이 커도 이 블록은 잘려 나가지 않는다.
+ *
+ * @param {string|Object} raw - JSON 문자열 또는 {nodes, edges, recentWriteback?}
+ * @returns {string} 프롬프트에 그대로 붙이는 그래프 컨텍스트
+ */
+function graphContext(raw) {
+  const data = parseJson(raw, {})
+  const nodes = asList(data?.nodes)
+  const edges = asList(data?.edges)
+  if (!nodes.length && !edges.length) return '(그래프가 비어 있다)'
+
+  const label = new Map()
+  for (const n of nodes) label.set(str(n?.id), str(n?.name) || str(n?.id))
+  const nm = (id) => label.get(str(id)) || str(id) || '(알 수 없음)'
+
+  const nodeLines = nodes.map((n) => `- ${str(n?.name) || str(n?.id)} (${str(n?.kind) || '종류 없음'})`)
+  const edgeLines = edges.map((e) => {
+    const p = str(e?.p ?? e?.predicate)
+    return `- ${nm(e?.s ?? e?.source)} --${p || '관계'}--> ${nm(e?.o ?? e?.target)}`
+      + `${isDerived(e) ? ' [추론]' : ''}`
+  })
+
+  const text = [
+    `[노드 ${nodes.length}개] 이름 (종류)`,
+    ...nodeLines,
+    '',
+    `[관계 ${edges.length}개] 출발 --관계--> 도착`,
+    ...edgeLines,
+  ].join('\n')
+  const body = text.length <= GRAPH_CTX_MAX ? text : `${text.slice(0, GRAPH_CTX_MAX)}\n(그래프를 여기서 잘랐다)`
+  const recent = writebackContext(data?.recentWriteback, nm)
+  return recent ? `${body}\n\n${recent}` : body
+}
+
+/**
+ * 이전 대화 + 이번 질문을 Converse 의 messages 로 만든다.
+ * Converse 는 user 로 시작해서 user·assistant 가 번갈아 와야 한다 —
+ * 어긋나면 ValidationException 이라서 여기서 모양을 맞춘다.
+ *
+ * @param {string|Array} historyRaw - [{role, content}, ...]
+ * @param {string} finalText - 마지막 user message 로 들어갈 그래프 컨텍스트 + 질문
+ * @returns {Array} ConverseCommand 의 messages
+ */
+function chatMessages(historyRaw, finalText) {
+  const out = []
+  const push = (role, content) => {
+    const text = str(content)
+    if (!text) return
+    const last = out[out.length - 1]
+    // 같은 역할이 이어지면 버리지 않고 한 칸으로 합친다
+    if (last && last.role === role) last.content[0].text += `\n\n${text}`
+    else out.push({ role, content: [{ text }] })
+  }
+
+  for (const m of asList(parseJson(historyRaw, [])).slice(-HISTORY_MAX)) {
+    const role = m?.role === 'assistant' ? 'assistant' : 'user'
+    if (!out.length && role !== 'user') continue // assistant 로 시작할 수 없다
+    push(role, m?.content)
+  }
+  push('user', finalText)
+  return out
+}
+
+/**
+ * 질문 하나에 답하고 결과를 적는다. plan 과 같이 던지지 않는다 —
+ * Event 호출에서 던지면 Lambda 가 비동기 재시도를 돌려 Bedrock 을 또 부른다.
+ *
+ * @param {Object} payload - {jobId, owner, projectId, question, graphData, conversationHistory, model}
+ */
+async function navigate(payload) {
+  const jobId = str(payload?.jobId)
+  const owner = str(payload?.owner)
+  if (!jobId) throw new Error('navigate 에 jobId 가 없다')
+  if (!TABLE) throw new Error('OPS_TABLE 이 비어 있다')
+
+  try {
+    const question = str(payload?.question).trim()
+    if (!question) throw new Error('질문이 비어 있습니다')
+
+    const asked = str(payload?.model)
+    const modelId = MODELS[MODEL_NAMES.includes(asked) ? asked : DEFAULT_MODEL]
+    const messages = chatMessages(payload?.conversationHistory, [
+      '## 현재 세계관 그래프',
+      graphContext(payload?.graphData),
+      '',
+      '## 질문',
+      question,
+    ].join('\n'))
+
+    let out
+    try {
+      out = await openBedrock().send(new ConverseCommand({
+        modelId,
+        system: [{ text: NAVIGATE_SYSTEM }],
+        messages,
+        inferenceConfig: { maxTokens: NAVIGATE_MAX_TOKENS },
+        additionalModelRequestFields: { thinking: { type: 'disabled' } },
+      }))
+    } catch (err) {
+      console.error('[graph] Bedrock Converse 실패', modelId, err)
+      throw new Error(`Bedrock ${err.name || 'Error'}: ${err.message}`)
+    }
+
+    // 여러 칸으로 쪼개져 올 수 있다. text 인 칸만 이어 붙인다
+    let text = ''
+    for (const c of out.output?.message?.content || []) if (typeof c.text === 'string') text += c.text
+    await putPlanResult(jobId, owner, { status: 'done', text, usage: out.usage, stop: out.stopReason })
+  } catch (err) {
+    console.error('[graph] navigate 실패', jobId, err)
+    await putPlanResult(jobId, owner, { status: 'error', error: str(err?.message) || 'navigate 실패' })
+  }
+  return { jobId, status: 'accepted' }
+}
+
 // ── 핸들러 ───────────────────────────────────────────────────────────────────
 
 /** Neptune 을 여는 오퍼레이션. 끊긴 소켓 재연결이 붙는다 */
 const GRAPH_OPS = { loadGraph, saveGraph, queryGraph, updateGraph }
 /** Neptune 을 쓰지 않는 오퍼레이션. payload 하나만 받는다 */
-const PLAIN_OPS = { plan }
+const PLAIN_OPS = { plan, navigate }
 
 /** 프로토타입의 값('constructor' 등)이 오퍼레이션으로 잡히지 않게 자기 키만 본다 */
 const pick = (table, name) => (Object.hasOwn(table, name) ? table[name] : null)

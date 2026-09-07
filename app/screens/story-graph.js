@@ -16,7 +16,7 @@
 //   대본화  planScript. 컷을 드라마·영화·웹드라마 대본 텍스트로 옮긴다
 // 조회는 전부 graph-engine.js 의 GraphStore 를 거친다. 배포에서는 같은 저장소가
 // Neptune 을 사실로 두고 돈다 (hasGraph). 이 화면이 아는 차이는 save·flush 뿐이다.
-import { createGraphStore, loadGraphStore } from '../story/graph-engine.js'
+import { createGraphStore, loadGraphStore, DEFAULT_PROJECT } from '../story/graph-engine.js'
 import { findSeeds, PROBES } from '../story/graph-probes.js'
 import {
   planGraph, planBranches, planFreeBranches, localBranches, scriptToText,
@@ -25,8 +25,10 @@ import {
   planScript, scriptBlob, scriptFileName, SCRIPT_FORMATS,
   GENRES, TONES, LENGTHS, CUTCOUNTS,
 } from '../story/story.js'
-import { planClient, graphClient, opsClient } from '../platform/net.js'
+import { planClient, graphClient, opsClient, runNavigateJob } from '../platform/net.js'
+import { mountNavigatorChat, readHistory } from '../story/navigator-ui.js'
 import { createGraphView, graphDelta, KIND_COLOR, KIND_LABEL } from '../story/graph-view.js'
+import { edgeKey } from '../story/graph-schema.js'
 import { configured, session, login, setNewPassword, logout } from '../platform/auth.js'
 import { DEMO_USERS } from '../platform/login.js'
 import { NAV_TABS, navHref, mountNav, navTabFromSearch, boardFromSearch } from '../chrome/nav-tabs.js'
@@ -115,6 +117,12 @@ let SCRIPT = { ep: 0, format: 'drama', text: '', busy: false, err: '' }
 let NEW_SEEDS = new Set() // 역기입 뒤에 새로 나온 씨앗의 키. 카드에 NEW 뱃지를 붙인다
 let NAV = null           // 상단 기능 탭. mountNav 가 만든다
 let LAST_DEV_TAB = 'seeds' // 상단 [스토리 디벨롭] 으로 돌아왔을 때 열어 줄 안쪽 탭
+/**
+ * 가장 최근 역기입 한 번의 변경 요약 (writebackSummary). 네비게이터 챗봇이 질문마다
+ * 함께 받아 "방금 뭐가 추가됐어?" 에 답하는 근거다. 현재 스냅샷만으로는 무엇이 새것인지
+ * 알 수 없다. 판을 새로 지으면(build) 지난 판의 변경이라 버린다.
+ */
+let LAST_WRITEBACK = null
 let JOURNAL = []         // 지나간 일. op 를 접기 전 원본이라 누가 언제 했는지가 남는다
 let HIST_MINE = false    // 「내 것만」
 let PLAYING_EXAMPLE = false // 예시 재생 중. 그 사이의 기록에 example 표시를 붙인다
@@ -265,6 +273,7 @@ function newStore(graph) {
 function build(store, { keepSeeds = null } = {}) {
   STORE = store
   SEEDS = keepSeeds || findSeeds(STORE)
+  LAST_WRITEBACK = null // 지난 판에서 붙인 것이다. 새 판에는 해당하지 않는다
   STORIES = new Map()
   CUR = { seed: -1, branch: 0 }
   showAllSeeds = false
@@ -908,6 +917,40 @@ function stashEpisode() {
   return x.epIndex
 }
 
+/** 역기입 요약에 적는 목록의 상한. 페이로드를 부풀리지 않고 개수는 따로 적어 둔다 */
+const WB_LIST_MAX = 40
+
+/**
+ * 역기입 한 번의 변경 요약. 네비게이터 챗봇이 받아 가는 값이다 (LAST_WRITEBACK).
+ *
+ * 이름이 아니라 id 로 적는다. Lambda 가 그래프 노드 표에서 id → 이름 표를 이미
+ * 만들어 두고 있어 거기서 풀리고, 페이로드도 작다. 목록은 WB_LIST_MAX 에서 자르고
+ * 전체 개수는 counts 에 남긴다 (자른 것을 전부라고 답하지 않게).
+ *
+ * @param {{nodes: Array, edges: Array}} before - 역기입 전 판
+ * @param {{nodes: Array, edges: Array}} after - 역기입 뒤 판
+ * @param {string} branch - 어느 분기의 역기입인가
+ * @returns {Object} graphData.recentWriteback 에 실리는 값
+ */
+function writebackSummary(before, after, branch) {
+  const hadNode = new Set(before.nodes.map((n) => n.id))
+  const hadEdge = new Set(before.edges.map(edgeKey))
+  const hasEdge = new Set(after.edges.map(edgeKey))
+  // 파생 엣지는 규칙이 다시 만든 것이라 갈라 적는다. 작가가 직접 넣은 것이 아니다
+  const triple = (e) => (e.asserted ? { s: e.s, p: e.p, o: e.o } : { s: e.s, p: e.p, o: e.o, derived: true })
+  const nodes = after.nodes.filter((n) => !hadNode.has(n.id)).map((n) => n.id)
+  const added = after.edges.filter((e) => !hadEdge.has(edgeKey(e)))
+  const removed = before.edges.filter((e) => !hasEdge.has(edgeKey(e)))
+  return {
+    at: new Date().toISOString(),
+    branch,
+    addedNodes: nodes.slice(0, WB_LIST_MAX),
+    addedEdges: added.slice(0, WB_LIST_MAX).map(triple),
+    removedEdges: removed.slice(0, WB_LIST_MAX).map(triple),
+    counts: { addedNodes: nodes.length, addedEdges: added.length, removedEdges: removed.length },
+  }
+}
+
 /**
  * 판에 붙이기. 여기서 역기입이 확정되고 그래프가 자란다.
  * 씨앗 인덱스가 바뀌므로 분기 캐시는 버린다.
@@ -919,7 +962,10 @@ async function applyToBoard() {
   const before = STORE.toJSON()
   const seedsBefore = new Set(SEEDS.map(seedKey))
   x.applied = applyWriteback(STORE, x.branch.writeback)
-  x.delta = graphDelta(before, STORE.toJSON())
+  const after = STORE.toJSON()
+  x.delta = graphDelta(before, after)
+  // 챗봇이 볼 변경 요약. 역기입을 또 하면 마지막 것만 남는다
+  LAST_WRITEBACK = writebackSummary(before, after, `${x.branch.id}. ${x.branch.label}`)
   x.step = 'done'
   SEEDS = x.applied.newSeeds
   NEW_SEEDS = new Set(SEEDS.map(seedKey).filter((k) => !seedsBefore.has(k)))
@@ -1209,6 +1255,34 @@ function openCoach() {
      */
     host: { atStep: atTab, goStep: (t) => openTab(t) },
     onDone: () => { if (atTab() !== was) openTab(was) },
+  })
+}
+
+// ── 세계관 네비게이터 챗봇 ────────────────────────────────────────────────────
+// 떠 있는 버튼 하나로 열리는 카드다. 화면 구조(왼쪽 카드 · 판 · 오른쪽 패널)는 건드리지 않는다.
+// 마운트는 한 번만 한다. 판을 다시 지어도(build) 챗봇은 그대로 있고, 질문이 올 때
+// STORE 를 그때 읽는다. 그래서 목데이터로 되돌리거나 새 대본을 추출해도 최신 그래프를 본다.
+function mountChat() {
+  mountNavigatorChat(document.body, {
+    onSend: async (question) => {
+      if (!STORE || !STORE.stats().nodes) {
+        return '현재 그래프가 비어있습니다. 먼저 시놉시스를 넣어 그래프를 추출하세요.'
+      }
+      if (!NET) {
+        return '지금은 로컬 모드입니다. 네비게이터는 Bedrock 연결이 필요합니다. 배포된 화면에서 물어봐 주세요.'
+      }
+      // 히스토리는 navigator-ui.js 가 sessionStorage 에 적어 둔 것을 그대로 읽는다.
+      // 이번 질문은 아직 들어 있지 않다. Lambda 가 마지막 user 메시지로 따로 붙인다
+      return runNavigateJob(NET, {
+        projectId: STORE.projectId || DEFAULT_PROJECT,
+        question,
+        // 스냅샷에 최근 역기입의 변경 요약을 얹어 보낸다. 역기입을 한 적이 없으면
+        // null 이고, 그때는 Lambda 가 스냅샷만으로 답한다
+        graphData: { ...STORE.toJSON(), recentWriteback: LAST_WRITEBACK },
+        conversationHistory: readHistory(),
+        model: MODEL(),
+      })
+    },
   })
 }
 
@@ -1502,6 +1576,12 @@ if (configured && !session()) {
     who: (id) => nameMap(JOURNAL).get(id) || null,
   }).then(() => start()).then(() => {
     loadHistory()
+    /*
+     * 챗봇을 여기서 붙인다. 로그인 문이나 프로젝트 고르는 판이 서 있는 동안에는
+     * 붙이지 않는다. 떠 있는 버튼이 그 위로 올라온다 (navigator-ui.js 의 z-index 가
+     * projects.js 의 판보다 높다). 고르는 판이 닫히고 start() 가 지난 뒤가 그 자리다.
+     */
+    mountChat()
     /*
      * 예시 프로젝트가 이 화면으로 데려온 것이면(?demo=1) 바로 예시를 시작한다.
      * 키비주얼·보드도 같은 자리에서 같은 일을 한다(app/demo.js).
