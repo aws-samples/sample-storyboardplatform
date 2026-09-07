@@ -149,6 +149,15 @@ def lamp(im: Image.Image, floor: float = 0.22) -> Image.Image:
 
 _en: dict[str, str] = {}
 
+# 손으로 한국어를 적은 프롬프트만 영어로 옮긴다. 옮기는 것도 Bedrock 이 한다.
+# 프롬프트를 쓰는 것이 이미 Bedrock 이라, 이 서버가 부르는 모델 서비스는 하나뿐이다.
+# 리전(ap-northeast-2)에 In-Region 이 없어 전역 추론 프로필을 쓴다. infra/graph/index.js 와 같다.
+EN_MODEL = os.environ.get("SB_EN_MODEL", "global.anthropic.claude-haiku-4-5-20251001-v1:0")
+EN_SYSTEM = (
+    "Translate the text into English for an image generation prompt. "
+    "Reply with the translation only: no quotes, no notes, no extra words."
+)
+
 def en(text: str) -> str:
 
     text = (text or "").strip()
@@ -158,9 +167,16 @@ def en(text: str) -> str:
         try:
             import boto3
 
-            _en[text] = boto3.client("translate", region_name=REGION).translate_text(
-                Text=text[:900], SourceLanguageCode="ko", TargetLanguageCode="en"
-            )["TranslatedText"]
+            out = boto3.client("bedrock-runtime", region_name=REGION).converse(
+                modelId=EN_MODEL,
+                system=[{"text": EN_SYSTEM}],
+                messages=[{"role": "user", "content": [{"text": text[:900]}]}],
+                inferenceConfig={"maxTokens": 512, "temperature": 0},
+                additionalModelRequestFields={"thinking": {"type": "disabled"}},
+            )
+            said = "".join(c.get("text", "") for c in out["output"]["message"]["content"]).strip()
+            # 빈 답이 오면 원문을 그대로 둔다. 그림이 안 나오는 것보다 낫다
+            _en[text] = said or text
         except Exception:
             _en[text] = text
     return _en[text]

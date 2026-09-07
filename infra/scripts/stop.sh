@@ -12,4 +12,4 @@ REGION="${AWS_REGION:-ap-northeast-2}"
 aws neptune stop-db-cluster --db-cluster-identifier "$CLUSTER" --region "$REGION" \
   --query 'DBCluster.[DBClusterIdentifier,Status]' --output text
 
-echo "세우는 중입니다. 몇 분 걸립니다 — scripts/start.sh 로 다시 켭니다."
+echo "세우는 중입니다. 몇 분 걸립니다. scripts/start.sh 로 다시 켭니다."

@@ -50,4 +50,4 @@ cd /opt/sb && HF_HOME=/opt/hf HF_XET_HIGH_PERFORMANCE=1 SB_BUCKET=x SB_POOL=x SB
   nohup /opt/sb/venv/bin/python server.py prefetch >> /var/log/sb-setup.log 2>&1 &
 
 echo "sb: 서비스 시작. 기본 모델(약 26GB)을 받으면 /gen/health의 warm이 true가 된다."
-echo "sb: 모델 세 벌(약 67GB) 내려받기는 배경에서 계속된다 — 다 받으면 화면에서 바로 갈아끼운다."
+echo "sb: 모델 세 벌(약 67GB) 내려받기는 배경에서 계속된다. 다 받으면 화면에서 바로 갈아끼운다."

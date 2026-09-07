@@ -1,14 +1,14 @@
 // AppSync 의 GraphDs 데이터소스가 부르는 Lambda. 두 가지 일을 한다.
 //
-// Neptune 그래프 저장소 — 브라우저의 graph-engine.js 가 기대는 것은 네 가지다.
+// Neptune 그래프 저장소. 브라우저의 graph-engine.js 가 기대는 것은 네 가지다.
 //   loadGraph    projectId 의 노드·명시 엣지를 mock/graph.json 모양으로 돌려준다
 //   saveGraph    그래프 하나를 통째로 덮어쓴다 (추출 직후 한 번)
 //   queryGraph   이웃·서브그래프처럼 그래프를 걸어야 답이 나오는 조회
 //   updateGraph  역기입. 엣지 끊기 → 노드 얹기 → 엣지 얹기 순서로 돈다
 //
-// Bedrock 호출 — 대본·분기 생성이 쓴다. 이것만 Event(비동기)로 들어온다.
+// Bedrock 호출. 대본·분기 생성이 쓴다. 이것만 Event(비동기)로 들어온다.
 //   plan         Converse 로 모델을 부르고 결과를 Ops 테이블에 적는다.
-//                브라우저는 planResult(jobId) 로 받아 간다 — AppSync 30초 상한 우회.
+//                브라우저는 planResult(jobId) 로 받아 간다. AppSync 30초 상한 우회.
 //   navigate     세계관 네비게이터 챗봇. plan 과 같은 비동기 패턴이고 같은 Ops 테이블을 쓴다.
 //                브라우저는 navigateResult(jobId) 로 받아 간다.
 //
@@ -127,7 +127,7 @@ const putNode = (t, projectId, n) => t
 
 /**
  * 엣지 하나를 넣는다. s·o 가 없으면 아무것도 만들어지지 않으므로 만들었는지 돌려준다.
- * 엣지는 한 번에 하나씩 보낸다 — 같은 노드를 건드리는 쓰기를 겹치면
+ * 엣지는 한 번에 하나씩 보낸다. 같은 노드를 건드리는 쓰기를 겹치면
  * Neptune 이 ConcurrentModificationException 을 던진다.
  *
  * @returns {Promise<boolean>} 실제로 만들었으면 true
@@ -286,17 +286,16 @@ async function updateGraph(g, payload) {
 
 // ── Bedrock ──────────────────────────────────────────────────────────────────
 // 원래 AppSync 의 HTTP 데이터소스(BedrockDs)가 /model/{id}/converse 를 직접 쳤다.
-// 느린 모델에서 Execution timeout 이 나서 여기로 옮겼다. 보내는 몸통은 그때와 같다 —
-// Converse API 를 SDK 로 부르는 것뿐이라 요청·응답 모양이 바뀌지 않는다.
+// 느린 모델에서 Execution timeout 이 나서 여기로 옮겼다. 보내는 몸통은 그때와 같다. // Converse API 를 SDK 로 부르는 것뿐이라 요청·응답 모양이 바뀌지 않는다.
 
 // 프론트엔드가 spec.model 로 고르는 이름 → Bedrock 모델 id.
-// 이름은 화면(demo/story-graph.html 의 #modelSel)과 짝이 맞아야 한다.
+// 이름은 화면(app/story-graph.html 의 #modelSel)과 짝이 맞아야 한다.
 //
 // 배포 리전이 ap-northeast-2(서울)라서 전역(global.anthropic.…) 추론 프로필을 쓴다.
-// 서울은 이 모델들의 In-Region 도 Geo 도 지원하지 않는다 — 전역 프로필만 붙는다.
+// 서울은 이 모델들의 In-Region 도 Geo 도 지원하지 않는다. 전역 프로필만 붙는다.
 // APAC 지역 프로필(apac.…)은 존재하지 않는다. 지역 프로필은 us./eu./au./jp. 뿐이고
 // 그중 서울을 소스 리전으로 받는 것이 없다. 잘못 넣으면 ValidationException 이 난다.
-// 전역 프로필은 데이터 residency 를 보장하지 않는다 — 전 세계 상용 리전으로 라우팅된다.
+// 전역 프로필은 데이터 residency 를 보장하지 않는다. 전 세계 상용 리전으로 라우팅된다.
 // 확인: 모델별 상세 페이지의 Regional availability 표
 //   https://docs.aws.amazon.com/bedrock/latest/userguide/model-cards.html
 const MODELS = {
@@ -390,8 +389,7 @@ async function putPlanResult(jobId, owner, body) {
 }
 
 /**
- * Bedrock 을 부르고 결과를 적는다. 성공이든 실패든 반드시 한 건 적는다 —
- * 안 적으면 브라우저가 타임아웃까지 빈손으로 기다린다.
+ * Bedrock 을 부르고 결과를 적는다. 성공이든 실패든 반드시 한 건 적는다. * 안 적으면 브라우저가 타임아웃까지 빈손으로 기다린다.
  *
  * 던지지 않는 것이 중요하다. Event 호출에서 던지면 Lambda 가 비동기 재시도를 돌려
  * Bedrock 을 또 부른다 (스택에서 retryAttempts 를 0 으로 잡아 두었지만 여기서도 막는다).

@@ -21,20 +21,19 @@ const {
 } = require('aws-cdk-lib')
 
 const HERE = __dirname
-const DEMO = path.join(HERE, '..', '..', 'demo')
+const APP = path.join(HERE, '..', '..', 'app')
 const GRAPH_FN = path.join(HERE, '..', 'graph')
-const KEYVISUAL = path.join(HERE, '..', '..', 'key-visual')
+const WALKTHROUGH = path.join(HERE, '..', '..', 'app-walkthrough')
 const read = (...p) => fs.readFileSync(path.join(HERE, '..', ...p), 'utf8')
 
 const GPU_TYPE = 'g6e.2xlarge'
-// GPU_AZS[0] 이 실제로 쓰이는 AZ 다. g6e 는 AZ 마다 용량이 따로 있고 자주 마른다 —
-// us-east-1 도 us-west-2 도 네 AZ 전부 InsufficientInstanceCapacity 로 막혔다.
+// GPU_AZS[0] 이 실제로 쓰이는 AZ 다. g6e 는 AZ 마다 용량이 따로 있고 자주 마른다. // us-east-1 도 us-west-2 도 네 AZ 전부 InsufficientInstanceCapacity 로 막혔다.
 // 또 마르면 앞의 항목을 뒤로 돌리면 된다.
 //
 // 리전을 옮길 때 g6e 가 그 리전에 *판매되는지*부터 확인해야 한다:
 //   aws ec2 describe-instance-types --region <r> --instance-types g6e.2xlarge
 // ap-southeast-1(싱가폴)에는 아예 없다(T4/T4g/A100 만 있다).
-// run-instances --dry-run 으로는 확인할 수 없다 — 리전에 없는 타입에도
+// run-instances --dry-run 으로는 확인할 수 없다. 리전에 없는 타입에도
 // "성공했을 것"이라고 답한다. 문법만 검사하며 가용성도 용량도 보지 않는다.
 const GPU_AZS = ['ap-northeast-2a', 'ap-northeast-2b']
 const MODEL = 'chroma'
@@ -42,12 +41,11 @@ const NEPTUNE_VERSION = '1.3.4.0'
 const NEPTUNE_PORT = 8182
 // 데모용 기본 인스턴스 클래스. --context neptuneInstance=db.r6g.large 로 덮어쓴다
 const NEPTUNE_INSTANCE_DEFAULT = 'db.t4g.medium'
-// CloudFront origin-facing 프리픽스 리스트. 리전마다 ID 가 다르다 —
-// ap-northeast-2 는 pl-22a6434b, us-west-2 는 pl-82a045eb, us-east-1 은 pl-3b927c52 였다.
+// CloudFront origin-facing 프리픽스 리스트. 리전마다 ID 가 다르다. // ap-northeast-2 는 pl-22a6434b, us-west-2 는 pl-82a045eb, us-east-1 은 pl-3b927c52 였다.
 const CF_ORIGINS = 'pl-22a6434b'
 
 /*
- * 업무 시간에만 GPU 를 켠다. 시간은 UTC 다 — 여기서 틀리면 새벽에 켜지고 낮에 꺼진다.
+ * 업무 시간에만 GPU 를 켠다. 시간은 UTC 다. 여기서 틀리면 새벽에 켜지고 낮에 꺼진다.
  * 아래는 한국 시간(KST = UTC+9) 기준 평일 09:00 켜고 20:00 끈다.
  * 다른 표준시로 옮기려면 두 숫자를 같이 고쳐야 한다.
  *
@@ -68,7 +66,7 @@ class StoryboardStack extends Stack {
       removalPolicy: RemovalPolicy.DESTROY,
     })
 
-    // 프로젝트별 기획 이력. Ops 와 달리 TTL 이 없다 — 영구 보관이다.
+    // 프로젝트별 기획 이력. Ops 와 달리 TTL 이 없다. 영구 보관이다.
     // GraphFn 이 읽고 쓴다 (HISTORY_TABLE).
     const history = new dynamodb.Table(this, 'StoryHistory', {
       partitionKey: { name: 'projectId', type: dynamodb.AttributeType.STRING },
@@ -124,11 +122,14 @@ class StoryboardStack extends Stack {
     js(ops, 'PutOp', 'Mutation', 'publishOp', 'putOp.js')
     js(ops, 'ListOps', 'Query', 'listOps', 'listOps.js')
     js(bus, 'Presence', 'Mutation', 'publishPresence', 'presence.js')
+    // 프로젝트 카드는 같은 Ops 테이블의 pk='PROJECTS' 한 자리에 산다. op 와 달리 TTL 이 없다
+    js(ops, 'PutProject', 'Mutation', 'putProject', 'putProject.js')
+    js(ops, 'ListProjects', 'Query', 'listProjects', 'listProjects.js')
     // plan 결과는 GraphFn 이 Ops 테이블에 적어 둔 것을 읽어 온다
     js(ops, 'PlanResult', 'Query', 'planResult', 'planResult.js')
-    // navigate 결과도 같은 항목이다 — GraphFn 이 두 잡을 같은 키로 적는다
+    // navigate 결과도 같은 항목이다. GraphFn 이 두 잡을 같은 키로 적는다
     js(ops, 'NavigateResult', 'Query', 'navigateResult', 'navigateResult.js')
-    // plan 자체는 GraphFn 이 받는다 — 데이터소스는 graphDs 를 만든 뒤에 붙인다.
+    // plan 자체는 GraphFn 이 받는다. 데이터소스는 graphDs 를 만든 뒤에 붙인다.
     // Bedrock 을 치던 HTTP 데이터소스(BedrockDs)는 지웠다.
 
     const realtimeUrl = api.node.defaultChild.attrRealtimeUrl
@@ -143,9 +144,9 @@ class StoryboardStack extends Stack {
 
     // ── 관계 그래프 (Neptune Provisioned) ────────────────────────────────────
     // 브라우저의 graph-engine.js 가 조회를 들고 있고, 사실은 여기에 남는다.
-    // 기본 VPC 를 그대로 쓴다 — 서브넷 그룹은 AZ 두 곳 이상이 필요하다.
+    // 기본 VPC 를 그대로 쓴다. 서브넷 그룹은 AZ 두 곳 이상이 필요하다.
     //
-    // Provisioned 라서 시간당 요금이 붙는다. 쓰지 않는 동안에는 클러스터를 세워라 —
+    // Provisioned 라서 시간당 요금이 붙는다. 쓰지 않는 동안에는 클러스터를 세워라.
     // scripts/stop.sh / scripts/start.sh. 인스턴스 클래스는 컨텍스트로 바꿀 수 있다:
     //   npx cdk deploy --context neptuneInstance=db.r6g.large
     const slug = id.toLowerCase()
@@ -181,13 +182,13 @@ class StoryboardStack extends Stack {
     graphInstance.applyRemovalPolicy(RemovalPolicy.DESTROY)
 
     // Gremlin 과 Bedrock 을 도는 Lambda. 이 스택의 첫 Lambda 다.
-    // 기본 VPC 에는 Private 서브넷이 없으므로 Public 에 넣는다 — Lambda ENI 는 퍼블릭 IP 를
+    // 기본 VPC 에는 Private 서브넷이 없으므로 Public 에 넣는다. Lambda ENI 는 퍼블릭 IP 를
     // 받지 못해서 NAT 없이는 인터넷으로 나가지 못한다. 같은 VPC 안의 Neptune 은 닿는다.
     const graphFnSg = new ec2.SecurityGroup(this, 'GraphFnSg', { vpc: net, description: 'storyboard graph lambda' })
     neptuneSg.addIngressRule(graphFnSg, ec2.Port.tcp(NEPTUNE_PORT), 'Lambda to Neptune')
 
     // 그래서 Bedrock 은 인터페이스 엔드포인트로 닿는다. 이게 없으면 plan 오퍼레이션이
-    // 응답 없이 Lambda 타임아웃까지 매달린다 — NAT 게이트웨이보다 싸다.
+    // 응답 없이 Lambda 타임아웃까지 매달린다. NAT 게이트웨이보다 싸다.
     // privateDnsEnabled(기본값)라 SDK 는 평소 호스트명을 그대로 쓴다.
     const bedrockEp = net.addInterfaceEndpoint('BedrockEp', {
       service: ec2.InterfaceVpcEndpointAwsService.BEDROCK_RUNTIME,
@@ -197,12 +198,12 @@ class StoryboardStack extends Stack {
     bedrockEp.connections.allowFrom(graphFnSg, ec2.Port.tcp(443), 'Lambda to Bedrock')
 
     // plan 결과를 Ops 테이블에 적어야 한다. DynamoDB 는 게이트웨이 엔드포인트라
-    // ENI 도 시간당 요금도 없다 — 라우트 테이블에 프리픽스만 얹는다.
+    // ENI 도 시간당 요금도 없다. 라우트 테이블에 프리픽스만 얹는다.
     net.addGatewayEndpoint('DdbEp', { service: ec2.GatewayVpcEndpointAwsService.DYNAMODB })
 
     for (const dep of ['gremlin', '@aws-sdk/client-bedrock-runtime']) {
       if (fs.existsSync(path.join(GRAPH_FN, 'node_modules', ...dep.split('/')))) continue
-      throw new Error(`infra/graph 의 의존성(${dep})이 없다. \`cd infra/graph && npm install\` 을 먼저 돌려라 — CDK 는 이 디렉터리를 그대로 올린다.`)
+      throw new Error(`infra/graph 의 의존성(${dep})이 없다. \`cd infra/graph && npm install\` 을 먼저 돌려라. CDK 는 이 디렉터리를 그대로 올린다.`)
     }
 
     const graphFn = new lambda.Function(this, 'GraphFn', {
@@ -214,11 +215,10 @@ class StoryboardStack extends Stack {
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
       allowPublicSubnet: true,
       securityGroups: [graphFnSg],
-      // Neptune 조회는 초 단위로 끝난다. 길게 잡는 것은 plan(Bedrock) 때문이다 —
-      // 느린 모델에서 대본 한 편이 1분을 넘긴다.
+      // Neptune 조회는 초 단위로 끝난다. 길게 잡는 것은 plan(Bedrock) 때문이다. // 느린 모델에서 대본 한 편이 1분을 넘긴다.
       timeout: Duration.seconds(120),
       // plan 은 Event(비동기)로 들어온다. 기본값 2 로 두면 실패한 잡이 Bedrock 을
-      // 세 번까지 부른다 — 핸들러도 던지지 않게 짜 두었지만 여기서 한 번 더 막는다.
+      // 세 번까지 부른다. 핸들러도 던지지 않게 짜 두었지만 여기서 한 번 더 막는다.
       retryAttempts: 0,
       memorySize: 512,
       environment: {
@@ -262,9 +262,15 @@ class StoryboardStack extends Stack {
       ],
     })
     images.grantPut(gpuRole)
+    // 손으로 한국어를 적은 프롬프트를 영어로 옮길 때만 쓴다(server.py 의 en).
+    // 예전에는 Amazon Translate 를 불렀다. 부르는 서비스를 Bedrock 하나로 모았다.
+    // GPU 는 퍼블릭 서브넷에 퍼블릭 IP 로 있어서 엔드포인트 없이 그냥 닿는다.
     gpuRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: ['translate:TranslateText'],
-      resources: ['*'],
+      actions: ['bedrock:InvokeModel'],
+      resources: [
+        'arn:aws:bedrock:*::foundation-model/anthropic.claude-*',
+        `arn:aws:bedrock:${this.region}:${this.account}:inference-profile/*`,
+      ],
     }))
 
     const serverPy = new s3assets.Asset(this, 'GpuServer', { path: path.join(HERE, '..', 'gpu', 'server.py') })
@@ -294,7 +300,7 @@ class StoryboardStack extends Stack {
      * 루트 볼륨만 담은 시작 템플릿. 인스턴스 설정을 여기로 옮기려는 게 아니다.
      *
      * CloudFormation 의 AWS::EC2::Instance 는 EBS 처리량(Throughput)을 받지 않는다.
-     * 인스턴스에 직접 적으면 조용히 빠지고 gp3 기본값 125MB/s 가 된다 — 26GB 모델을
+     * 인스턴스에 직접 적으면 조용히 빠지고 gp3 기본값 125MB/s 가 된다. 26GB 모델을
      * 올리는 데 3분 반이다. 시작 템플릿의 블록 디바이스는 처리량을 받으므로,
      * 볼륨 한 줄만 템플릿에 두고 인스턴스가 그것을 참조한다.
      * 500MB/s 는 server.py 의 DISK_MBS=300 이 기대하는 값이다(약 88초).
@@ -306,7 +312,7 @@ class StoryboardStack extends Stack {
           volumeType: ec2.EbsDeviceVolumeType.GP3,
           throughput: 500,
           // 껐다 켜도 모델 가중치(약 67GB)가 살아 있어야 한다. 인스턴스와 함께 지우면
-          // 다음 날 아침에 다시 받는다 — 스케줄로 아낀 시간을 다운로드로 되돌려주는 셈이다.
+          // 다음 날 아침에 다시 받는다. 스케줄로 아낀 시간을 다운로드로 되돌려주는 셈이다.
           //
           // 대가: cdk destroy 로 인스턴스가 사라져도 이 볼륨은 남는다. 아무것에도
           // 붙지 않은 채 월 $27 이 계속 붙으므로 스택을 지운 뒤 볼륨도 지워야 한다.
@@ -324,7 +330,7 @@ class StoryboardStack extends Stack {
      * 걸러진 선택 결과가 비어 버린다. ec2.Instance 는 넘긴 subnetType 이 아니라 *선택
      * 결과*로 검사하므로(hasPublic = subnets.some(…)) 빈 선택은 퍼블릭이 아닌 것으로
      * 보고 "To set 'associatePublicIpAddress: true' you must select Public subnets" 로
-     * 죽는다 — 조회가 끝나기 전에 죽어서 두 번째 패스로 넘어가지 못한다.
+     * 죽는다. 조회가 끝나기 전에 죽어서 두 번째 패스로 넘어가지 못한다.
      * 리전을 옮기면 조회 캐시(cdk.context.json)가 리전별이라 반드시 이 경로를 지난다.
      */
     const publicAzs = net.selectSubnets({ subnetType: ec2.SubnetType.PUBLIC }).availabilityZones
@@ -358,7 +364,7 @@ class StoryboardStack extends Stack {
       version: lt.latestVersionNumber,
     }
     /*
-     * 켜고 끄기. EventBridge Scheduler 가 EC2 API 를 직접 부른다 — 우리가 만든
+     * 켜고 끄기. EventBridge Scheduler 가 EC2 API 를 직접 부른다. 우리가 만든
      * Lambda 도, 붙여 쓰는 Lambda 도 없다.
      *
      * 볼륨이 남아 있으므로 아침에 켤 때 67GB 를 다시 받지 않는다. systemd 가
@@ -458,61 +464,64 @@ class StoryboardStack extends Stack {
     ].join('\n')
 
     /*
-     * 버킷 배치가 세 제약을 동시에 만족해야 한다.
-     *   - 기존 앱은 루트에서 열린다               → demo/* 를 루트에 둔다
-     *   - key-visual/index.html 은 <script src="/aws-config.js">  → config 는 루트
-     *   - key-visual/keyvisual.js 는 '../demo/core.js' 를 import  → /demo/* 도 필요
-     * 마지막 것 때문에 demo 를 루트에만 두면 /demo/core.js 가 403 이 되어
-     * 브라우저에서 모듈 로드가 실패한다. 그래서 demo 를 루트와 /demo/ 양쪽에 올린다.
+     * 버킷 배치는 저장소의 두 폴더를 그대로 옮긴 것입니다.
+     *   app/*             → 버킷 루트. 아래 폴더 구조는 그대로 남습니다
+     *   app-walkthrough/* → /app-walkthrough/. 예시 코드와 목데이터입니다
      * 최종 구조:
-     *   /aws-config.js  /index.html(홈)  /board.html  /core.js …
-     *   /demo/core.js …  /key-visual/index.html
+     *   /aws-config.js  /index.html(홈)  /board.html  /story-graph.html
+     *   /key-visual.html
+     *   /platform/…  /chrome/…  /story/…  /art/…  /screens/…
+     *   /app-walkthrough/tour.js  /app-walkthrough/guide.js
+     *   /app-walkthrough/steps/…  /app-walkthrough/data/graph.json …
      *
-     * 아래 defaultRootObject 는 루트 '/' 에만 적용된다 — 하위 디렉터리에는 적용되지
-     * 않으므로 '/key-visual/' 은 403 이다. 그래서 탭 주소는 파일 이름까지 적는다
-     * (demo/nav-tabs.js 의 NAV_TABS).
+     * app/ 은 폴더째로 루트에 붙지만 app-walkthrough/ 는 자기 이름을 접두사로 답니다.
+     * 그래서 두 폴더의 깊이가 배포에서 한 칸씩 달라집니다. 화면(app/screens/x.js)에서
+     * '../../app-walkthrough/tour.js' 는 두 배치에서 같은 자리를 가리키지만, 반대
+     * 방향은 디스크에서만 맞고 배포에서는 404 입니다. 그래서 예시가 제품을 import
+     * 하지 않고 화면이 필요한 것을 넣어 줍니다 (app-walkthrough/tour.js 의 wire).
+     *
+     * 한때 키 비주얼만 자기 폴더에 따로 있었고, 그 화면이 옆 폴더의 공용 모듈을
+     * import 해서 같은 파일을 버킷의 두 자리에 올려야 했습니다(배포가 셋이었습니다).
+     * 화면을 app/ 한 폴더로 모으면서 그 사본이 필요 없어졌습니다.
+     *
+     * 아래 defaultRootObject 는 루트 '/' 에만 적용됩니다. 하위 디렉터리에는 적용되지
+     * 않으므로 디렉터리로 끝나는 주소는 403 입니다. 그래서 탭 주소는 파일 이름까지
+     * 적습니다 (app/chrome/nav-tabs.js 의 NAV_TABS).
      */
     const webDeploy = new s3deploy.BucketDeployment(this, 'Web', {
       destinationBucket: site,
       sources: [
-        s3deploy.Source.asset(DEMO, { exclude: ['aws-config.js', '.DS_Store', 'test.html'] }),
+        s3deploy.Source.asset(APP, { exclude: ['aws-config.js', '.DS_Store', 'test.html'] }),
         s3deploy.Source.data('aws-config.js', config),
       ],
-      // 이 배포는 접두사가 없어서 버킷 전체를 소스와 맞춘다 — 즉 기본 prune 이
-      // 다른 배포가 만든 폴더를 통째로 지운다. 두 배포의 실행 순서는 보장되지
-      // 않으므로 이 예외가 없으면 배포마다 폴더가 있다 없다 한다.
-      exclude: ['key-visual/*', 'demo/*'],
+      // 이 배포는 접두사가 없어서 버킷 전체를 소스와 맞춥니다. 즉 기본 prune 이
+      // 다른 배포가 만든 폴더를 통째로 지웁니다. 두 배포의 실행 순서는 보장되지
+      // 않으므로 이 예외가 없으면 배포마다 폴더가 있다 없다 합니다.
+      exclude: ['app-walkthrough/*'],
       distribution: cdn,
       distributionPaths: ['/*'],
     })
 
-    // key-visual 의 '../demo/*' import 를 받아주는 사본. 루트의 것과 같은 파일이지만
-    // destinationKeyPrefix 는 배포 단위로만 지정할 수 있어서 한 배포에 루트와
-    // 하위 폴더를 함께 담을 수 없다 — 그래서 배포를 나눈다.
-    const webDemo = new s3deploy.BucketDeployment(this, 'WebDemo', {
+    /*
+     * 예시. 안내를 끌고 가는 코드와 그 코드가 읽는 목데이터가 함께 있습니다.
+     * destinationKeyPrefix 는 배포 단위로만 지정할 수 있어서 한 배포에 루트와
+     * 하위 폴더를 함께 담을 수 없습니다. 그래서 배포를 나눕니다.
+     *
+     * screens/ 는 올리지 않습니다. 화면 스크린샷과 목업은 README 가 보는 문서용이고
+     * 브라우저가 읽지 않습니다. steps/ 는 브라우저가 읽으므로 올립니다.
+     */
+    const webWalkthrough = new s3deploy.BucketDeployment(this, 'WebWalkthrough', {
       destinationBucket: site,
-      destinationKeyPrefix: 'demo',
-      sources: [
-        s3deploy.Source.asset(DEMO, { exclude: ['aws-config.js', '.DS_Store', 'test.html'] }),
-      ],
+      destinationKeyPrefix: 'app-walkthrough',
+      sources: [s3deploy.Source.asset(WALKTHROUGH, {
+        exclude: ['.DS_Store', 'screens/*'],
+      })],
       distribution: cdn,
-      distributionPaths: ['/demo/*'],
+      distributionPaths: ['/app-walkthrough/*'],
     })
-    webDemo.node.addDependency(webDeploy)
-
-    // key-visual 은 별도 BucketDeployment 다. destinationKeyPrefix 는 배포 단위로만
-    // 지정할 수 있어서 한 배포에 루트와 하위 폴더를 섞을 수 없다.
-    const webKv = new s3deploy.BucketDeployment(this, 'WebKeyVisual', {
-      destinationBucket: site,
-      destinationKeyPrefix: 'key-visual',
-      // .drawio 원본과 목업 PNG 는 배포에 넣지 않는다 — 문서용 파일이다.
-      sources: [s3deploy.Source.asset(KEYVISUAL, { exclude: ['.DS_Store', '*.drawio', '*.drawio.png'] })],
-      distribution: cdn,
-      distributionPaths: ['/key-visual/*'],
-    })
-    // 같은 버킷에 쓰는 두 배포를 동시에 돌리지 않는다. 순서를 고정해 두면
-    // 위의 exclude 와 합쳐 어느 쪽도 상대의 파일을 지우지 않는다.
-    webKv.node.addDependency(webDemo)
+    // 같은 버킷에 쓰는 두 배포를 동시에 돌리지 않습니다. 순서를 고정해 두면
+    // 위의 exclude 와 합쳐 어느 쪽도 상대의 파일을 지우지 않습니다.
+    webWalkthrough.node.addDependency(webDeploy)
 
     new CfnOutput(this, 'Url', { value: `https://${cdn.distributionDomainName}` })
     new CfnOutput(this, 'GraphqlUrl', { value: api.graphqlUrl })

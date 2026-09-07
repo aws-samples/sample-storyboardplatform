@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Story Graph · 대본에서 씨앗과 분기까지</title>
+<!-- 세 화면이 나눠 쓰는 색 한 벌. 아래 :root 가 이 값을 가리킨다 -->
+<link rel="stylesheet" href="chrome/theme.css">
+<style>
+  /*
+   * 이 화면의 이름들은 그대로 두고 값만 공통 토큰(theme.css)을 가리킨다.
+   *
+   * 예전에는 따뜻한 회색 배경에 보라 강조였다. 세 화면을 탭으로 오가게 되면서
+   * 여기만 강조색이 달라 다른 제품처럼 보였다. 그래서 파랑 한 가지로 모았다.
+   * 이름을 바꾸지 않은 이유는 이 파일과 graph-view.js 규칙이 짧은 이름을 쓰기
+   * 때문이다. 값만 갈아 끼우면 규칙은 그대로 따라온다.
+   *
+   * 둥근 정도만 예외로 남긴다(--r: 14px). 이 화면은 카드가 크고 그래프 위에 얹혀서
+   * 6px 로 줄이면 판이 각지고 답답해진다. 대신 버튼·입력칸은 아래에서 --sb-r 로
+   * 내려 잡아 다른 화면과 손끝 느낌을 맞춘다.
+   */
+  :root {
+    --bg: var(--sb-fill);
+    --bg-soft: var(--sb-fill);
+    --panel: var(--sb-panel);
+    --ink: var(--sb-ink);
+    --ink2: var(--sb-ink-2);
+    --ink3: var(--sb-ink-3);
+    --line: var(--sb-line);
+    --line2: var(--sb-line-2);
+    --acc: var(--sb-accent);
+    --acc-ink: var(--sb-accent-ink);
+    --acc-soft: var(--sb-accent-soft);
+    --ok: var(--sb-ok);
+    --ok-ink: var(--sb-ok);
+    --ok-soft: var(--sb-ok-soft);
+    --warn: var(--sb-work);
+    --warn-soft: var(--sb-work-soft);
+    --bad: var(--sb-no);
+    --bad-soft: var(--sb-no-soft);
+    --sh1: var(--sb-sh);
+    --sh2: var(--sb-sh-lg);
+    --r: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  [hidden] { display: none !important; }
+  body {
+    font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+    background: var(--bg); color: var(--ink);
+    font-size: 15px; line-height: 1.7; letter-spacing: -.005em;
+    height: 100vh; overflow: hidden; -webkit-font-smoothing: antialiased;
+  }
+  /* 줄: 위 띠 · 기능 탭 바 · 내용 */
+  .app { display: grid; grid-template-columns: 1fr 468px; grid-template-rows: 66px auto 1fr; height: 100vh; }
+  /* 탭 바는 두 칸을 다 씁니다. 탭 바 모양은 nav-tabs.js 가 들고 있습니다 */
+  #navMount { grid-column: 1 / -1; min-width: 0; }
+  #navMount { z-index: 19; }
+
+  /* ── 위 띠 ─────────────────────────────────────────────────────────────── */
+  .topbar {
+    grid-column: 1 / -1; background: rgba(255,255,255,.88); backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line); display: flex; align-items: center;
+    padding: 0 22px; gap: 10px; box-shadow: 0 1px 12px rgba(26,34,60,.05); z-index: 20;
+  }
+  .topbar h1 {
+    font-size: 19px; font-weight: 800; letter-spacing: -.02em; margin-right: 8px;
+    color: var(--acc);
+  }
+  .badge {
+    font-size: 13px; font-weight: 600; background: var(--bg-soft); border: 1px solid var(--line);
+    border-radius: 999px; padding: 5px 12px; color: var(--ink3); white-space: nowrap;
+  }
+  .badge--live { background: var(--ok-soft); border-color: var(--sb-ok-line); color: var(--ok-ink); }
+  .who { font-size: 14px; font-weight: 700; color: var(--ink2); white-space: nowrap; }
+  .grow { flex: 1; }
+  .graph-area { position: relative; overflow: hidden; background: var(--bg); }
+  .sidebar { background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; overflow: hidden; }
+  #network { width: 100%; height: 100%; }
+
+  /* ── 버튼 · 입력 ────────────────────────────────────────────────────────── */
+  button { font-family: inherit; }
+  .btn {
+    padding: 12px 17px; background: var(--acc);
+    border: none; border-radius: var(--sb-r); color: #fff; font-size: 14.5px; font-weight: 700;
+    letter-spacing: -.01em; cursor: pointer; box-shadow: var(--sh1);
+    transition: transform .14s, box-shadow .14s, filter .14s;
+  }
+  .btn:hover:not(:disabled) { transform: translateY(-1px); background: var(--acc-ink); box-shadow: var(--sh2); }
+  .btn:active:not(:disabled) { transform: translateY(0); filter: brightness(.97); }
+  .btn:disabled { opacity: .45; cursor: default; box-shadow: none; }
+  .btn--line {
+    background: #fff; border: 1px solid var(--line); color: var(--ink2);
+    font-weight: 600; box-shadow: none;
+  }
+  .btn--line:hover:not(:disabled) { border-color: var(--sb-accent-line); color: var(--acc-ink); background: var(--acc-soft); }
+  .btn--wide { width: 100%; }
+  .btn--mini { padding: 8px 12px; font-size: 13px; border-radius: var(--sb-r); }
+
+  textarea, select, input[type="text"], input[type="password"] {
+    width: 100%; background: #fff; border: 1px solid var(--line); border-radius: var(--sb-r);
+    color: var(--ink); font-family: inherit; font-size: 15px; line-height: 1.7; padding: 11px 13px;
+    transition: border-color .14s, box-shadow .14s;
+  }
+  textarea { resize: vertical; }
+  textarea:focus, select:focus, input:focus {
+    outline: none; border-color: var(--acc); box-shadow: 0 0 0 3px var(--acc-soft);
+  }
+  textarea::placeholder { color: var(--ink3); }
+
+  /* ── 모델 고르기 ────────────────────────────────────────────────────────────
+     이 화면의 모든 Bedrock 호출(추출·요약·분기·대본)이 여기서 고른 모델로 간다.
+     이름은 infra/resolvers/plan.js 의 MODELS 키와 짝이 맞아야 한다. */
+  .model-pick { margin-bottom: 13px; }
+  .model-pick label {
+    display: block; font-size: 12px; font-weight: 800; color: var(--ink3);
+    text-transform: uppercase; letter-spacing: .07em; margin-bottom: 6px;
+  }
+  .model-pick select {
+    font-size: 13.5px; line-height: 1.5; padding: 9px 11px; border-radius: var(--sb-r);
+    cursor: pointer; font-weight: 600; color: var(--ink);
+  }
+  .model-pick select:disabled { background: var(--bg-soft); color: var(--ink3); cursor: default; }
+  .model-pick .hint { margin-top: 6px; font-size: 12.5px; }
+
+  /* ── 그래프 위에 얹는 카드 ─────────────────────────────────────────────── */
+  .card {
+    position: absolute; z-index: 5; background: rgba(255,255,255,.94); backdrop-filter: blur(10px);
+    border: 1px solid var(--line); border-radius: 18px; padding: 17px; box-shadow: var(--sh1);
+  }
+  .card h3 {
+    font-size: 12.5px; font-weight: 800; color: var(--ink3); text-transform: uppercase;
+    letter-spacing: .08em; margin-bottom: 11px; display: flex; align-items: center; gap: 8px;
+  }
+  .card--input { top: 18px; left: 18px; width: 392px; }
+  .card--input.drop { border-color: var(--acc); box-shadow: 0 0 0 5px var(--acc-soft), var(--sh2); }
+  .card--node { bottom: 18px; left: 18px; width: 392px; max-height: 48%; overflow-y: auto; }
+  .card__row { display: flex; gap: 9px; margin-top: 12px; }
+
+  .hint { font-size: 13.5px; color: var(--ink3); line-height: 1.7; margin-top: 9px; }
+  .warn { font-size: 14px; color: var(--warn); line-height: 1.7; margin-top: 9px; }
+  .err { font-size: 14.5px; color: var(--bad); line-height: 1.7; margin-top: 9px; font-weight: 500; }
+  .ok { font-size: 14.5px; color: var(--ok-ink); line-height: 1.7; margin-top: 9px; font-weight: 600; }
+
+  .legend {
+    position: absolute; z-index: 5; right: 18px; bottom: 18px; display: flex; flex-wrap: wrap;
+    gap: 8px 15px; max-width: 400px; justify-content: flex-end; align-items: center;
+    background: rgba(255,255,255,.92); backdrop-filter: blur(8px); border: 1px solid var(--line);
+    border-radius: 999px; padding: 11px 18px; box-shadow: var(--sh1);
+  }
+  .legend span { font-size: 13px; font-weight: 600; color: var(--ink2); display: flex; align-items: center; gap: 6px; }
+  .legend i {
+    width: 13px; height: 13px; border-radius: 50%; display: inline-block;
+    background: radial-gradient(circle at 33% 28%, rgba(255,255,255,.9), var(--c) 58%, rgba(0,0,0,.18));
+    box-shadow: 0 2px 4px rgba(26,34,60,.22);
+  }
+  .legend i.line { width: 18px; height: 0; border-radius: 0; background: none; box-shadow: none; border-top: 2px solid var(--ink2); }
+  .legend i.dash { width: 18px; height: 0; border-radius: 0; background: none; box-shadow: none; border-top: 2px dashed var(--ink3); }
+  .canvas-msg {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    text-align: center; color: var(--ink3); font-size: 15.5px; line-height: 2; padding: 48px; pointer-events: none;
+  }
+  .canvas-msg b { color: var(--acc-ink); }
+
+  /*
+   * 처음 온 사람에게 뜨는 판. 모양은 app/onboard.js 가 넣고(.onb*) 여기서는 자리만
+   * 잡는다. 판 가운데가 아니라 대본 카드 오른쪽에 둔다. 가운데에 놓으면 카드를 덮고,
+   * 「직접 시작하기」가 가리키는 대본 칸이 그 아래에 가려진다. 카드를 접으면
+   * (대본 입력 접기) 그 자리까지 넓게 쓴다.
+   */
+  .onbslot { position: absolute; z-index: 6; left: 430px; top: 22px; }
+  .onbslot--wide { left: 22px; }
+
+  .kv { display: grid; grid-template-columns: 62px 1fr; gap: 5px 12px; font-size: 14.5px; }
+  .kv .k { color: var(--ink3); font-weight: 600; }
+  .kv .v { color: var(--ink); word-break: break-all; }
+  .edge-line { font-size: 14px; color: var(--ink2); line-height: 1.85; }
+  .edge-line b { color: var(--acc-ink); font-weight: 700; }
+  .edge-line.der { color: var(--ink3); }
+
+  /* ── 사이드바 ───────────────────────────────────────────────────────────── */
+  .stats-bar {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 16px 18px;
+    border-bottom: 1px solid var(--line2); background: var(--panel); flex-shrink: 0;
+  }
+  .stat { background: var(--bg-soft); border: 1px solid var(--line2); border-radius: 13px; padding: 11px 12px; }
+  .stat .n { font-size: 27px; font-weight: 800; line-height: 1.15; letter-spacing: -.03em; color: var(--ink); }
+  .stat .l { font-size: 12.5px; font-weight: 600; color: var(--ink3); margin-top: 3px; }
+
+  .tabs { display: flex; gap: 7px; padding: 12px 14px; border-bottom: 1px solid var(--line2); background: var(--panel); flex-shrink: 0; }
+  .tab {
+    padding: 10px 18px; font-size: 15px; font-weight: 700; cursor: pointer; color: var(--ink3);
+    border-radius: 11px; transition: all .15s; user-select: none;
+  }
+  .tab:hover { color: var(--ink); background: var(--bg-soft); }
+  .tab.active { color: var(--acc-ink); background: var(--acc-soft); }
+  .panel { display: none; flex-direction: column; overflow: hidden; flex: 1; }
+  .panel.active { display: flex; }
+  .panel-scroll { overflow-y: auto; flex: 1; padding: 18px; }
+  .panel-scroll::-webkit-scrollbar { width: 9px; }
+  .panel-scroll::-webkit-scrollbar-track { background: transparent; }
+  .panel-scroll::-webkit-scrollbar-thumb { background: var(--line); border: 3px solid var(--panel); border-radius: 999px; }
+  .panel-scroll::-webkit-scrollbar-thumb:hover { background: var(--ink3); }
+
+  /* ── 씨앗 카드 ──────────────────────────────────────────────────────────── */
+  .seed-card {
+    background: #fff; border: 1px solid var(--line); border-radius: 17px; margin-bottom: 14px;
+    box-shadow: var(--sh1); overflow: hidden;
+    transition: transform .16s, box-shadow .16s, border-color .16s;
+  }
+  .seed-card:hover { transform: translateY(-2px); box-shadow: var(--sh2); }
+  .seed-card.on { border-color: var(--acc); box-shadow: 0 0 0 4px var(--acc-soft), var(--sh2); }
+  /* 탐지기별 파스텔 그라디언트 머리. --p1/--p2/--pi 는 JS 가 씨앗마다 꽂아 준다 */
+  .seed-head {
+    display: flex; align-items: center; gap: 10px; padding: 13px 15px;
+    background: linear-gradient(135deg, var(--p1, var(--acc-soft)), var(--p2, var(--bg-soft)));
+    border-bottom: 1px solid rgba(255,255,255,.7);
+  }
+  .probe-tag {
+    font-size: 13px; font-weight: 800; letter-spacing: -.01em; color: var(--pi, var(--acc-ink));
+    background: rgba(255,255,255,.75); border-radius: 999px; padding: 6px 13px; white-space: nowrap;
+  }
+  .seed-score { margin-left: auto; font-size: 14px; font-weight: 800; color: var(--pi, var(--acc-ink)); }
+  /* 역기입 뒤에 새로 나온 씨앗. 판의 새 노드·엣지와 같은 녹색을 쓴다 (graph-view.js) */
+  .seed-card.is-new { border-color: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft), var(--sh1); }
+  .seed-new-tag {
+    display: flex; align-items: center; gap: 6px; padding: 7px 15px;
+    background: var(--ok); color: #fff; font-size: 12.5px; font-weight: 800; letter-spacing: -.01em;
+  }
+  .seed-new-tag::before { content: '✦'; font-size: 11px; }
+  .new-badge {
+    font-size: 10.5px; font-weight: 800; letter-spacing: .04em; color: #fff;
+    background: var(--ok); border-radius: 999px; padding: 4px 9px; line-height: 1;
+  }
+  .seed-body { padding: 15px 16px 16px; }
+  .seed-title { font-size: 19px; font-weight: 800; line-height: 1.45; letter-spacing: -.02em; color: var(--ink); margin-bottom: 9px; cursor: pointer; }
+  .seed-title:hover { color: var(--acc-ink); }
+  .seed-rationale { font-size: 15.5px; color: var(--ink2); line-height: 1.75; margin-bottom: 11px; }
+  .seed-focus { font-size: 13.5px; color: var(--ink3); margin-bottom: 14px; }
+
+  /* ── 스토리 · 분기 ──────────────────────────────────────────────────────── */
+  .story-content { font-size: 15.5px; line-height: 1.75; padding-bottom: 26px; }
+  .story-content h1 { font-size: 25px; font-weight: 800; letter-spacing: -.03em; line-height: 1.35; margin-bottom: 12px; }
+  .seed-info {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 9px;
+    background: linear-gradient(135deg, var(--p1, var(--acc-soft)), var(--p2, var(--bg-soft)));
+    border: 1px solid rgba(255,255,255,.8); border-radius: 14px; padding: 13px 15px;
+    margin-bottom: 16px; font-size: 14px; color: var(--ink2); line-height: 1.6;
+  }
+  .logline { color: var(--ink2); font-size: 16.5px; line-height: 1.8; margin-bottom: 16px; }
+  .pivot-box {
+    background: var(--warn-soft); border: 1px solid var(--sb-work-line); border-radius: 14px;
+    padding: 14px 16px; margin-bottom: 16px; font-size: 15px; line-height: 1.75;
+  }
+  .pivot-box .ttl { color: var(--warn); font-weight: 800; font-size: 15.5px; display: block; margin-bottom: 5px; }
+  .pivot-box .bd { color: var(--ink2); }
+
+  .branch-chips { display: grid; grid-template-columns: repeat(auto-fit, minmax(98px, 1fr)); gap: 10px; margin-bottom: 18px; }
+  .branch-chip {
+    background: #fff; border: 1px solid var(--line); border-radius: 15px; padding: 13px 10px;
+    text-align: center; cursor: pointer; font-size: 13.5px; font-weight: 600; color: var(--ink2);
+    line-height: 1.45; box-shadow: var(--sh1); transition: all .15s;
+  }
+  .branch-chip:hover { transform: translateY(-2px); border-color: var(--sb-accent-line); color: var(--ink); box-shadow: var(--sh2); }
+  .branch-chip.on {
+    border-color: var(--acc); background: var(--acc-soft); color: var(--acc-ink);
+    box-shadow: 0 0 0 3px var(--acc-soft), var(--sh2);
+  }
+  .branch-chip .bid { display: block; font-size: 23px; font-weight: 800; letter-spacing: -.02em; color: var(--ink); margin-bottom: 3px; }
+  .branch-chip.on .bid { color: var(--acc-ink); }
+
+  .branch-head { font-size: 22px; font-weight: 800; letter-spacing: -.025em; line-height: 1.4; margin-bottom: 7px; }
+  .branch-tone {
+    display: inline-block; font-size: 13px; font-weight: 700; background: var(--bg-soft);
+    border: 1px solid var(--line2); border-radius: 999px; padding: 4px 12px; color: var(--ink2); margin-bottom: 11px;
+  }
+  .branch-premise {
+    font-size: 15.5px; color: var(--ink2); line-height: 1.8; margin-bottom: 16px;
+    padding: 2px 0 2px 14px; border-left: 3px solid var(--sb-accent-line);
+  }
+
+  .beats { margin-bottom: 16px; }
+  .beat { display: flex; gap: 12px; font-size: 15.5px; color: var(--ink); line-height: 1.75; margin-bottom: 12px; }
+  .beat .no {
+    flex-shrink: 0; width: 25px; height: 25px; margin-top: 2px; border-radius: 9px;
+    background: var(--acc-soft); color: var(--acc-ink); font-size: 13px; font-weight: 800;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  .sec-label {
+    font-size: 12.5px; font-weight: 800; color: var(--ink3); text-transform: uppercase;
+    letter-spacing: .09em; margin: 24px 0 11px;
+  }
+  .outcome { display: grid; grid-template-columns: 88px 1fr; gap: 4px 12px; font-size: 15px; margin-bottom: 8px; }
+  .outcome .k { color: var(--ink3); font-weight: 700; }
+  .outcome .v { color: var(--ink); }
+
+  .wb-box { background: var(--ok-soft); border: 1px solid var(--sb-ok-line); border-radius: 14px; padding: 13px 15px; font-size: 14px; line-height: 1.75; }
+  .wb-box .item { color: var(--ink2); padding: 2px 0; }
+  .wb-box .item::before { content: "+ "; color: var(--ok); font-weight: 800; }
+  .wb-box .item.cut::before { content: "− "; color: var(--bad); }
+  .wb-box .item.cut { color: var(--ink3); text-decoration: line-through; }
+  .wb-box .item .p { color: var(--acc-ink); font-weight: 600; }
+  .wb-box .item .nt { color: var(--ink3); font-size: 12.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+  .wb-sum { font-size: 14.5px; color: var(--ink2); margin-bottom: 9px; }
+  .wb-sum b { color: var(--ok-ink); font-weight: 800; }
+  .wb-sum i { color: var(--bad); font-style: normal; font-weight: 800; }
+
+  .free-box { background: var(--bg-soft); border: 1.5px dashed var(--line); border-radius: 16px; padding: 17px; margin-top: 20px; }
+  .free-box h4 { font-size: 15.5px; font-weight: 800; color: var(--ink); margin-bottom: 9px; }
+
+  /* ── 지나간 일 ────────────────────────────────────────────────────────────
+     목록 자체의 모양(.hist*)은 app/history.js 가 넣는다. 홈·보드·키비주얼이 같은
+     목록을 쓰기 때문에 화면마다 베껴 두지 않는다. 여기 있는 것은 머리줄과 꼬리말이다. */
+  .hist-head {
+    display: flex; align-items: center; gap: 9px; margin-bottom: 12px;
+    font-size: 12.5px; font-weight: 800; color: var(--ink3);
+    text-transform: uppercase; letter-spacing: .08em;
+  }
+  .hist-head .btn { margin-left: auto; text-transform: none; letter-spacing: 0; }
+  .hist-head .btn[aria-pressed="true"] {
+    border-color: var(--sb-accent-line); color: var(--acc-ink); background: var(--acc-soft);
+  }
+  .hist-note { margin-top: 12px; font-size: 12.5px; color: var(--ink3); line-height: 1.75; }
+
+  .placeholder { text-align: center; color: var(--ink3); padding: 30px 18px; font-size: 15px; line-height: 1.95; }
+  .placeholder b { color: var(--acc-ink); }
+  .load-error { padding: 26px; color: var(--bad); font-size: 15px; line-height: 1.9; }
+  .spin {
+    display: inline-block; width: 15px; height: 15px; border: 2.5px solid var(--line2);
+    border-top-color: var(--acc); border-radius: 50%; animation: sp .7s linear infinite; vertical-align: -2px;
+  }
+  @keyframes sp { to { transform: rotate(360deg) } }
+  .busy { display: flex; align-items: center; gap: 10px; color: var(--ink2); font-size: 15px; font-weight: 600; padding: 20px 4px; }
+
+  .cmp { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; margin-top: 8px; border-radius: 12px; overflow: hidden; border: 1px solid var(--line2); }
+  .cmp th { background: var(--bg-soft); color: var(--ink2); padding: 9px 10px; border-bottom: 1px solid var(--line2); font-weight: 700; text-align: left; }
+  .cmp tr > th:first-child { white-space: nowrap; color: var(--ink3); }
+  .cmp td { padding: 9px 10px; border-bottom: 1px solid var(--line2); color: var(--ink2); vertical-align: top; line-height: 1.6; }
+  .cmp tr:last-child td, .cmp tr:last-child th { border-bottom: none; }
+  .cmp td.on { background: var(--acc-soft); color: var(--acc-ink); font-weight: 600; }
+  details.warns { margin-top: 14px; font-size: 14px; color: var(--warn); }
+  details.warns summary { cursor: pointer; font-weight: 700; }
+  details.warns ul { margin: 8px 0 0 18px; color: var(--ink2); line-height: 1.75; }
+
+  /* ── 분기 → 대본 · 대본화 ───────────────────────────────────────────────── */
+  .opt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px; }
+  .opt-grid label { font-size: 13px; font-weight: 700; color: var(--ink3); display: flex; flex-direction: column; gap: 6px; }
+  .opt-grid label.wide { grid-column: 1 / -1; }
+  .step-bar { display: flex; gap: 7px; margin-bottom: 16px; }
+  .step {
+    flex: 1; font-size: 12.5px; font-weight: 700; text-align: center; padding: 8px 4px;
+    border-radius: 10px; background: var(--bg-soft); border: 1.5px solid var(--line2); color: var(--ink3);
+  }
+  .step.done { border-color: var(--sb-ok-line); background: var(--ok-soft); color: var(--ok-ink); }
+  .step.on { background: var(--acc-soft); border-color: var(--acc); color: var(--acc-ink); }
+  .cut-row {
+    background: #fff; border: 1px solid var(--line); border-radius: 13px; padding: 12px 14px;
+    margin-bottom: 9px; font-size: 15px; line-height: 1.75; box-shadow: 0 1px 2px rgba(26,34,60,.04);
+  }
+  .cut-row .hd { display: flex; flex-wrap: wrap; gap: 9px; font-size: 12.5px; font-weight: 600; color: var(--ink3); margin-bottom: 5px; }
+  .cut-row .hd .no { color: var(--acc-ink); font-weight: 800; }
+  .cut-row .ac { color: var(--ink); }
+  .cut-row .dl { color: var(--acc-ink); font-weight: 500; }
+  pre.script {
+    background: var(--bg-soft); border: 1px solid var(--line); border-radius: 14px; padding: 17px;
+    font-family: ui-monospace, Menlo, 'Malgun Gothic', monospace; font-size: 15px; line-height: 1.95;
+    color: var(--ink); white-space: pre-wrap; word-break: break-word; max-height: 46vh; overflow: auto;
+    box-shadow: inset 0 1px 3px rgba(26,34,60,.04);
+  }
+  .ep-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 15px; }
+  .ep-chips .branch-chip { flex: 0 0 auto; padding: 9px 15px; font-size: 14px; }
+
+  /* ── 로그인 문 ──────────────────────────────────────────────────────────── */
+  .gate {
+    position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
+    padding: 28px; overflow: auto;
+    background: linear-gradient(140deg, var(--acc-soft) 0%, var(--bg) 55%, var(--bg) 100%);
+  }
+  .gate__card {
+    width: 100%; max-width: 470px; background: #fff; border-radius: 24px; padding: 34px;
+    box-shadow: var(--sh2); border: 1px solid var(--line);
+  }
+  .gate__eyebrow { font-size: 13px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--acc); margin-bottom: 8px; }
+  .gate__title { font-size: 27px; font-weight: 800; letter-spacing: -.03em; margin-bottom: 10px; }
+  .gate__sub { font-size: 15px; color: var(--ink2); line-height: 1.75; margin-bottom: 22px; }
+  .gate__list { display: grid; gap: 8px; margin-bottom: 6px; }
+  .gate__who {
+    display: flex; align-items: center; gap: 11px; width: 100%; text-align: left; cursor: pointer;
+    padding: 11px 14px; border: 1px solid var(--line); border-radius: 13px; background: #fff;
+    font-family: inherit; font-size: 14.5px; transition: all .14s;
+  }
+  .gate__who:hover:not(:disabled) { border-color: var(--sb-accent-line); background: var(--acc-soft); transform: translateY(-1px); }
+  .gate__who:disabled { opacity: .5; cursor: default; }
+  .gate__dot { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 1px 3px rgba(26,34,60,.25); }
+  .gate__name { font-size: 15px; font-weight: 700; color: var(--ink); }
+  .gate__role { font-size: 12.5px; color: var(--ink3); }
+  .gate__job { margin-left: auto; font-size: 12.5px; color: var(--ink3); text-align: right; }
+  .lf { display: block; margin-bottom: 14px; }
+  .lf__label { display: block; font-size: 13.5px; font-weight: 700; color: var(--ink2); margin-bottom: 7px; }
+  .lf--check { display: flex; align-items: center; gap: 9px; font-size: 14.5px; color: var(--ink2); }
+  .lf--check input { width: 17px; height: 17px; accent-color: var(--acc); }
+  .lf__or { text-align: center; font-size: 13px; font-weight: 700; color: var(--ink3); margin: 16px 0 14px; }
+  .lf__why { min-height: 22px; font-size: 14px; font-weight: 600; color: var(--bad); line-height: 1.6; margin-top: 10px; }
+  .lf__note { font-size: 13px; color: var(--ink3); line-height: 1.75; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <h1>Story Graph</h1>
+    <span class="badge" id="modeBadge">모드 확인 중</span>
+    <span class="badge" id="srcBadge">graph: app-walkthrough/data/graph.json</span>
+    <div class="grow"></div>
+    <span class="who" id="whoAmI" hidden></span>
+    <button class="btn btn--line btn--mini" id="logoutBtn" hidden>로그아웃</button>
+    <button class="btn btn--line btn--mini" id="coachBtn">안내 다시 보기</button>
+    <button class="btn btn--line btn--mini" id="inputToggle">대본 입력 접기</button>
+  </div>
+
+  <!-- 상단 기능 탭. index.html 과 같은 탭 바를 nav-tabs.js 에서 받아 쓴다 -->
+  <div id="navMount"></div>
+
+  <div class="graph-area">
+    <div id="network"></div>
+    <div class="canvas-msg" id="canvasMsg" hidden></div>
+
+    <!-- 처음 온 사람에게 뜨는 판. 그래프가 비어 있을 때만 보인다 (onboard.js 의 emptyPanel) -->
+    <div class="onbslot" id="onbSlot" hidden></div>
+
+    <section class="card card--input" id="inputCard" data-coach="input">
+      <h3>대본 · 시놉시스</h3>
+
+      <!-- 고른 모델은 이 화면의 모든 생성에 쓰인다. 값은 plan 리졸버의 MODELS 키다 -->
+      <div class="model-pick">
+        <label for="modelSel">모델</label>
+        <select id="modelSel">
+          <option value="haiku-4.5">Haiku 4.5 · 빠른 초안 · 구조와 뼈대를 빠르게 잡을 때</option>
+          <option value="sonnet-5" selected>Sonnet 5 · 균형잡힌 작업 · 대부분의 작업에 추천 (기본값)</option>
+          <option value="opus-4.8">Opus 4.8 · 깊이 있는 창작 · 캐릭터 심리와 대사에 강함, 느리고 비용 높음</option>
+        </select>
+        <div class="hint" id="modelHint">추출 · 요약 · 분기 · 대본 생성에 모두 이 모델을 씁니다.</div>
+      </div>
+
+      <textarea id="scriptIn" rows="7" spellcheck="false"
+        placeholder="시놉시스나 대본을 붙여 넣거나 .txt / .fdx 파일을 이 카드로 끌어다 놓습니다.
+예: 새벽에 문 여는 동네 빵집. 주인은 첫 손님이 오기까지..."></textarea>
+      <div class="card__row">
+        <button class="btn" id="extractBtn" data-coach="extract">그래프 추출</button>
+        <button class="btn btn--line" id="mockBtn">예시 대본으로 보기</button>
+      </div>
+      <div class="hint" id="inputHint">최소 8자 이상. 추출은 Bedrock 연결이 필요합니다.</div>
+    </section>
+
+    <section class="card card--node" id="nodeCard" hidden>
+      <h3>노드 <button class="btn btn--line btn--mini" id="nodeClose" style="margin-left:auto">닫기</button></h3>
+      <div id="nodeBody"></div>
+    </section>
+
+    <!-- 종류별 구체 색은 graph-view.js 의 KIND_COLOR 한 곳에서 온다 -->
+    <div class="legend" id="legend"></div>
+  </div>
+
+  <div class="sidebar">
+    <div class="stats-bar" data-coach="stats">
+      <div class="stat"><div class="n" id="s-nodes">-</div><div class="l">노드</div></div>
+      <div class="stat"><div class="n" id="s-asserted">-</div><div class="l">명시 엣지</div></div>
+      <div class="stat"><div class="n" id="s-derived">-</div><div class="l">추론</div></div>
+      <div class="stat"><div class="n" id="s-seeds">-</div><div class="l">씨앗</div></div>
+    </div>
+    <div class="tabs" data-coach="tabs">
+      <div class="tab active" data-tab="seeds">씨앗</div>
+      <div class="tab" data-tab="story">스토리</div>
+      <div class="tab" data-tab="script">대본화</div>
+      <div class="tab" data-tab="hist">지나간 일</div>
+    </div>
+    <div id="panel-seeds" class="panel active">
+      <div class="panel-scroll" id="seedsList"></div>
+    </div>
+    <div id="panel-story" class="panel">
+      <div class="panel-scroll" id="storyPanel"><div class="placeholder">씨앗을 골라 스토리를 생성합니다.</div></div>
+    </div>
+    <div id="panel-script" class="panel">
+      <div class="panel-scroll" id="scriptPanel"></div>
+    </div>
+    <!--
+      지나간 일. 누가 · 어떤 단계에서 · 뭘 · 언제 했는지. 이 화면이 따로 쌓는 것이
+      아니라 보드의 op 로그 한 곳을 읽는다. 그래서 다른 사람이 키비주얼에서 한 일도
+      여기 보인다. 옮기는 일은 app/history.js 가 한다.
+    -->
+    <div id="panel-hist" class="panel">
+      <div class="panel-scroll" data-coach="histbox">
+        <div class="hist-head">지나간 일
+          <button class="btn btn--line btn--mini" id="histMine" type="button"
+                  aria-pressed="false" title="내가 등록한 것만 봅니다">내 것만</button>
+        </div>
+        <div id="hist"></div>
+        <p class="hist-note">줄을 누르면 그 자리에서 이어서 합니다. 회차는 대본화 탭이 열립니다.</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- 이 화면을 새 탭에서 바로 열었을 때의 로그인 문. 토큰이 있으면 아예 안 나온다 -->
+<div class="gate" id="gate" hidden></div>
+
+<script src="./aws-config.js"></script>
+<script type="module" src="./screens/story-graph.js"></script>
+</body>
+</html>
