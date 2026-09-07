@@ -2842,7 +2842,7 @@
    * 카드가 그렇게 말하면 화면이 그 말을 곧 뒤집는다.
    */
   for (const [name, url] of [['키 비주얼', 'screens/key-visual.js'], ['스토리보드', 'screens/board.js'],
-    ['홈', 'screens/home.js'], ['스토리 디벨롭', './story-graph.html']]) {
+    ['홈', 'screens/home.js'], ['스토리 디벨롭', 'screens/story-graph.js']]) {
     const src = await (await fetch(url)).text()
     const m = src.match(/const \w+_CARDS = \[([\s\S]*?)\n\]/)
     const words = ['빠르', '무한', '제작 기간', '단축'].filter((w) => m && m[1].includes(w))
