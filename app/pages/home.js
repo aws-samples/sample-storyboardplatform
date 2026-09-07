@@ -25,16 +25,18 @@
  * Cognito 없이 화면만 보는 용도이고, 보드도 같은 조건에서 로그인을 건너뜁니다
  * (app/board.js 의 boot 이 configured 로 갈라지는 것과 같습니다).
  */
-import { NAV_TABS, navHref, newHref } from '../chrome/nav-tabs.js'
-import { configured, session, logout } from '../platform/auth.js'
-import { showLogin, DEMO_USERS } from '../platform/login.js'
-import { setHtml } from '../platform/dom.js'
-import { opsClient } from '../platform/net.js'
-import { entries, group, paintTable } from '../chrome/history.js'
-import { emptyPanel } from '../chrome/empty-panel.js'
-import { list as listProjects, paintCards, touch as touchProject } from '../chrome/projects.js'
+import { NAV_TABS, navHref, newHref } from '../domain/routes.js'
+import { configured, session, logout } from '../services/auth.js'
+import { showLogin, DEMO_USERS } from '../components/login-form.js'
+import { setHtml } from '../lib/dom.js'
+import { opsClient } from '../services/api.js'
+import { entries, group } from '../services/activity-log.js'
+import { paintTable } from '../components/history-list.js'
+import { emptyPanel } from '../components/empty-panel.js'
+import { list as listProjects, touch as touchProject } from '../services/projects.js'
+import { paintCards } from '../components/project-picker.js'
 import { wire as wireTour, startDemo, DEMO_BOARD, DEMO_NAME, DEMO_TOTAL } from '../../app-walkthrough/tour.js'
-import * as coach from '../chrome/coach.js'
+import * as coach from '../components/coachmark.js'
 
 /*
  * 예시가 쓸 제품 쪽 함수를 넣습니다. app-walkthrough 는 app/ 을 import 할 수 없습니다.

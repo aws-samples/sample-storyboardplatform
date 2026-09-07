@@ -1,6 +1,6 @@
 
-import { login, setNewPassword } from './auth.js'
-import { setHtml } from './dom.js'
+import { login, setNewPassword } from '../services/auth.js'
+import { setHtml } from '../lib/dom.js'
 
 const DEMO_PW = window.SB_CONFIG?.demoPw || ''
 

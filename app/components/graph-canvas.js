@@ -14,7 +14,7 @@
 // 배치는 Fruchterman-Reingold 한 판을 미리 돌려 굳힌다 (계속 흔들리는 물리 대신).
 // 다시 그릴 때 이미 있던 노드는 지금 자리에서 시작해서, 판이 자라도 모양이 튀지 않는다.
 
-import { edgeKey } from './graph-schema.js'
+import { edgeKey } from '../domain/graph-schema.js'
 
 const TAU = Math.PI * 2
 

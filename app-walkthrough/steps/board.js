@@ -1,7 +1,7 @@
 /*
  * 스토리보드 화면의 예시 안내.
  *
- * app/screens/board.js 에 같이 있던 것을 여기로 옮겼습니다. 그 파일이 3,400줄이라
+ * app/pages/board.js 에 같이 있던 것을 여기로 옮겼습니다. 그 파일이 3,400줄이라
  * 예시 100줄이 섞여 있으면 어디까지가 제품인지 눈으로 갈라지지 않았습니다.
  *
  * 예시 데이터를 만드는 seedBuild 는 화면에 남겨 두었습니다. 관리 화면의 「보드 비우기」가
@@ -15,7 +15,7 @@ import { guide as guideExample } from '../guide.js'
 import { demoActive, demoAdvance, demoSay, demoTitle } from '../tour.js'
 
 /*
- * 화면이 넣어 주는 것. 전부 app/screens/board.js 의 것입니다.
+ * 화면이 넣어 주는 것. 전부 app/pages/board.js 의 것입니다.
  *   seedBuild  예시 op 한 벌과 「여기서부터 무엇을 하는 중인지」 표시(marks)
  *   push       op 하나를 판에 넣기. 사람이 손으로 할 때와 같은 길입니다
  *   render     다시 그리기

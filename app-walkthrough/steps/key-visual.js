@@ -1,7 +1,7 @@
 /*
  * 키 비주얼 화면의 예시 안내.
  *
- * app/screens/key-visual.js 에 같이 있던 것을 여기로 옮겼습니다. 예시만 쓰는 코드가
+ * app/pages/key-visual.js 에 같이 있던 것을 여기로 옮겼습니다. 예시만 쓰는 코드가
  * 300줄 넘게 그 파일에 섞여 있어서, 화면을 고치는 사람이 매번 그것을 지나가야 했고
  * 「예시 코드는 app-walkthrough 에」라는 말과도 달랐습니다.
  *
@@ -13,12 +13,12 @@ import { guide as guideExample } from '../guide.js'
 import { demoActive, demoAdvance, demoSay, demoTitle } from '../tour.js'
 
 /*
- * 화면이 넣어 주는 것. 전부 app/screens/key-visual.js 의 것입니다.
+ * 화면이 넣어 주는 것. 전부 app/pages/key-visual.js 의 것입니다.
  *   S                상태 한 덩이. 예시가 대본과 씬을 여기에 씁니다
  *   paint            다시 그리기
  *   wire note mark   지금 무엇을 부르는지 · 아래 안내 한 줄 · 지나간 일 한 줄
  *   job              씬 하나의 생성 상태 칸
- *   makeArt          브라우저가 그리는 대신 그림 (app/art/art.js)
+ *   makeArt          브라우저가 그리는 대신 그림 (app/lib/placeholder-art.js)
  *   toScenes         대본을 씬으로 자르기
  *   normalizeVisuals 프롬프트 응답의 형식 검사. 실제 경로와 같은 검사를 지납니다
  *   paintQueue paintBoard doneJobs

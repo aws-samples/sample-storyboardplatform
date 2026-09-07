@@ -1,26 +1,23 @@
 
-import {
-  orderKeyBetween, orderKeyForIndex, byOrderKey,
-  STATUS, ACTIONS, ROLES, POSES, FEEDBACK_TAGS, NEEDS,
-  canTransition, canEditContent, canMakeArt, canGrantRole, canSeeAdmin, canPlan, splitScenario, mergeField, handBackTo, notifFor,
-  sceneGroups, clock, startTimes, scrub, debounceBy, epLabel,
-  lostEdit, isActionable, changedSince, touchedAt, workload, liveVer, deadVer,
-  tally, stalls, retakes, flow, pace, actorPace, firstPass, reviewLag, fmtDur,
-} from '../story/core.js'
-import { MODES, GENRES, TONES, LENGTHS, CUTCOUNTS, planOutline, planCuts } from '../story/story.js'
-import { esc, setHtml } from '../platform/dom.js'
-import { srcOf, downscale } from '../art/art.js'
-import { SEED_ART } from '../art/seed-art.js'
-import { connect } from '../platform/net.js'
-import { configured, idToken, session, logout } from '../platform/auth.js'
-import { showLogin } from '../platform/login.js'
-import { NAV_TABS, navHref, mountNav, boardFromSearch } from '../chrome/nav-tabs.js'
-import * as coach from '../chrome/coach.js'
-import { emptyPanel } from '../chrome/empty-panel.js'
+import { orderKeyBetween, orderKeyForIndex, byOrderKey, STATUS, ACTIONS, ROLES, POSES, FEEDBACK_TAGS, NEEDS, canTransition, canEditContent, canMakeArt, canGrantRole, canSeeAdmin, canPlan, splitScenario, mergeField, handBackTo, notifFor, sceneGroups, clock, startTimes, scrub, debounceBy, epLabel, lostEdit, isActionable, changedSince, touchedAt, workload, liveVer, deadVer, tally, stalls, retakes, flow, pace, actorPace, firstPass, reviewLag, fmtDur } from '../domain/panels.js'
+import { MODES, GENRES, TONES, LENGTHS, CUTCOUNTS } from '../domain/prompts.js'
+import { planOutline, planCuts } from '../services/planner.js'
+import { esc, setHtml } from '../lib/dom.js'
+import { srcOf, downscale } from '../lib/placeholder-art.js'
+import { SEED_ART } from '../lib/seed-art.js'
+import { connect } from '../services/api.js'
+import { configured, idToken, session, logout } from '../services/auth.js'
+import { showLogin } from '../components/login-form.js'
+import { NAV_TABS, navHref, boardFromSearch } from '../domain/routes.js'
+import { mountNav } from '../components/nav-tabs.js'
+import * as coach from '../components/coachmark.js'
+import { emptyPanel } from '../components/empty-panel.js'
 import { guiding } from '../../app-walkthrough/guide.js'
 import { boardExample } from '../../app-walkthrough/steps/board.js'
-import { entries, group, paintList, toEntry } from '../chrome/history.js'
-import { pickProject, touch as touchProject } from '../chrome/projects.js'
+import { entries, group, toEntry } from '../services/activity-log.js'
+import { paintList } from '../components/history-list.js'
+import { pickProject } from '../components/project-picker.js'
+import { touch as touchProject } from '../services/projects.js'
 import { wire as wireTour, demoActive, demoAdvance, demoSay, demoTitle } from '../../app-walkthrough/tour.js'
 
 /*
