@@ -2,7 +2,7 @@
  * 키 비주얼 · 씬 단위 이미지 생성
  *
  * 실제 배포된 경로만 쓴다.
- *   대본 자르기      빈 줄로 블록을 나누고 슬러그가 같으면 한 씬으로 합친다
+ *   대본 자르기      domain/scene-split.js 가 씬 머리글에서 끊는다
  *   프롬프트 쓰기    net.plan()  → AppSync → Bedrock Converse
  *   그림 그리기      POST /gen   → ALB → EC2 GPU
  *   보드에 남기기    net.sendOp  → AppSync → DynamoDB
@@ -12,6 +12,7 @@
  */
 
 import { ART_ROLES, orderKeyBetween } from '../domain/panels.js'
+import { toScenes, readSlug } from '../domain/scene-split.js'
 import { configured, idToken, session } from '../services/auth.js'
 import { connect } from '../services/api.js'
 import { showLogin } from '../components/login-form.js'
@@ -122,73 +123,15 @@ function mark(what, { ref = null, example = false } = {}) {
 
 const say = (m) => { const r = $('#live'); if (r) r.textContent = m }
 
-/* ══ 대본 → 씬 ════════════════════════════════════ */
-
-/*
- * 우리가 쓰는 글에는 줄표를 넣지 않지만, 이 둘은 남이 쓴 대본을 받아 읽는 자리라
- * 붙임표 · 짧은 줄표 · 긴 줄표를 다 받습니다. 슬러그의 시간이 긴 줄표 뒤에 붙어
- * 있으면 그것을 못 읽어 그 씬의 시간이 통째로 빠집니다.
- */
-const SLUG = /^(INT|EXT|I\/E)\.?\s+(.+?)(?:\s+[-–—]\s+(.+))?$/i
-const KO_SLUG = /^(실내|실외)[.\s]+(.+?)(?:\s+[-–—]\s+(.+))?$/
-
-/**
- * 슬러그 라인에서 장소·시간을 뽑는다. 없으면 null.
- * 이어지는 씬 표시는 장소든 시간이든 어디에 붙어 있어도 먼저 떼어낸다.
- * 그러지 않으면 "분장실 - 밤" 과 "분장실 - 밤 (이어서)" 가 다른 씬으로 갈라진다.
- */
-const CONT = /\s*\((?:이어서|계속|CONT'?D\.?|CONTINUOUS)\)\s*/gi
-
-function readSlug(text) {
-  const first = String(text).split('\n')[0].trim().replace(CONT, ' ')
-  const m = first.match(SLUG) || first.match(KO_SLUG)
-  if (!m) return null
-  return { place: (m[2] || '').trim(), time: (m[3] || '').trim() }
-}
-
-/**
- * splitScenario() 로 블록을 자르고, 슬러그의 장소·시간이 같은 인접 블록을 한 씬으로 합친다.
- * 씬을 고르지 않는다. 목록 전체가 그대로 넘어간다.
- */
-function toScenes(text) {
-  const blocks = String(text).split(/\n[ \t]*\n/).map((s) => s.trim()).filter(Boolean)
-  const out = []
-  blocks.forEach((b, i) => {
-    const slug = readSlug(b)
-    const last = out.at(-1)
-    const sameHead = last && slug && last.place === slug.place && last.time === slug.time
-    const noSlug = !slug && last
-    if (sameHead || noSlug) {
-      last.blkIdx.push(i)
-      last.text += '\n\n' + b
-    } else {
-      out.push({
-        place: slug?.place || '장소 미정',
-        time: slug?.time || '',
-        weather: '',
-        blkIdx: [i],
-        text: b,
-      })
-    }
-  })
-  return out.map((s, i) => ({
-    ...s,
-    id: `S${String(i + 1).padStart(2, '0')}`,
-    blocks: s.blkIdx.length === 1 ? `블록 ${s.blkIdx[0] + 1}` : `블록 ${s.blkIdx[0] + 1}–${s.blkIdx.at(-1) + 1} 병합`,
-    prompt: '',
-    cast: [],
-    beat: '',
-    framing: '',
-  }))
-}
-
 /* ══ 프롬프트 · Bedrock ═══════════════════════════ */
 
 const JSON_ONLY = '오직 아래 모양의 JSON 하나만 출력한다. 설명·머리말·코드펜스를 붙이지 않는다.'
 
 export function keyVisualPrompt(scenes) {
   const lines = scenes.map((s) =>
-    `${s.id} | ${s.place}${s.time ? ' · ' + s.time : ''}\n${s.text.replace(/\n+/g, ' ').slice(0, 400)}`)
+    `${s.id} | ${s.place}${s.time ? ' · ' + s.time : ''}`
+    + `${s.cast?.length ? ` | 등장: ${s.cast.join(', ')}` : ''}`
+    + `\n${s.text.replace(/\n+/g, ' ').slice(0, 400)}`)
   return [
     '아래는 한 대본을 씬으로 나눈 것이다. 씬마다 키 비주얼 한 장의 이미지 프롬프트를 쓴다.',
     '키 비주얼은 그 씬 전체의 화풍과 공간을 정하는 대표 그림이다. 컷보다 넓게 잡는다.',
@@ -262,7 +205,8 @@ async function writePrompts() {
         weather: v.weather,
         beat: v.beat,
         framing: v.framing,
-        cast: v.cast,
+        // 대본의 「등장인물:」 줄이 모델의 추측보다 정확합니다. 모델이 빈 값을 주면 그것을 지킵니다
+        cast: v.cast.length ? v.cast : s.cast,
       })
       got++
     }
@@ -702,7 +646,7 @@ const ROLE_KO = { planner: '기획', artist: '아티스트', director: '감독',
 /* ── STEP 1 ───────────────────────────────────── */
 function step1() {
   const w = el('div', 'wrap wrap--2')
-  const a = card('대본', '붙여넣은 대본을 블록으로 자르고, 슬러그가 같은 인접 블록을 한 씬으로 합칩니다.', 'script')
+  const a = card('대본', '붙여넣은 대본을 씬 머리글에서 끊습니다. S#1 · INT. · 씬 1 을 다 읽습니다.', 'script')
   const ta = el('textarea', 'script')
   ta.value = S.script
   ta.placeholder = 'INT. 극장 분장실 - 밤\n거울 앞. 분장을 지우다 멈춘다.\n\n    수린\n  그 이름을 어디서 들었어.'
@@ -726,7 +670,11 @@ function step1() {
     if (canPlan()) writePrompts()
   }
   row.append(go)
-  const n = el('span', 'hint', `${S.script.split(/\n[ \t]*\n/).filter((x) => x.trim()).length} 블록`)
+  // 나누기 전에도 몇 개로 갈릴지 보여줍니다. 머리글이 하나도 없으면 블록 수로 말합니다
+  const heads = S.script.split('\n').filter((l) => readSlug(l)).length
+  const n = el('span', 'hint', heads
+    ? `머리글 ${heads}개`
+    : `${S.script.split(/\n[ \t]*\n/).filter((x) => x.trim()).length} 블록`)
   row.append(n)
   a.append(row)
   w.append(a)
@@ -1325,4 +1273,6 @@ document.addEventListener('keydown', (e) => {
 
 boot()
 
-export { S, toScenes, readSlug, runBatch, genOne, postToBoard }
+export { S, runBatch, genOne, postToBoard }
+// 씬 나누기는 domain/scene-split.js 로 옮겼습니다. 이 이름을 쓰던 자리를 위해 다시 내보냅니다
+export { toScenes, readSlug }

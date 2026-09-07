@@ -39,6 +39,9 @@
   } = await import(`./services/planner.js?t=${Date.now()}`)
   const { localBranches, branchToSpec, branchOutlinePrompt, localBranchOutline } = await import(`./domain/local-fallback.js?t=${Date.now()}`)
   const { parseJson } = await import(`./domain/json-repair.js?t=${Date.now()}`)
+  const {
+    toScenes, readHeading, readCast, readSlug, placeTime, stripCont,
+  } = await import(`./domain/scene-split.js?t=${Date.now()}`)
   const { applyWriteback, validateWritebackBeforeApply } = await import(`./domain/graph-writeback.js?t=${Date.now()}`)
   const { edgeLabel, graphDelta, EDGE_LABELS_KR } = await import(`./components/graph-canvas.js?t=${Date.now()}`)
   const { parseField, runPlanJob, PLAN_TIMEOUT_MS } = await import(`./services/api.js?t=${Date.now()}`)
@@ -3560,6 +3563,118 @@
   ok('대본 파일 이름에 제목이 들어간다', scriptFileName('마지막 레시피') === '마지막 레시피_대본.txt')
   ok('제목이 없으면 무제로 둔다', scriptFileName('') === '무제_대본.txt' && scriptFileName(null) === '무제_대본.txt')
   ok('파일 이름에서 경로 문자를 뺀다', scriptFileName('A/B:C*D') === 'A B C D_대본.txt')
+
+  // ── scene-split.js: 대본을 씬으로 나누기 ───────────────────────────────────
+  /*
+   * 키 비주얼 STEP 1 이 쓰는 자리입니다. 예전에는 `INT./EXT.` 와 `실내/실외` 두 형식만
+   * 읽어서, 한국 드라마 대본의 표준인 `S#1. 장소 / 밤` 을 머리글로 보지 못했습니다.
+   * 머리글이 하나도 안 잡히면 모든 블록이 앞 씬에 붙어 대본 전체가 씬 한 개로 들어옵니다.
+   */
+  ok('S#1. 형식의 머리글을 읽는다', (() => {
+    const h = readHeading('S#1. 예린의 방 / 밤')
+    return h?.no === 1 && h.place === '예린의 방' && h.time === '밤'
+  })())
+  ok('씬 번호 표기를 여러 가지로 받는다', (() => {
+    const forms = ['S# 12. 카페 (낮)', 'SCENE 12. 카페 - 낮', '씬 12 카페 / 낮',
+      '장면 12. 카페 · 낮', '#12 카페 / 낮', '[씬 12 - 카페]']
+    return forms.every((f) => readHeading(f)?.no === 12)
+  })())
+  ok('INT./EXT. 슬러그는 번호가 없다', (() => {
+    const h = readHeading('INT. 극장 분장실 - 밤')
+    return h?.no === null && h.place === '극장 분장실' && h.time === '밤'
+  })())
+  ok('실내/실외 슬러그도 읽는다', readHeading('실내. 부엌 - 아침')?.place === '부엌')
+  ok('시간이 괄호 · 슬래시 뒤에 있어도 갈라 읽는다',
+    placeTime('흥신소 사무실 (낮)').time === '낮'
+    && placeTime('예린의 방 / 밤').time === '밤'
+    && placeTime('옥상 — 새벽').time === '새벽')
+  ok('이어지는 씬 표시를 떼고 빈 괄호도 치운다',
+    stripCont('분장실 - 밤 (이어서)') === '분장실 - 밤'
+    && stripCont('흥신소 사무실 (낮, 이어서)') === '흥신소 사무실 (낮)'
+    && stripCont('INT. BAR - NIGHT (CONT\'D)') === 'INT. BAR - NIGHT')
+  ok('장소만 있으면 시간은 빈 문자열이다', (() => {
+    const h = readHeading('씬 3 - 옥상')
+    return h?.place === '옥상' && h.time === ''
+  })())
+  /*
+   * 지문을 머리글로 잘못 보면 씬이 문장 수만큼 갈라집니다. 번호만 앞에 붙은 줄이
+   * 위험한 자리라 시간처럼 보이는 말이 있거나 짧고 문장으로 끝나지 않을 때만 받습니다.
+   */
+  ok('번호만 붙은 짧은 머리글은 받는다', readHeading('1. 카페 / 낮')?.no === 1)
+  ok('번호가 붙은 지문은 머리글로 보지 않는다',
+    readHeading('1. 커피를 사서 나온다.') === null)
+  ok('평범한 지문 · 대사 · 인물 이름은 머리글이 아니다',
+    readHeading('그는 문을 열었다.') === null
+    && readHeading('지영: 그게 무슨 말이야') === null
+    && readHeading('수린') === null
+    && readHeading('등장인물: 한지영, 예린') === null)
+
+  ok('등장인물 줄에서 이름을 꺼낸다', (() => {
+    const c = readCast('등장인물: 한지영, 예린')
+    return c?.length === 2 && c[0] === '한지영' && c[1] === '예린'
+  })())
+  ok('등장인물이 아닌 줄에서는 null 이다',
+    readCast('지영이 문을 연다.') === null && readCast('등장인물: 없음') === null)
+
+  ok('S#1~S#8 대본은 씬 8개로 갈라진다', (() => {
+    // app-walkthrough/data/test-synopsis.txt 와 같은 형식입니다. 예전에는 1개로 들어왔습니다
+    const t = ['S#1. 예린의 방 / 밤', '등장인물: 한지영, 예린', '방 안이 어둡다.', '',
+      'S#2. 예린의 방 / 밤 (이어서)', '등장인물: 한지영', '화면을 켠다.', '',
+      'S#3. 카페 구석 테이블 / 낮', '두 사람이 앉아 있다.', '',
+      'S#4. 카페 구석 테이블 / 낮 (이어서)', '지영이 눈을 깜빡인다.'].join('\n')
+    const sc = toScenes(t)
+    return sc.length === 4 && sc[0].id === 'S01' && sc[3].id === 'S04'
+      && sc[0].place === '예린의 방' && sc[2].place === '카페 구석 테이블'
+  })())
+  /*
+   * 여기가 두 규칙이 갈라지는 자리입니다. 작가가 번호를 매겼으면 장소·시간이 같아도
+   * 그 자리가 경계입니다. 번호가 없는 슬러그는 `(이어서)` 를 떼면 같은 슬러그가 되므로
+   * 한 씬으로 합칩니다. 두 규칙을 하나로 합치면 8씬 대본이 4씬으로 줄어듭니다.
+   */
+  ok('번호가 있으면 장소·시간이 같아도 새 씬으로 끊는다', (() => {
+    const t = 'S#5. 흥신소 사무실 (낮)\n봉투를 꺼낸다.\n\nS#6. 흥신소 사무실 (낮, 이어서)\n봉투를 쥔다.'
+    const sc = toScenes(t)
+    return sc.length === 2 && sc[0].no === 5 && sc[1].no === 6 && sc[1].place === '흥신소 사무실'
+  })())
+  ok('번호가 없는 슬러그는 이어지면 한 씬으로 합친다', (() => {
+    const t = 'INT. 분장실 - 밤\n거울 앞.\n\nINT. 분장실 - 밤 (이어서)\n문틈의 빛.\n\nINT. 본무대 - 밤\n조명이 한 점으로.'
+    const sc = toScenes(t)
+    return sc.length === 2 && sc[0].place === '분장실' && sc[1].place === '본무대'
+      && sc[0].text.includes('거울 앞') && sc[0].text.includes('문틈의 빛')
+  })())
+  ok('예시 대본은 씬 7개를 지킨다', (() => {
+    // key-visuals.json 의 미리 받아 둔 프롬프트가 S01~S07 이라 이 수가 바뀌면 예시가 빕니다
+    const t = ['INT. 극장 분장실 - 밤', '거울 앞.', '', '    수린', '  그 이름을 어디서 들었어.', '',
+      'INT. 극장 분장실 - 밤 (이어서)', '문틈으로 빛이 새어든다.', '',
+      'INT. 본무대 - 밤', '조명이 한 점으로.', '', 'INT. 객석 - 밤', '빈 좌석.', '',
+      'INT. 분장실 앞 복도 - 새벽', '반쯤 열린 문.', '', 'EXT. 극장 옥상 - 새벽', '난간.', '',
+      'INT. 지하 연습실 - 낮', '거울 벽.', '', 'EXT. 극장 앞 거리 - 낮', '찢긴 포스터.'].join('\n')
+    return toScenes(t).length === 7
+  })())
+  ok('씬마다 등장인물이 담긴다', (() => {
+    const sc = toScenes('S#1. 방 / 밤\n등장인물: 한지영, 예린\n어둡다.')
+    return sc[0].cast.length === 2 && sc[0].cast.includes('예린')
+  })())
+  ok('빈 줄이 없어도 머리글에서 끊는다', (() => {
+    const sc = toScenes('S#1. 방 / 밤\n어둡다.\nS#2. 카페 / 낮\n밝다.')
+    return sc.length === 2 && sc[1].place === '카페'
+  })())
+  ok('머리글이 없는 산문은 씬 하나로 둔다', (() => {
+    const sc = toScenes('헌트릭스는 사냥꾼 계보다.\n\n루미는 스물둘이다.')
+    return sc.length === 1 && sc[0].place === '장소 미정'
+  })())
+  ok('머리글보다 먼저 나온 줄을 버리지 않는다', (() => {
+    const sc = toScenes('제목: 무언가\n\nS#1. 방 / 밤\n어둡다.')
+    return sc.length === 2 && sc[0].place === '장소 미정' && sc[0].text.includes('제목')
+  })())
+  ok('빈 대본은 빈 목록이다', toScenes('').length === 0 && toScenes(null).length === 0)
+  ok('씬 id 는 두 자리로 이어 붙는다', (() => {
+    const t = Array.from({ length: 11 }, (_, i) => `S#${i + 1}. 방${i} / 밤\n지문.`).join('\n\n')
+    const sc = toScenes(t)
+    return sc.length === 11 && sc[0].id === 'S01' && sc[10].id === 'S11'
+  })())
+  ok('readSlug 는 옛 이름으로 남아 있다',
+    readSlug('INT. 카페 - 낮')?.place === '카페' && readSlug('그는 문을 열었다.') === null)
 
   // ── graph-view.js: 엣지 라벨과 역기입 전후 비교 ────────────────────────────
   // 캔버스 그리기는 여기서 못 돌린다. 순수 함수인 라벨 표와 판 비교만 본다
