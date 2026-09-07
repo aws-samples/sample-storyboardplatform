@@ -3,7 +3,7 @@
  *
  * 마크업과 CSS 는 app/story-graph.html 에 있고 여기는 그 화면의 코드입니다. 한때 그
  * 파일의 <script type="module"> 안에 1,660줄이 같이 있었습니다. 다른 세 화면은 처음부터
- * 코드를 파일로 뺐는데(screens/home.js · board.js · key-visual.js) 이 화면만 아니었고,
+ * 코드를 파일로 뺐는데(pages/home.js · board.js · key-visual.js) 이 화면만 아니었고,
  * 그래서 화면 코드를 찾을 때 세 번은 파일이 나오고 한 번은 안 나왔습니다.
  */
 
@@ -16,29 +16,30 @@
 //   대본화  planScript. 컷을 드라마·영화·웹드라마 대본 텍스트로 옮긴다
 // 조회는 전부 graph-engine.js 의 GraphStore 를 거친다. 배포에서는 같은 저장소가
 // Neptune 을 사실로 두고 돈다 (hasGraph). 이 화면이 아는 차이는 save·flush 뿐이다.
-import { createGraphStore, loadGraphStore, DEFAULT_PROJECT } from '../story/graph-engine.js'
-import { findSeeds, PROBES } from '../story/graph-probes.js'
-import {
-  planGraph, planBranches, planFreeBranches, localBranches, scriptToText,
-  branchToSpec, planBranchOutline, planCuts,
-  applyWriteback, validateWritebackBeforeApply,
-  planScript, scriptBlob, scriptFileName, SCRIPT_FORMATS,
-  GENRES, TONES, LENGTHS, CUTCOUNTS,
-} from '../story/story.js'
-import { planClient, graphClient, opsClient, runNavigateJob } from '../platform/net.js'
-import { mountNavigatorChat, readHistory } from '../story/navigator-ui.js'
-import { createGraphView, graphDelta, KIND_COLOR, KIND_LABEL } from '../story/graph-view.js'
-import { edgeKey } from '../story/graph-schema.js'
-import { configured, session, login, setNewPassword, logout } from '../platform/auth.js'
-import { DEMO_USERS } from '../platform/login.js'
-import { NAV_TABS, navHref, mountNav, navTabFromSearch, boardFromSearch } from '../chrome/nav-tabs.js'
-import { entries, group, markOp, paintList } from '../chrome/history.js'
-import { emptyPanel } from '../chrome/empty-panel.js'
+import { createGraphStore, loadGraphStore, DEFAULT_PROJECT } from '../services/graph-store.js'
+import { findSeeds, PROBES } from '../domain/graph-probes.js'
+import { planGraph, planBranches, planFreeBranches, planBranchOutline, planCuts, planScript } from '../services/planner.js'
+import { localBranches, branchToSpec } from '../domain/local-fallback.js'
+import { scriptToText, scriptBlob, scriptFileName, SCRIPT_FORMATS } from '../domain/script-format.js'
+import { applyWriteback, validateWritebackBeforeApply } from '../domain/graph-writeback.js'
+import { GENRES, TONES, LENGTHS, CUTCOUNTS } from '../domain/prompts.js'
+import { planClient, graphClient, opsClient, runNavigateJob } from '../services/api.js'
+import { mountNavigatorChat, readHistory } from '../components/navigator-chat.js'
+import { createGraphView, graphDelta, KIND_COLOR, KIND_LABEL } from '../components/graph-canvas.js'
+import { edgeKey } from '../domain/graph-schema.js'
+import { configured, session, login, setNewPassword, logout } from '../services/auth.js'
+import { DEMO_USERS } from '../components/login-form.js'
+import { NAV_TABS, navHref, navTabFromSearch, boardFromSearch } from '../domain/routes.js'
+import { mountNav } from '../components/nav-tabs.js'
+import { entries, group, markOp } from '../services/activity-log.js'
+import { paintList } from '../components/history-list.js'
+import { emptyPanel } from '../components/empty-panel.js'
 import { guiding } from '../../app-walkthrough/guide.js'
 import { developExample } from '../../app-walkthrough/steps/develop.js'
 import { wire as wireTour, demoActive, demoAdvance, demoSay, demoTitle } from '../../app-walkthrough/tour.js'
-import * as coach from '../chrome/coach.js'
-import { pickProject, touch as touchProject } from '../chrome/projects.js'
+import * as coach from '../components/coachmark.js'
+import { pickProject } from '../components/project-picker.js'
+import { touch as touchProject } from '../services/projects.js'
 
 /*
  * 예시가 쓸 제품 쪽 함수를 넣습니다. app-walkthrough 는 app/ 을 import 할 수 없습니다.

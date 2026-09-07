@@ -11,18 +11,21 @@
  * 그때는 화면이 무엇이 없어서 못 하는지 그대로 말한다. 흉내내지 않는다.
  */
 
-import { ART_ROLES, orderKeyBetween } from '../story/core.js'
-import { configured, idToken, session } from '../platform/auth.js'
-import { connect } from '../platform/net.js'
-import { showLogin } from '../platform/login.js'
-import { NAV_TABS, navHref, mountNav, boardFromSearch } from '../chrome/nav-tabs.js'
-import * as coach from '../chrome/coach.js'
-import { emptyPanel } from '../chrome/empty-panel.js'
+import { ART_ROLES, orderKeyBetween } from '../domain/panels.js'
+import { configured, idToken, session } from '../services/auth.js'
+import { connect } from '../services/api.js'
+import { showLogin } from '../components/login-form.js'
+import { NAV_TABS, navHref, boardFromSearch } from '../domain/routes.js'
+import { mountNav } from '../components/nav-tabs.js'
+import * as coach from '../components/coachmark.js'
+import { emptyPanel } from '../components/empty-panel.js'
 import { guiding } from '../../app-walkthrough/guide.js'
 import { keyVisualExample } from '../../app-walkthrough/steps/key-visual.js'
-import { makeArt } from '../art/art.js'
-import { entries, group, markOp, paintList } from '../chrome/history.js'
-import { pickProject, touch as touchProject } from '../chrome/projects.js'
+import { makeArt } from '../lib/placeholder-art.js'
+import { entries, group, markOp } from '../services/activity-log.js'
+import { paintList } from '../components/history-list.js'
+import { pickProject } from '../components/project-picker.js'
+import { touch as touchProject } from '../services/projects.js'
 import { wire as wireTour, demoActive, demoAdvance, demoSay, demoTitle } from '../../app-walkthrough/tour.js'
 
 /*

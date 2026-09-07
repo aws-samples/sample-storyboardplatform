@@ -1,7 +1,7 @@
 /*
  * 스토리 디벨롭 화면의 예시 안내.
  *
- * app/screens/story-graph.js 에 같이 있던 것을 여기로 옮겼습니다. 화면 코드가 1,669줄
+ * app/pages/story-graph.js 에 같이 있던 것을 여기로 옮겼습니다. 화면 코드가 1,669줄
  * 이었고 그중 170줄 가까이가 예시만 쓰는 것이었습니다.
  *
  * 이 폴더는 app/ 을 import 할 수 없습니다(../tour.js 의 머리글). 그래서 화면이 쓸
@@ -12,7 +12,7 @@ import { guide as guideExample } from '../guide.js'
 import { demoActive, demoAdvance, demoSay, demoTitle } from '../tour.js'
 
 /*
- * 화면이 넣어 주는 것. 전부 app/screens/story-graph.js 의 것입니다.
+ * 화면이 넣어 주는 것. 전부 app/pages/story-graph.js 의 것입니다.
  *   $            id 로 요소 하나. 예시가 대본 칸과 자유 입력 칸에 글을 씁니다
  *   NET          plan 을 부를 수 있는지. 안내 문구가 로컬 모드에서 달라집니다
  *   modelLabel   지금 고른 모델의 짧은 이름

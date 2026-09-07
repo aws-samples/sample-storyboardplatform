@@ -11,8 +11,8 @@
 // 어느 쪽이든 조회와 변경은 전부 동기다. 탐지기 한 바퀴가 수백 번을 물어보므로
 // 그때마다 왕복하면 화면이 멈춘다. 저장이 끝났는지는 flush() 로 확인한다.
 
-import { deriveEdges, edgeKey } from './graph-schema.js'
-import { normalizeGraph } from './core.js'
+import { deriveEdges, edgeKey } from '../domain/graph-schema.js'
+import { normalizeGraph } from '../domain/graph-rules.js'
 
 const asList = (v) => (Array.isArray(v) ? v : [])
 const asProps = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? { ...v } : {})

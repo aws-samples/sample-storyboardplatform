@@ -34,15 +34,15 @@
  * 배포에서만 깨지는, 가장 늦게 발견되는 종류의 고장입니다.
  *
  * 그래서 필요한 것을 화면이 넣어 줍니다(wire). 화면은 이 폴더를 import 할 수 있습니다
- * (app/screens/x.js 에서 '../../app-walkthrough/' 는 두 배치에서 같은 자리입니다).
+ * (app/pages/x.js 에서 '../../app-walkthrough/' 는 두 배치에서 같은 자리입니다).
  * 방향이 한쪽뿐이라 이 폴더를 지우면 예시만 사라지고 제품은 그대로 돕니다.
  */
 
 /*
  * 화면이 넣어 주는 것. 제품 쪽 함수 둘입니다.
- *   navHref(id, boardId) → 그 화면의 주소      (app/chrome/nav-tabs.js)
- *   label(id)            → 그 화면의 이름      (app/chrome/nav-tabs.js 의 NAV_TABS)
- *   touch({...})         → 프로젝트 목록에 한 줄  (app/chrome/projects.js)
+ *   navHref(id, boardId) → 그 화면의 주소      (app/components/nav-tabs.js)
+ *   label(id)            → 그 화면의 이름      (app/components/nav-tabs.js 의 NAV_TABS)
+ *   touch({...})         → 프로젝트 목록에 한 줄  (app/services/projects.js)
  *
  * 넣지 않고 부르면 그 자리에서 던집니다. 조용히 아무 일도 안 하는 것보다 낫습니다.
  * 예시가 안 도는 것을 예시를 만드는 사람이 바로 알아야 합니다.
