@@ -132,7 +132,7 @@ export async function runPlanJob(post, spec, opts = {}) {
 
   const started = await post(M_PLAN, { spec: JSON.stringify(spec) })
   const jobId = started?.plan?.jobId
-  if (!jobId) throw new Error('plan jobId 를 받지 못했다')
+  if (!jobId) throw new Error('plan jobId 를 받지 못했습니다')
 
   const deadline = Date.now() + timeoutMs
   let fails = 0
@@ -152,7 +152,7 @@ export async function runPlanJob(post, spec, opts = {}) {
     if (got?.status === 'done') return { text: got.text, usage: got.usage, stop: got.stop }
     if (got?.status === 'error') throw new Error(got.error || 'plan 실패')
   }
-  throw new Error(`plan 이 ${Math.round(timeoutMs / 1000)}초 안에 끝나지 않았다`)
+  throw new Error(`plan 이 ${Math.round(timeoutMs / 1000)}초 안에 끝나지 않았습니다`)
 }
 
 /**
@@ -165,6 +165,92 @@ export function planClient() {
   const cfg = window.SB_CONFIG
   if (!cfg?.graphqlUrl) return null
   return { plan: (spec) => runPlanJob((query, variables) => gqlPost(cfg, query, variables), spec) }
+}
+
+/**
+ * 로그만 읽는 최소 클라이언트. 홈처럼 활동 내역만 보여주는 화면에서 씁니다.
+ *
+ * connect() 를 쓰지 않는 이유는 그쪽이 WebSocket 을 열고 구독 두 개를 붙이고
+ * connection_ack 을 기다린다는 것입니다. 홈은 실시간으로 바뀔 것이 없고 한 번 읽어
+ * 그리면 끝입니다. 문 앞에서 소켓을 붙잡고 있을 이유가 없습니다.
+ *
+ * 쓰기(sendOp)도 하나 둡니다. 보드 화면 밖에서도 「누가 뭘 했다」를 같은 로그에 남길
+ * 수 있어야 하기 때문입니다 — 키비주얼과 디벨롭이 그렇게 씁니다. connect() 쪽의
+ * sendOp 과 달리 실패하면 대기열에 넣지 않고 그대로 던집니다. 기록은 화면의 본 일이
+ * 아니므로 부르는 쪽이 조용히 넘깁니다.
+ *
+ * @param {string} [boardId] - 없으면 설정의 기본 보드
+ * @returns {{boardId: string, fetchOps: Function, sendOp: Function}|null} 설정이 없으면 null
+ */
+export function opsClient(boardId) {
+  const cfg = window.SB_CONFIG
+  if (!cfg?.graphqlUrl) return null
+  const id = boardId || cfg.boardId || 'demo'
+  return {
+    boardId: id,
+    sendOp: (op) => gqlPost(cfg, M_OP, {
+      boardId: id, id: op.id, ts: pad(op.ts), actor: op.actor, body: JSON.stringify(op),
+    }),
+    fetchOps: async (since) => {
+      const out = []
+      let token = null
+      do {
+        const d = await gqlPost(cfg, Q_LIST, { boardId: id, since: since ? pad(since) : null, nextToken: token })
+        for (const it of d.listOps.items) {
+          try { out.push(JSON.parse(it.body)) } catch {  }
+        }
+        token = d.listOps.nextToken
+      } while (token)
+      return out.sort((a, b) => a.ts - b.ts)
+    },
+  }
+}
+
+const PROJECT_FIELDS = 'boardId name createdAt createdBy updatedAt lastActor lastWhat'
+
+const Q_PROJECTS = `query Projects($nextToken: String) {
+  listProjects(nextToken: $nextToken) {
+    items { ${PROJECT_FIELDS} }
+    nextToken
+  }
+}`
+
+const M_PUT_PROJECT = `mutation PutProject($boardId: ID!, $name: String, $actor: ID!, $what: String, $ts: String!) {
+  putProject(boardId: $boardId, name: $name, actor: $actor, what: $what, ts: $ts) { ${PROJECT_FIELDS} }
+}`
+
+/**
+ * 프로젝트 카드를 읽고 쓰는 클라이언트. 작업판 앞에 세우는 보드가 씁니다.
+ *
+ * op 로그와 따로 두는 까닭은 두 가지입니다. op 는 pk=BOARD#<id> 로 흩어져 있어서
+ * 「보드가 몇 개 있나」를 물으면 테이블을 훑어야 하고, 30일 TTL 이 걸려 있어서
+ * 한 달 쉰 프로젝트는 이름까지 사라집니다. 카드는 pk='PROJECTS' 한 자리에 모으고
+ * TTL 을 걸지 않습니다.
+ *
+ * @returns {{list: Function, put: Function}|null} 설정이 없으면 null — 부르는 쪽이
+ *          브라우저 저장소로 내려갑니다
+ */
+export function projectsClient() {
+  const cfg = window.SB_CONFIG
+  if (!cfg?.graphqlUrl) return null
+  return {
+    list: async () => {
+      const out = []
+      let token = null
+      do {
+        const d = await gqlPost(cfg, Q_PROJECTS, { nextToken: token })
+        out.push(...d.listProjects.items)
+        token = d.listProjects.nextToken
+      } while (token)
+      return out
+    },
+    put: async ({ boardId, name, actor, what, ts }) => {
+      const d = await gqlPost(cfg, M_PUT_PROJECT, {
+        boardId, name: name ?? null, actor, what: what ?? null, ts: pad(ts ?? Date.now()),
+      })
+      return d.putProject
+    },
+  }
 }
 
 const Q_LOAD_GRAPH = `query LoadGraph($projectId: String) { loadGraph(projectId: $projectId) }`

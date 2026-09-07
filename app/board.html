@@ -16,7 +16,7 @@
  * 되면서 그 톤만 혼자 어두워 다른 제품처럼 보였다 — 그래서 키 비주얼의 흰 배경 ·
  * 파란 강조에 맞췄다.
  *
- * 이름을 바꾸지 않은 이유는 CSS 규칙 400곳이 이 이름을 쓰고, demo/app.js 가
+ * 이름을 바꾸지 않은 이유는 CSS 규칙 400곳이 이 이름을 쓰고, app/board.js 가
  * stroke="var(--tape)" 처럼 이름을 문자열로 박아 SVG 를 만들기 때문이다. 값만 갈면
  * 규칙도 그 SVG 도 그대로 따라온다.
  *
@@ -298,9 +298,7 @@ dialog#keys::backdrop { background: rgba(17,19,24,.5); }
   flex: 1 1 auto; min-height: 0;
   display: grid; grid-template-columns: 288px minmax(0,1fr) 344px;
 }
-/* 준비 중 안내를 띄울 때 보드 전체를 접는다 (display:grid 가 [hidden] 보다 세다) */
-.work[hidden] { display: none !important; }
-/* 탭 바 자리. 모양은 nav-tabs.js 가 두 화면에 같이 넣어 준다 */
+/* 탭 바 자리. 모양은 nav-tabs.js 가 두 화면에 같이 넣어 줍니다 */
 #navMount { flex: 0 0 auto; }
 .pane { min-height: 0; overflow: auto; }
 .pane--script {
@@ -343,6 +341,15 @@ dialog#keys::backdrop { background: rgba(17,19,24,.5); }
 .mine__no { font-family: var(--mono); font-size: 10px; color: var(--pencil-2); }
 .mine__where { margin-left: auto; font-family: var(--mono); font-size: 9px; color: var(--pencil-2); }
 .mine--empty { color: var(--pencil-2); font-size: 12px; padding: 6px 2px; }
+
+/* 「지나간 일」의 내 것만 토글. 목록 자체는 app/history.js 가 그린다 */
+.histmine { padding: 3px 7px; font-size: 10px; }
+.histmine[aria-pressed="true"] {
+  color: var(--stamp-blue); background: var(--sb-accent-soft); border-color: var(--sb-accent-line);
+}
+/* .h 는 ::after 로 남는 자리를 채운다 — 토글이 그 선 오른쪽으로 밀리지 않게 순서를 뒤집는다 */
+.h .histmine { order: 3; }
+.h::after { order: 2; }
 
 .nav { list-style: none; margin: 0 0 9px; padding: 0; display: grid; gap: 5px; }
 .nav__item {
@@ -485,6 +492,12 @@ dialog#keys::backdrop { background: rgba(17,19,24,.5); }
   color: var(--pencil); font-size: 13px; text-align: center;
   border: 1px dashed var(--pencil-2); border-radius: var(--sb-r-lg); padding: 44px 20px;
   grid-column: 1 / -1; background: var(--paper-2);
+}
+/* 「처음 오셨나요?」 판이 앉는 자리. 안의 판(app/onboard.js 의 .onb)이 자기 테두리와
+   여백을 갖고 있으므로 여기서는 점선과 가운데 정렬만 걷어낸다 */
+.onbslot {
+  border: 0; background: none; padding: 0; text-align: left;
+  display: flex; justify-content: center;
 }
 
 .cursors { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
@@ -942,7 +955,7 @@ dialog.plan { width: min(680px, 95vw); }
 @media print {
   @page { margin: 12mm; }
   body { display: block; overflow: visible; height: auto; background: #fff; }
-  .slate, .navbar, .soonpage, .pane--script, .pane--detail, .cursors, .toasts, .gate, .vwrap,
+  .slate, .navbar, .pane--script, .pane--detail, .cursors, .toasts, .gate, .vwrap,
   .adder, .cut__zoom, .tl, .adm { display: none !important; }
   .work { display: block; }
   .pane { overflow: visible; height: auto; min-height: 0; }
@@ -1020,7 +1033,7 @@ dialog.plan { width: min(680px, 95vw); }
 
     <div id="scriptBlock">
       <h2 class="mono h" style="margin-top:22px">시나리오</h2>
-      <textarea id="scenario" spellcheck="false"></textarea>
+      <textarea id="scenario" spellcheck="false" data-coach="scenario"></textarea>
       <button class="btn btn--solid" id="breakdown">컷으로 분해</button>
       <p class="hint">빈 줄을 기준으로 컷을 나눕니다. 나눈 뒤 컷마다 화면 설명·대사·카메라를 고칠 수 있습니다.
         이야기부터 만들려면 위의 <b>이야기 기획</b>을 씁니다.</p>
@@ -1034,21 +1047,31 @@ dialog.plan { width: min(680px, 95vw); }
     </div>
 
     <h2 class="mono h" style="margin-top:22px">내 작업 <span class="count" id="mineCount"></span></h2>
-    <ul class="mine" id="mine"></ul>
+    <ul class="mine" id="mine" data-coach="mine"></ul>
+
+    <!--
+      지나간 일. 누가 · 어떤 단계에서 · 뭘 · 언제 했는지가 남는다. 줄을 누르면 그 컷으로
+      가서 이어서 한다. 목록의 모양과 문구는 app/history.js 가 들고 있다 — 홈과 세
+      화면이 같은 목록을 쓴다.
+    -->
+    <div data-coach="histbox">
+      <h2 class="mono h" style="margin-top:22px">지나간 일
+        <button class="btn btn--ghost histmine" id="histMine" aria-pressed="false"
+                title="내가 등록한 것만 봅니다"><span class="mono">내 것만</span></button>
+      </h2>
+      <div id="hist"></div>
+    </div>
   </aside>
 
   <section class="pane pane--board" id="boardPane">
     <div class="printhead mono" id="printHead"></div>
     <div class="tl" id="timeline" hidden></div>
-    <div class="board" id="board"></div>
+    <div class="board" id="board" data-coach="board"></div>
     <div class="cursors" id="cursors"></div>
   </section>
 
-  <aside class="pane pane--detail" id="detail"></aside>
+  <aside class="pane pane--detail" id="detail" data-coach="detail"></aside>
 </main>
-
-<!-- 아직 화면이 없는 탭(대본 번역 · 키비주얼)을 눌렀을 때 보드 대신 나오는 자리 -->
-<section class="soonpage" id="soon" hidden></section>
 
 <div class="vwrap" id="viewer" hidden></div>
 <div class="gate" id="gate" hidden></div>
@@ -1093,6 +1116,6 @@ dialog.plan { width: min(680px, 95vw); }
 <input type="file" accept="image/*" hidden id="file">
 
 <script src="./aws-config.js"></script>
-<script type="module" src="./app.js"></script>
+<script type="module" src="./board.js"></script>
 </body>
 </html>

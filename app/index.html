@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>여름 스튜디오 — 스토리보드 플랫폼</title>
+
+<!--
+  홈. 왼쪽에 메뉴가 있고, 고른 메뉴 하나만 오른쪽에 펼칩니다.
+
+  전에는 이 자리(/)가 스토리보드였습니다. 그런데 스토리보드는 이야기가 다 만들어진
+  뒤에 쓰는 화면입니다. 로그인하자마자 마지막 단계에 떨어지니 앞의 세 단계가 있는 줄
+  모르고, 상단 탭 바만으로는 무엇부터 해야 하는지 읽히지 않았습니다. 그래서 보드를
+  /board.html 로 옮기고 이 자리에 순서를 보여주는 화면을 두었습니다.
+
+  그 다음에 프로젝트 카드가 붙고 「지나간 일」이 붙으면서 한 화면에 세 가지가 한꺼번에
+  쌓였습니다 — 프로젝트 목록, 네 단계, 활동 기록. 세 가지 모두 필요한 것이었는데, 셋을
+  같이 두면 처음 들어온 사람이 어디를 봐야 하는지 고르지 못합니다. 그래서 왼쪽 메뉴로
+  갈라 한 번에 하나만 보여줍니다. 고른 메뉴는 주소에 ?view= 로 남습니다 — 새로고침해도
+  같은 자리이고, 주소를 보내면 받은 사람도 같은 자리를 봅니다.
+
+  로그인 문이 여기 있습니다. 세션은 sessionStorage 나 localStorage 에 담기고
+  (app/auth.js 의 KEY = 'sb.auth') 같은 오리진의 다른 화면이 그것을 그대로 읽으므로,
+  여기서 한 번 로그인하면 보드·디벨롭·키비주얼이 다시 묻지 않습니다. 각 화면은 자기
+  로그인 문을 그대로 갖고 있어서 주소로 바로 들어가도 막히지 않습니다.
+-->
+<link rel="stylesheet" href="./theme.css">
+<script src="/aws-config.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box }
+  html, body { height: 100% }
+  body {
+    margin: 0; font-family: var(--sb-sans); color: var(--sb-ink);
+    background: var(--sb-bg); -webkit-font-smoothing: antialiased;
+    display: flex; flex-direction: column;
+  }
+
+  /* ── 머리 ───────────────────────────────────────── */
+  .top {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
+    padding: 13px 22px; border-bottom: 1px solid var(--sb-line);
+    background: var(--sb-panel);
+  }
+  .top__mark {
+    width: 22px; height: 22px; border-radius: 5px; flex: none;
+    background: var(--sb-accent); color: #fff;
+    display: grid; place-items: center; font-size: 11px; font-weight: 700;
+  }
+  .top__name { font-size: 13.5px; font-weight: 600; letter-spacing: -.01em }
+  .top__env {
+    font-family: var(--sb-mono); font-size: 10px; letter-spacing: .1em;
+    color: var(--sb-ink-3); padding: 2px 7px; border: 1px solid var(--sb-line);
+    border-radius: 999px;
+  }
+  .top__me { margin-left: auto; display: flex; align-items: center; gap: 9px; font-size: 12.5px }
+  .top__me[hidden] { display: none }
+  .top__who { color: var(--sb-ink-2) }
+  .top__out {
+    background: none; border: 1px solid var(--sb-line); border-radius: var(--sb-r);
+    padding: 4px 10px; font: inherit; font-size: 12px; color: var(--sb-ink-2); cursor: pointer;
+  }
+  .top__out:hover { border-color: var(--sb-ink-3); color: var(--sb-ink) }
+
+  /* ── 왼쪽 메뉴 + 본문 ───────────────────────────── */
+  /*
+   * 메뉴는 세로로 고정하고 본문만 스크롤합니다. 메뉴가 본문과 같이 밀려 올라가면
+   * 긴 표를 훑는 동안 다른 메뉴로 갈 길이 화면에서 사라집니다.
+   */
+  .shell { flex: 1 1 auto; min-height: 0; display: flex }
+  .side {
+    flex: 0 0 auto; width: 232px; padding: 18px 12px;
+    border-right: 1px solid var(--sb-line); background: var(--sb-panel);
+    overflow: auto;
+  }
+  .side__eyebrow {
+    font-family: var(--sb-mono); font-size: 10px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--sb-ink-3); padding: 0 10px 9px;
+  }
+  .side__list { display: grid; gap: 3px; list-style: none; margin: 0; padding: 0 }
+  .side__go {
+    display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+    padding: 10px 11px; font: inherit; font-size: 13px; color: var(--sb-ink-2);
+    background: none; border: 1px solid transparent; border-radius: var(--sb-r);
+    cursor: pointer;
+  }
+  .side__go:hover { background: var(--sb-fill); color: var(--sb-ink) }
+  .side__go[aria-current="page"] {
+    background: var(--sb-accent-soft); border-color: var(--sb-accent-line);
+    color: var(--sb-accent); font-weight: 600;
+  }
+  .side__ico { flex: none; width: 17px; text-align: center; font-size: 13px }
+  .side__n {
+    margin-left: auto; font-family: var(--sb-mono); font-size: 10.5px; color: var(--sb-ink-3);
+  }
+  .side__go[aria-current="page"] .side__n { color: var(--sb-accent) }
+  .side__foot { margin: 16px 10px 0; font-size: 11px; line-height: 1.7; color: var(--sb-ink-3) }
+
+  .wrap {
+    flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto;
+    padding: 34px 26px 56px; display: flex; justify-content: center;
+  }
+  .col { width: min(920px, 100%) }
+
+  .view[hidden] { display: none }
+  .view__eyebrow {
+    font-family: var(--sb-mono); font-size: 10.5px; letter-spacing: .16em;
+    color: var(--sb-accent); text-transform: uppercase;
+  }
+  .view__h { margin: 9px 0 6px; font-size: 24px; font-weight: 700; letter-spacing: -.025em }
+  .view__p { margin: 0 0 22px; font-size: 13.5px; line-height: 1.65; color: var(--sb-ink-2) }
+  .view__note { margin: 12px 0 0; font-size: 11.5px; line-height: 1.7; color: var(--sb-ink-3) }
+
+  /*
+   * 단계 목록. 세로로 쌓고 왼쪽에 번호를 둡니다 — 가로로 늘어놓으면 네 개가 그냥
+   * 나란한 버튼으로 보이고, 앞뒤 순서가 있다는 것이 읽히지 않습니다. 사용자가 원한
+   * 것은 순서가 명확히 보이는 것이었습니다.
+   */
+  .steps { display: grid; gap: 9px; list-style: none; margin: 0; padding: 0 }
+  .step { position: relative }
+  .step__go {
+    display: flex; align-items: center; gap: 15px; width: 100%; text-align: left;
+    padding: 15px 17px; font: inherit; color: inherit; text-decoration: none;
+    background: var(--sb-panel); border: 1px solid var(--sb-line);
+    border-radius: var(--sb-r-lg); cursor: pointer;
+    transition: border-color .14s, box-shadow .14s, transform .14s;
+  }
+  .step__go:hover {
+    border-color: var(--sb-accent-line); box-shadow: var(--sb-sh);
+    transform: translateY(-1px);
+  }
+  .step__go:focus-visible { outline: 2px solid var(--sb-accent); outline-offset: 2px }
+  .step__n {
+    flex: none; width: 27px; height: 27px; border-radius: 50%;
+    display: grid; place-items: center;
+    background: var(--sb-fill); border: 1px solid var(--sb-line);
+    font-family: var(--sb-mono); font-size: 11.5px; color: var(--sb-ink-3);
+  }
+  .step__go:hover .step__n {
+    background: var(--sb-accent-soft); border-color: var(--sb-accent-line); color: var(--sb-accent);
+  }
+  .step__body { min-width: 0 }
+  .step__label { font-size: 14.5px; font-weight: 600; letter-spacing: -.01em }
+  .step__desc { margin-top: 2px; font-size: 12.5px; color: var(--sb-ink-3) }
+  .step__arrow { margin-left: auto; flex: none; color: var(--sb-line-2); font-size: 15px }
+  .step__go:hover .step__arrow { color: var(--sb-accent) }
+
+  /*
+   * 예시 프로젝트로 가는 파란 버튼. 단계 목록 맨 아래에 둡니다 — 네 단계를 읽은
+   * 다음에 「그래서 이게 어떻게 이어지나」가 오는 자리입니다. 예시는 화면마다 따로
+   * 있던 것을 하나로 이었습니다(app/demo.js).
+   */
+  .demo { margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--sb-line) }
+  .demo__go {
+    display: flex; align-items: center; gap: 11px; width: 100%; text-align: left;
+    padding: 15px 18px; font: inherit; cursor: pointer;
+    background: var(--sb-accent); border: 1px solid var(--sb-accent);
+    border-radius: var(--sb-r-lg); color: #fff;
+  }
+  .demo__go:hover { background: var(--sb-accent-ink); border-color: var(--sb-accent-ink) }
+  .demo__go:disabled { opacity: .6; cursor: default }
+  .demo__ico { flex: none; font-size: 15px }
+  .demo__label { font-size: 14.5px; font-weight: 600; letter-spacing: -.01em }
+  .demo__sub { margin-top: 3px; font-size: 12px; opacity: .85 }
+  .demo__arrow { margin-left: auto; flex: none; font-size: 15px }
+  .demo__note { margin: 11px 0 0; font-size: 11.5px; line-height: 1.7; color: var(--sb-ink-3) }
+
+  /* 예시를 다 본 사람이 홈으로 돌아왔을 때 (?demo=done) */
+  .done {
+    display: none; align-items: center; gap: 11px; margin-bottom: 20px;
+    padding: 13px 15px; border-radius: var(--sb-r-lg);
+    background: var(--sb-accent-soft); border: 1px solid var(--sb-accent-line);
+    font-size: 13px; line-height: 1.6; color: var(--sb-ink);
+  }
+  .done[hidden] { display: none }
+  .done:not([hidden]) { display: flex }
+  .done__ico { flex: none; color: var(--sb-accent); font-size: 15px }
+  .done__x {
+    margin-left: auto; flex: none; background: none; border: 0; font: inherit; font-size: 15px;
+    color: var(--sb-ink-3); cursor: pointer; padding: 0 3px;
+  }
+
+  /* 활동 표와 프로젝트 목록의 머리줄 */
+  .sect__h {
+    display: flex; align-items: center; gap: 9px; margin: 0 0 12px;
+    font-size: 13.5px; font-weight: 600; letter-spacing: -.01em;
+  }
+  .sect__h::after { content: ''; flex: 1 1 auto; height: 1px; background: var(--sb-line); order: 2 }
+  .sect__n { font-family: var(--sb-mono); font-size: 11px; color: var(--sb-ink-3); order: 1 }
+  .sect__mine {
+    order: 3; flex: none; background: none; border: 1px solid var(--sb-line);
+    border-radius: var(--sb-r); padding: 3px 9px; font: inherit; font-size: 11.5px;
+    color: var(--sb-ink-3); cursor: pointer;
+  }
+  .sect__mine:hover { border-color: var(--sb-ink-3); color: var(--sb-ink-2) }
+  .sect__mine[aria-pressed="true"] {
+    color: var(--sb-accent); border-color: var(--sb-accent-line); background: var(--sb-accent-soft);
+  }
+  /* 표는 흰 판 위에 앉힙니다. 모양(.htab*)은 app/history.js 가 넣습니다 */
+  .tabbox {
+    background: var(--sb-panel); border: 1px solid var(--sb-line);
+    border-radius: var(--sb-r-lg); padding: 14px 15px; overflow-x: auto;
+  }
+
+  /* 처음 온 사람에게 보이는 판. 모양은 app/onboard.js 가 넣습니다 */
+  .onbslot { margin-top: 26px }
+  .onbslot[hidden] { display: none }
+
+  /* ── 로그인 문 ───────────────────────────────────── */
+  .gate {
+    position: fixed; inset: 0; z-index: 90;
+    background: rgba(15, 20, 30, .55); backdrop-filter: blur(3px);
+    display: grid; place-items: center; padding: 24px;
+  }
+  .gate[hidden] { display: none }
+  .gate__card {
+    background: var(--sb-panel); border-radius: var(--sb-r-lg); padding: 24px;
+    width: min(430px, 100%); box-shadow: var(--sb-sh-lg);
+    max-height: 100%; overflow: auto;
+  }
+  .gate__eyebrow {
+    font-family: var(--sb-mono); font-size: 10px; letter-spacing: .18em; color: var(--sb-accent);
+  }
+  .gate__title { margin: 8px 0 4px; font-size: 19px; font-weight: 700; letter-spacing: -.01em }
+  .gate__sub { margin: 0 0 18px; font-size: 12.5px; line-height: 1.6; color: var(--sb-ink-2) }
+  .gate__list { display: grid; gap: 7px }
+  .gate__who {
+    display: flex; align-items: center; gap: 11px; width: 100%; text-align: left;
+    background: var(--sb-panel); border: 1px solid var(--sb-line); border-radius: var(--sb-r);
+    padding: 11px 13px; cursor: pointer; font: inherit; color: var(--sb-ink);
+  }
+  .gate__who:hover, .gate__who:focus-visible {
+    background: var(--sb-fill); border-color: var(--sb-accent-line);
+  }
+  .gate__who:disabled { opacity: .5; cursor: default }
+  .gate__dot { width: 24px; height: 24px; border-radius: 50%; flex: none }
+  .gate__name { font-weight: 600; font-size: 13.5px }
+  .gate__role {
+    font-family: var(--sb-mono); font-size: 10px; letter-spacing: .1em; color: var(--sb-ink-3);
+  }
+  .gate__job { margin-left: auto; font-size: 11.5px; color: var(--sb-ink-3) }
+
+  .lf { display: block; margin-bottom: 12px }
+  .lf__label {
+    display: block; font-family: var(--sb-mono); font-size: 10px; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--sb-ink-3); margin-bottom: 5px;
+  }
+  .lf input[type=text], .lf input[type=password] {
+    width: 100%; padding: 9px 11px; font: inherit; font-size: 13.5px;
+    background: var(--sb-bg); color: var(--sb-ink);
+    border: 1px solid var(--sb-line); border-radius: var(--sb-r);
+  }
+  .lf input:focus {
+    outline: none; border-color: var(--sb-accent);
+    box-shadow: 0 0 0 3px var(--sb-accent-soft);
+  }
+  .lf--check { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--sb-ink-2) }
+  .lf--check input { margin: 0 }
+  .lf__or {
+    margin: 16px 0 12px; font-size: 11px; color: var(--sb-ink-3); text-align: center;
+    border-top: 1px solid var(--sb-line); padding-top: 12px;
+  }
+  .lf__why { margin: 9px 0 0; font-size: 12px; color: var(--sb-no); min-height: 1em }
+  .lf__note { margin: 12px 0 0; font-size: 11.5px; line-height: 1.6; color: var(--sb-ink-3) }
+  .btn {
+    font: inherit; cursor: pointer; border-radius: var(--sb-r);
+    border: 1px solid var(--sb-line); background: var(--sb-panel); color: var(--sb-ink);
+    padding: 9px 14px; font-size: 13px;
+  }
+  .btn--solid {
+    background: var(--sb-accent); border-color: var(--sb-accent); color: #fff; font-weight: 600;
+  }
+  .btn--solid:hover { background: var(--sb-accent-ink); border-color: var(--sb-accent-ink) }
+  .btn--wide { width: 100%; margin-top: 4px }
+  .btn:disabled { opacity: .55; cursor: default }
+
+  /*
+   * 좁은 화면에서는 메뉴를 위로 눕힙니다. 232px 짜리 기둥을 그대로 두면 본문에
+   * 남는 폭이 표를 담지 못합니다.
+   */
+  @media (max-width: 760px) {
+    .shell { flex-direction: column }
+    .side {
+      width: auto; border-right: 0; border-bottom: 1px solid var(--sb-line);
+      padding: 10px; overflow-x: auto;
+    }
+    .side__eyebrow, .side__foot { display: none }
+    .side__list { grid-auto-flow: column; grid-auto-columns: max-content; gap: 5px }
+    .wrap { padding: 22px 15px 40px }
+    .view__h { font-size: 20px }
+    .step__desc { display: none }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <span class="top__mark" aria-hidden="true">S</span>
+  <span class="top__name">여름 스튜디오</span>
+  <span class="top__env" id="env">로컬</span>
+  <div class="top__me" id="meBox" hidden>
+    <span class="top__who" id="meWho"></span>
+    <button class="top__out" id="meOut" type="button">로그아웃</button>
+  </div>
+</header>
+
+<div class="shell">
+  <!--
+    왼쪽 메뉴. 세 갈래입니다 — 새로 만들기, 우리 팀 프로젝트, 팀원들의 작업 상황.
+    버튼의 data-view 가 아래 세 판의 id 와 짝입니다(app/home.js 의 VIEWS).
+  -->
+  <nav class="side" aria-label="홈 메뉴" data-coach="side">
+    <div class="side__eyebrow">스토리보드 플랫폼</div>
+    <ul class="side__list" id="sideList"></ul>
+    <p class="side__foot" id="sideFoot"></p>
+  </nav>
+
+  <main class="wrap">
+    <div class="col">
+
+      <!-- 예시를 끝까지 본 사람이 홈으로 돌아온 자리 (?demo=done) -->
+      <div class="done" id="doneBar" hidden>
+        <span class="done__ico" aria-hidden="true">✓</span>
+        <span id="doneText"></span>
+        <button class="done__x" id="doneX" type="button" aria-label="닫기">×</button>
+      </div>
+
+      <!-- ① 새로 생성 ─ 네 단계와 예시 프로젝트 -->
+      <section class="view" id="viewNew" hidden aria-labelledby="newH">
+        <div class="view__eyebrow">새로 생성</div>
+        <h1 class="view__h" id="newH">어디부터 시작할까요?</h1>
+        <p class="view__p">
+          시놉시스에서 시작해 대본이 되고, 그림이 나오고, 마지막에 보드에 얹힙니다.
+          순서대로 가도 되고 필요한 단계만 골라도 됩니다. 단계에 들어가면 먼저 프로젝트
+          이름을 붙입니다.
+        </p>
+        <ol class="steps" id="steps" data-coach="steps"></ol>
+
+        <div class="demo" data-coach="demo">
+          <button class="demo__go" id="demoGo" type="button">
+            <span class="demo__ico" aria-hidden="true">▶</span>
+            <span class="demo__body">
+              <span class="demo__label">예시 프로젝트를 통해 전체 단계 활용방법 확인하기</span>
+              <span class="demo__sub" id="demoSub">네 단계를 한 번에 이어서 보여드립니다</span>
+            </span>
+            <span class="demo__arrow" aria-hidden="true">→</span>
+          </button>
+          <p class="demo__note" id="demoNote"></p>
+        </div>
+      </section>
+
+      <!-- ② 프로젝트 ─ 우리 팀이 하던 판들 -->
+      <section class="view" id="viewPj" hidden aria-labelledby="pjH">
+        <div class="view__eyebrow">프로젝트</div>
+        <h1 class="view__h" id="pjH">우리 팀 프로젝트</h1>
+        <p class="view__p">
+          대본도, 씬별 그림도, 컷도 프로젝트 안에 담깁니다. 카드를 누르면 그 판의
+          스토리보드가 열리고, 상단 탭으로 다른 단계로 넘어가도 같은 판을 봅니다.
+        </p>
+        <h2 class="sect__h">지금까지 만든 판
+          <span class="sect__n" id="pjN"></span>
+        </h2>
+        <div id="pjList" data-coach="projects"></div>
+        <p class="view__note" id="pjNote"></p>
+      </section>
+
+      <!-- ③ 팀원들의 작업 상황 ─ 어느 프로젝트에서 · 누가 · 무슨 일을 -->
+      <section class="view" id="viewAct" hidden aria-labelledby="actH">
+        <div class="view__eyebrow">팀원들의 작업 상황</div>
+        <h1 class="view__h" id="actH">팀원들의 작업 상황 확인하기</h1>
+        <p class="view__p">
+          네 화면이 같은 기록을 씁니다 — 어느 프로젝트에서, 누가, 무슨 일을 했는지가
+          여기 한 표에 모입니다. 줄의 「열기」는 그 일이 있던 자리로 데려갑니다.
+        </p>
+        <h2 class="sect__h">지나간 일
+          <span class="sect__n" id="actN"></span>
+          <button class="sect__mine" id="actMine" type="button" aria-pressed="false"
+                  title="내가 한 것만 봅니다">내 것만</button>
+        </h2>
+        <div class="tabbox" id="act" data-coach="actbox"></div>
+        <p class="view__note" id="actNote"></p>
+      </section>
+
+      <!-- 처음 온 사람에게 뜨는 판. 활동 기록이 하나도 없을 때만 보입니다 -->
+      <div class="onbslot" id="onbSlot" hidden></div>
+    </div>
+  </main>
+</div>
+
+<div class="gate" id="gate" hidden></div>
+
+<script type="module" src="./home.js"></script>
+</body>
+</html>

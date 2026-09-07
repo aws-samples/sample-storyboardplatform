@@ -30,8 +30,34 @@ type PlanJob {
   status: String!
 }
 
+# 작업판 앞에 세우는 프로젝트 카드 한 장.
+#
+# op 로그와 다른 항목에 따로 담는다. op 는 pk=BOARD#<id> 로 흩어져 있어서 목록을 뽑으려면
+# 테이블을 Scan 해야 하고, 30일 TTL 이 걸려 있다 — 프로젝트 이름이 한 달 뒤에 사라지면
+# 카드가 이름 없는 보드가 된다. 그래서 pk='PROJECTS' 한 자리에 모으고 TTL 을 걸지 않는다.
+#
+# lastWhat/lastActor 는 op 로그에서 온 것을 적어 둔 사본이다. 사실은 로그가 갖고 있고
+# 이건 카드에 보여줄 한 줄이다 — 카드 20장을 그리려고 보드 20개의 로그를 다 읽을 수는 없다.
+type Project {
+  boardId: ID!
+  name: String!
+  createdAt: String!
+  createdBy: ID!
+  updatedAt: String!
+  lastActor: ID
+  lastWhat: String
+}
+
+type ProjectPage {
+  items: [Project!]!
+  nextToken: String
+}
+
 type Query {
   listOps(boardId: ID!, since: String, nextToken: String): OpPage!
+
+  # 작업판 앞에 세울 프로젝트 카드 전부. 최근에 손댄 것이 먼저 온다.
+  listProjects(nextToken: String): ProjectPage!
 
   # plan 결과 한 건. 아직 끝나지 않았으면 {status:"pending"} 이 온다.
   # 끝났으면 {status:"done", text, usage, stop}, 실패했으면 {status:"error", error}.
@@ -46,6 +72,11 @@ type Query {
 
 type Mutation {
   publishOp(boardId: ID!, id: ID!, ts: String!, actor: ID!, body: String!): Op!
+
+  # 프로젝트 카드를 앉히거나, 마지막 손길만 고쳐 준다.
+  # 이름은 만들 때 한 번만 받고 그 뒤로는 덮어쓰지 않는다 — 여러 사람이 같은 보드를
+  # 동시에 열어도 이름이 서로 뒤집히지 않게 한다.
+  putProject(boardId: ID!, name: String, actor: ID!, what: String, ts: String!): Project!
   publishPresence(boardId: ID!, actor: ID!, body: String!): Presence!
 
   # plan 은 Query 가 아니라 Mutation 이다. AppSync 요청 실행 시간 상한이 30초(변경 불가)라서

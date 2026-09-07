@@ -1,15 +1,15 @@
 // kdh-extract-raw.json → normalizeGraph → deriveEdges → extracted-graph.json
-// mock/graph.json 과 얼마나 겹치는지 함께 찍는다.
-//   node fixtures/build.mjs        (demo/ 에서. node 22 이상)
+// 같은 폴더의 graph.json 과 얼마나 겹치는지 함께 찍습니다.
+//   node app-walkthrough/data/build.mjs        (저장소 루트에서. node 22 이상)
 import { readFile, writeFile } from 'node:fs/promises'
-import { normalizeGraph, validateAgainstCanon } from '../core.js'
-import { deriveEdges, edgeKey } from '../graph-schema.js'
+import { normalizeGraph, validateAgainstCanon } from '../../app/core.js'
+import { deriveEdges, edgeKey } from '../../app/graph-schema.js'
 
 const here = new URL('.', import.meta.url)
 const read = async (p) => JSON.parse(await readFile(new URL(p, here), 'utf8'))
 
 const raw = await read('kdh-extract-raw.json')
-const canon = await read('../mock/graph.json')
+const canon = await read('graph.json')
 
 const g = normalizeGraph(raw)
 const derived = deriveEdges(g.nodes, g.edges)
@@ -42,6 +42,6 @@ console.log('canon 대조', JSON.stringify(validateAgainstCanon(out, canon)))
 
 await writeFile(new URL('extracted-graph.json', here),
   `${JSON.stringify({
-    _note: 'fixtures/kdh-synopsis.txt → extractGraphPrompt → (모델 응답 재현: kdh-extract-raw.json) → normalizeGraph + deriveEdges. fixtures/build.mjs 로 다시 만든다. story-graph.html?graph=fixtures/extracted-graph.json 으로 열어 확인한다.',
+    _note: 'kdh-synopsis.txt → extractGraphPrompt → (모델 응답 재현: kdh-extract-raw.json) → normalizeGraph + deriveEdges. app-walkthrough/data/build.mjs 로 다시 만듭니다. /story-graph.html?graph=/app-walkthrough/data/extracted-graph.json 으로 열어 확인합니다.',
     ...out,
   }, null, 1)}\n`)

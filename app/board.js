@@ -14,14 +14,19 @@ import { SEED_ART } from './seed-art.js'
 import { connect } from './net.js'
 import { configured, idToken, session, logout } from './auth.js'
 import { showLogin } from './login.js'
-import { mountNav, soonMarkup, isSoonTab, navTabFromSearch } from './nav-tabs.js'
+import { mountNav, boardFromSearch } from './nav-tabs.js'
+import * as coach from './coach.js'
+import { emptyPanel, guide as guideExample, guiding } from './onboard.js'
+import { entries, group, paintList, toEntry } from './history.js'
+import { pickProject, touch as touchProject } from './projects.js'
+import { demoActive, demoAdvance, demoSay, demoTitle } from './demo.js'
 
 const ROSTER = [
-  { id: 'u1', name: '김하나', role: 'planner', color: '#E3A93C', job: '시나리오를 컷으로 쪼갠다' },
-  { id: 'u2', name: '이도현', role: 'artist', color: '#4FA97A', job: '구도를 그리고 올린다' },
-  { id: 'u3', name: '박서준', role: 'director', color: '#7FB3E8', job: '피드백하고 승인한다' },
-  { id: 'u4', name: '최유진', role: 'reviewer', color: '#D69AC9', job: '메모로 의견을 남긴다' },
-  { id: 'u5', name: '정민아', role: 'admin', color: '#C77B62', job: '팀원을 등록하고 역할을 정한다' },
+  { id: 'u1', name: '김하나', role: 'planner', color: '#E3A93C', job: '시나리오를 컷으로 쪼갭니다' },
+  { id: 'u2', name: '이도현', role: 'artist', color: '#4FA97A', job: '구도를 그리고 올립니다' },
+  { id: 'u3', name: '박서준', role: 'director', color: '#7FB3E8', job: '피드백하고 승인합니다' },
+  { id: 'u4', name: '최유진', role: 'reviewer', color: '#D69AC9', job: '메모로 의견을 남깁니다' },
+  { id: 'u5', name: '정민아', role: 'admin', color: '#C77B62', job: '팀원을 등록하고 역할을 정합니다' },
 ]
 
 const PALETTE = ['#E3A93C', '#4FA97A', '#7FB3E8', '#D69AC9', '#C77B62', '#8FA65B']
@@ -148,6 +153,29 @@ let linkTimer = 0
 let replaying = false
 let lastTs = 0
 
+/*
+ * 프로젝트 카드의 「마지막 손길」을 고칩니다.
+ *
+ * 무슨 일이었는지는 history.js 가 이미 한 줄로 옮기는 법을 알고 있으므로 그것을 그대로
+ * 씁니다 — 카드에 적을 문장을 여기서 또 만들면 목록과 카드가 서로 다른 말을 합니다.
+ * 히스토리에 넣지 않는 op(프레즌스·읽음 표시 따위)는 toEntry 가 null 을 주고, 그런
+ * 것으로는 카드를 건드리지 않습니다. 「본 일」이 아니라서입니다.
+ *
+ * 컷 9개를 한 번에 만들면 op 도 9건입니다. 그때마다 쓰면 같은 카드에 아홉 번 쓰는
+ * 것이므로, 마지막 것만 조금 늦춰 한 번 보냅니다.
+ */
+let cardTimer = null
+let cardWhat = ''
+function touchCard(op) {
+  const e = toEntry(op, (id) => person(id))
+  if (!e) return
+  cardWhat = e.what
+  clearTimeout(cardTimer)
+  cardTimer = setTimeout(() => {
+    touchProject({ boardId: boardFromSearch(), actor: me.id, what: cardWhat })
+  }, 600)
+}
+
 function emit(op) {
   op.id = uid()
   op.ts = now()
@@ -155,6 +183,7 @@ function emit(op) {
   seenOps.add(op.id)
   applyOp(op)
   net?.sendOp(op)
+  touchCard(op)
   save()
   render()
 }
@@ -168,6 +197,7 @@ function emitMany(ops) {
     applyOp(op)
     net?.sendOp(op)
   }
+  if (ops.length) touchCard(ops.at(-1))
   save()
   render()
 }
@@ -233,7 +263,18 @@ async function resync() {
   render()
 }
 
+/*
+ * 지나간 op 를 그대로 들고 있는다. state 는 「지금 어떤 모양인지」만 남기고 「누가 뭘
+ * 했는지」는 버리기 때문이다 — 판을 만들 때 op 를 접어 넣는 것이 그 일이다.
+ * 히스토리는 접기 전의 것을 봐야 한다. 서버의 로그가 사실이고 이건 그 사본이다.
+ */
+const journal = []
+const JOURNAL_MAX = 600
+
 function applyOp(op) {
+  journal.push(op)
+  if (journal.length > JOURNAL_MAX) journal.splice(0, journal.length - JOURNAL_MAX)
+
   const p = op.panelId ? state.panels[op.panelId] : null
   let landed = true
 
@@ -343,6 +384,9 @@ function applyOp(op) {
       const keep = state.members
       state = emptyState()
       state.members = keep
+      // 판을 비웠으므로 그 전의 기록이 가리키는 컷도 없다. 「이어서 하기」가 사라진
+      // 자리로 데려가지 않게 사본도 같이 비운다. 이 op 자체는 남는다
+      journal.splice(0, journal.length, op)
       break
     }
   }
@@ -382,18 +426,25 @@ function saveRead() {
   localStorage.setItem(readKey(), JSON.stringify([...readIds].slice(-300)))
 }
 
+/*
+ * 로컬 모드의 판 저장 자리. 프로젝트마다 다릅니다 — 한때 'sb.state' 한 칸이었는데,
+ * 프로젝트 보드가 생긴 뒤로는 그러면 A 를 열었다가 B 를 열면 A 의 컷이 B 에 그대로
+ * 나타납니다. 배포 모드는 이 함수를 타지 않습니다(op 로그가 판입니다).
+ */
+const stateKey = () => `sb.state.${boardFromSearch()}`
+
 let saveTimer = null
 function save() {
   if (net?.mode === 'aws') return
   clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
-    try { localStorage.setItem('sb.state', JSON.stringify(state)) } catch {  }
+    try { localStorage.setItem(stateKey(), JSON.stringify(state)) } catch {  }
   }, 220)
 }
 
 function load() {
   try {
-    const raw = localStorage.getItem('sb.state')
+    const raw = localStorage.getItem(stateKey())
     if (raw) {
       const s = scrub(JSON.parse(raw))
       if (!s.chars || !s.notifs) return false
@@ -468,10 +519,25 @@ const seedArt = (id, fallback, ai = true) =>
     ? { src: SEED_ART[id].src, ...(ai ? { gen: SEED_ART[id].gen } : {}) }
     : { art: fallback }
 
+/**
+ * 예시 데이터 한 벌. 예전에는 보드가 비어 있으면 이걸 조용히 밀어 넣었지만, 지금은
+ * 「예시 보기」를 눌렀을 때만 들어갑니다 (seedScript 가 나눠서 넣습니다).
+ *
+ * @returns {Array} op 들. 모두 seed:true 라 히스토리에서 「예시」로 갈라 보입니다
+ */
 function seedOps(opAt = null, tag = 'sd') {
+  return seedBuild(opAt, tag).ops
+}
+
+/*
+ * 예시를 만드는 곳. ops 와 함께 「여기서부터 무엇을 하는 중인지」 표시(marks)를 냅니다.
+ * 표시가 있어야 재생기가 한 번에 쏟아 넣지 않고 단계로 나눠 넣을 수 있습니다.
+ */
+function seedBuild(opAt = null, tag = 'sd') {
   const T = Math.floor(now() / 864e5) * 864e5
   const base = opAt ?? T
   const ops = []
+  const marks = []
   let n = 0
   let min = 0
   const add = (actor, o, gap = 3) => {
@@ -479,9 +545,13 @@ function seedOps(opAt = null, tag = 'sd') {
     ops.push({ ...o, id: `${tag}-${++n}`, ts: opAt ? base + n : T + min * 6e4, actor, seed: true })
     return ops.at(-1)
   }
+  /** 여기서부터 한 덩어리. say 는 재생 중 아래 띠에 적히는 한 줄이다 */
+  const mark = (say, sub) => marks.push({ at: ops.length, say, sub })
 
+  mark('시나리오를 넣습니다', '기획자 김하나가 15초 브랜드 필름 한 편을 엽니다')
   add('u1', { kind: 'board.patch', fields: { title: '아침빵집 — 15초 브랜드 필름', scenario: SEED_SCENARIO } })
 
+  mark('인물과 구도를 만듭니다', '인물마다 정면·3/4·측면… 구도가 따로 관리됩니다')
   let ck = null
   for (const c of SEED_CHARS) {
     ck = orderKeyBetween(ck, null)
@@ -519,6 +589,7 @@ function seedOps(opAt = null, tag = 'sd') {
     })
   }
 
+  mark('시나리오를 컷으로 나눕니다', '빈 줄이 컷 경계입니다. 씬으로 묶여 시간이 매겨집니다')
   const cuts = splitScenario(SEED_SCENARIO)
   let key = null
   cuts.forEach((cut, i) => {
@@ -549,6 +620,7 @@ function seedOps(opAt = null, tag = 'sd') {
     }
   })
 
+  mark('감독과 리뷰어가 의견을 남깁니다', '그림 위의 점과 동그라미가 그 의견이 가리키는 자리입니다')
   const feedback = [
     ['char-1-p3', 'u3', '[구도] 구도가 안 맞습니다. 어깨선이 너무 올라가 보여요.',
       { pin: { x: 0.44, y: 0.36 }, mark: [ring(0.44, 0.36, 0.13, 0.09)] }],
@@ -575,7 +647,7 @@ function seedOps(opAt = null, tag = 'sd') {
     },
   })
 
-  return ops
+  return { ops, marks }
 }
 
 function statusPath(status, assignee) {
@@ -1070,6 +1142,7 @@ function render() {
   renderGpu()
   renderNav()
   renderMine()
+  renderHist()
   renderTime()
   renderBoard()
   renderDetail()
@@ -1474,6 +1547,208 @@ function addMember() {
   byId('admId')?.focus()
 }
 
+/* ══ 온보딩 ════════════════════════════════════════ */
+
+/**
+ * 비어 있을 때의 판. 예시를 보거나 직접 시작합니다.
+ *
+ * 예시 데이터는 서버에 남고 같은 보드를 보는 사람에게도 보입니다 — push() 가
+ * net.sendOp 을 부르기 때문입니다. 그 사실을 버튼 아래에 적어 둡니다. 되돌리려면
+ * 관리 화면의 보드 비우기를 씁니다(board.reset).
+ */
+function welcomePanel() {
+  return emptyPanel({
+    eyebrow: '스토리보드',
+    head: '처음 오셨나요?',
+    lines: [
+      '컷을 만들고, 그림을 붙이고, 리뷰를 받아 승인까지 가는 화면입니다.',
+      '예시를 누르면 15초 브랜드 필름 한 편이 만들어지는 과정을 한 단계씩 눌러 보게 됩니다.',
+      '직접 시작하면 왼쪽에 시나리오를 넣고 컷으로 분해하는 것부터입니다.',
+    ],
+    onExample: () => runExample(),
+    /*
+     * 직접 시작하는 사람에게는 안내를 열지 않습니다. 이미 쓰기로 정한 사람에게 막을
+     * 덮으면 안내가 아니라 걸림돌입니다 — 커서만 시나리오 칸에 둡니다. 거절을 기억하는
+     * 이유는 coach.skip 에 적혀 있습니다.
+     */
+    onOwn: () => {
+      coach.skip(COACH_KEY)
+      byId('scenario')?.focus()
+    },
+    warn: '예시 내용은 이 보드에 실제로 저장되고 같은 보드를 보는 사람에게도 보입니다. '
+      + '지우려면 관리 화면의 보드 비우기를 씁니다.',
+  })
+}
+
+let exampleRun = null
+
+/*
+ * 단계마다 짚을 자리. seedBuild 의 표시(marks)와 같은 순서입니다.
+ *
+ * 여기 적힌 자리는 모두 board.html 에 처음부터 있는 것들입니다 — render() 가 다시 그려도
+ * 사라지지 않아야 테가 남습니다. 자리를 못 찾으면 onboard 가 테 없이 넘어갑니다.
+ */
+const EXAMPLE_SPOTS = ['scenario', '#newChar', '#breakdown', 'board']
+
+/*
+ * 그 단계에서 기다릴 초와, 기다려서 나온 것을 보여 줄 걸음. 모델을 부르는 자리에만
+ * 답니다 — 「컷으로 분해」가 그렇습니다. 예시는 미리 만들어 둔 op 를 밀어 넣으므로
+ * 실제로는 즉시 끝나지만, 그렇게 보여 주면 직접 할 때의 기다림을 고장으로 읽게 됩니다.
+ * 그리고 기다린 것을 보지 못한 채 다음 설명으로 넘어가면 그 3초가 헛것이 됩니다
+ * (app/onboard.js 머리글의 wait 와 done).
+ */
+const EXAMPLE_WAITS = {
+  2: {
+    wait: 3000,
+    waitSay: '시나리오를 컷으로 나누고 있습니다',
+    done: {
+      say: '컷이 만들어졌습니다',
+      sub: '빈 줄이 컷 경계였습니다. 컷은 씬으로 묶이고 시간이 매겨집니다 — 컷을 눌러 '
+        + '오른쪽에서 대사와 지시를 고칩니다',
+      see: 'board',
+      // 인물 구도도 같은 panels 에 삽니다(charId 가 붙습니다). 컷만 셉니다
+      got: () => `컷 ${Object.values(state.panels).filter((p) => !p.charId).length}개`,
+      /*
+       * 이 화면의 값은 모델이 아니라 판 자체입니다. 컷이 서는 것을 본 자리에서 한 번
+       * 적어 둡니다 — 앞의 두 화면에서 「무엇을 맡기고 무엇을 직접 드는지」를 말했으니
+       * 여기서는 「만든 것이 어디에 쌓이는지」를 말합니다(onboard.js 의 note).
+       */
+      note: {
+        head: '고친 것이 아니라 고친 일이 쌓입니다',
+        body: '판의 유일한 사실은 *편집 기록 한 줄씩*입니다. 그래서 두 사람이 같은 보드를 열어도 '
+          + '서로의 손이 덮이지 않고, 누가 무엇을 언제 했는지가 남습니다.',
+      },
+    },
+  },
+}
+
+/**
+ * 예시를 클릭에 맞춰 안내합니다. op 를 한 번에 밀어 넣지 않고 seedBuild 의 표시(marks)
+ * 단위로 나눠 넣어, 시나리오 → 인물 → 컷 → 리뷰 순서를 사람이 한 번씩 눌러 보게 합니다.
+ *
+ * 부르는 곳이 세 군데(빈 화면의 버튼·코치마크·직접)라 눌린 자리의 원래 동작은 onboard 가
+ * 막습니다. 예를 들어 「컷으로 분해」를 짚었을 때 눌러도 진짜 분해가 도는 게 아니라 아래
+ * run 이 돕니다 — 예시가 실제 대본을 건드리지 않게 하려는 것입니다.
+ */
+function runExample() {
+  if (exampleRun) return
+  const { ops, marks } = seedBuild()
+  // 표시 사이의 구간마다 그만큼의 op 를 밀어 넣는다. 마지막 구간은 끝까지다
+  const steps = marks.map((m, i) => {
+    const from = m.at
+    const to = marks[i + 1]?.at ?? ops.length
+    return {
+      say: m.say, sub: m.sub, spot: EXAMPLE_SPOTS[i], see: 'board',
+      ...(EXAMPLE_WAITS[i] || {}),
+      run: () => {
+        for (const op of ops.slice(from, to)) push(op)
+        if (!selectedId) { pickView() }
+        render()
+      },
+    }
+  })
+  // 끝은 말풍선의 버튼으로 냅니다 — 나가는 일과 짚은 자리를 누르는 일을 가릅니다
+  steps.push({
+    say: demoActive() ? '스토리보드까지 다 보셨습니다' : '여기까지가 예시입니다',
+    sub: demoActive()
+      ? demoSay('board')
+      : '이제 컷을 눌러 오른쪽에서 고치거나, 관리 화면에서 보드를 비우고 직접 시작할 수 있습니다',
+    see: 'histbox',
+    // 보드가 마지막 걸음이라 여기서는 두 갈래가 같은 곳으로 갑니다 — 홈으로 돌아갑니다
+    go: demoActive() ? '예시를 마치고 홈으로' : '예시 마치기',
+    leaves: demoActive(),
+    run: () => { pickView(); render() },
+  })
+  exampleRun = guideExample({
+    steps, title: demoTitle('board', '스토리보드'),
+    onDone: () => {
+      exampleRun = null
+      render()
+      /*
+       * 예시 프로젝트를 밟고 있으면 다음 화면으로 넘어간다 — 보드는 마지막 단계라
+       * 홈으로 돌아간다(demo.js 의 DEMO_STEPS). 그때는 코치마크를 열지 않는다.
+       * 화면을 떠나는 중에 막을 덮으면 한 번 반짝하고 사라진다.
+       */
+      if (demoAdvance('board')) return
+      // 예시를 다 본 뒤에 화면의 어디를 눌러야 하는지 짚어 준다. 순서가 반대면
+      // (코치마크 먼저) 가리킬 컷이 아직 없어 빈 자리를 가리키게 된다
+      openCoach()
+    },
+  })
+}
+
+/*
+ * 코치마크 넉 장. 지금 화면에 실제로 있는 것만 가리킨다 — 앵커가 없는 장은 coach.js 가
+ * 조용히 건너뛴다. 그래서 비어 있을 때 열면 시나리오 칸과 탭만 나오고, 예시를 본
+ * 뒤에 열면 컷과 상세까지 넉 장이 다 나온다.
+ */
+const BOARD_CARDS = [
+  {
+    head: '왼쪽에서 이야기가 들어옵니다',
+    body: '시나리오를 붙이고 컷으로 분해합니다.\n빈 줄이 컷 경계입니다.\n이야기부터 만들려면 위의 이야기 기획을 씁니다.',
+    spot: ['scenario'],
+  },
+  {
+    head: '가운데가 보드입니다',
+    body: '컷은 씬으로 묶이고 순서대로 시간이 매겨집니다.\n끌어서 순서를 바꿀 수 있습니다.',
+    spot: ['board'],
+  },
+  {
+    head: '오른쪽에서 한 컷을 다룹니다',
+    body: '고른 컷의 그림·대사·카메라·상태가 여기 있습니다.\n그림 위를 눌러 그 자리에 의견을 남길 수도 있습니다.',
+    spot: ['detail'],
+  },
+  {
+    head: '넘어온 일과 지나간 일',
+    body: '내게 배정된 것은 왼쪽 아래 「내 작업」에 모입니다.\n누가 무엇을 했는지는 그 아래 「지나간 일」에 남습니다.',
+    spot: ['mine', 'histbox'],
+    next: '시작하기', skip: '다시 보지 않기',
+  },
+]
+
+const COACH_KEY = 'sb.board.coach.v1'
+
+function openCoach() {
+  // 예시 안내 중에는 막을 덮지 않습니다. 짚은 자리를 사람이 실제로 눌러야 합니다
+  if (guiding()) return
+  coach.start({ cards: BOARD_CARDS, key: COACH_KEY, title: '스토리보드', onDone: render })
+}
+
+/* ══ 지나간 일 ═════════════════════════════════════ */
+
+let histMine = false
+
+/**
+ * 히스토리. 「내 것만」으로 좁히면 이 화면에서 내가 등록한 목록이 되고, 줄을 누르면
+ * 그 컷으로 갑니다 — 이어서 하는 자리입니다.
+ */
+function renderHist() {
+  const box = byId('hist')
+  if (!box) return
+  const list = group(entries(journal, {
+    who: (id) => person(id),
+    actor: histMine ? me.id : null,
+    limit: 40,
+  }))
+  byId('histMine').setAttribute('aria-pressed', String(histMine))
+  paintList(box, list, {
+    showStep: true,
+    none: histMine ? '내가 등록한 것이 아직 없습니다.' : '아직 지나간 일이 없습니다.',
+    onPick: (e) => {
+      // 패널을 가리키는 줄만 컷으로 간다. 회차나 인물 id 를 패널로 찾으면 늘 없다
+      if (e.refKind && e.refKind !== 'panel') { announce('그 줄은 이어서 갈 컷이 없습니다.'); return }
+      const p = state.panels[e.ref]
+      if (!p) { announce('그 컷은 지금 보드에 없습니다.'); return }
+      viewChar = p.charId ?? null
+      if (!p.charId) viewEp = p.epId ?? null
+      selectedId = e.ref
+      save()
+      render()
+      byId('detail')?.scrollIntoView({ block: 'nearest' })
+    },
+  })
+}
+
 function renderBoard() {
   const board = byId('board')
   const list = viewPanels()
@@ -1485,10 +1760,31 @@ function renderBoard() {
     history.replaceState(null, '', `#cut=${selectedId}`)
   }
 
+  /*
+   * 보드가 통째로 비어 있는 것과, 인물 하나에 구도가 없는 것은 다른 상황이다.
+   * 앞쪽만 「처음 오셨나요?」를 띄운다 — 뒤쪽은 이미 판이 있고 한 칸이 빈 것이라
+   * 온보딩이 아니라 짧은 안내가 맞다.
+   *
+   * 아래 keep 루프가 board--empty 를 list 가 찼을 때 지우므로 이 판도 같은 클래스를
+   * 달고 있어야 예시가 들어오는 순간 알아서 사라진다.
+   */
+  // 예시 프로젝트로 들어온 것이면 「처음 오셨나요?」 판을 띄우지 않는다 — 같은 것을
+  // 두 번 묻는 셈이고, render 가 runExample 보다 먼저 지나 한 프레임 깜빡인다
+  const blank = !Object.keys(state.panels).length && !Object.keys(state.chars).length && !demoActive()
   if (!list.length) {
-    setHtml(board, viewChar
-      ? '<div class="board--empty">구도가 없습니다. 아래 버튼으로 추가하세요.</div>'
-      : '<div class="board--empty">컷이 없습니다. 시나리오를 넣고 <b>컷으로 분해</b>를 누르거나 아래 버튼으로 추가하세요.</div>')
+    if (blank) {
+      if (!board.querySelector('.onbslot')) {
+        setHtml(board, '')
+        const slot = document.createElement('div')
+        slot.className = 'board--empty onbslot'
+        slot.append(welcomePanel())
+        board.append(slot)
+      }
+    } else {
+      setHtml(board, viewChar
+        ? '<div class="board--empty">구도가 없습니다. 아래 버튼으로 추가하세요.</div>'
+        : '<div class="board--empty">컷이 없습니다. 시나리오를 넣고 <b>컷으로 분해</b>를 누르거나 아래 버튼으로 추가하세요.</div>')
+    }
   }
 
   const rows = []
@@ -1504,7 +1800,11 @@ function renderBoard() {
   const keep = new Set(rows.map((r) => r.key))
   for (const node of [...board.children]) {
     if (node.classList.contains('adder')) continue
-    if (node.classList.contains('board--empty')) { if (list.length) node.remove(); continue }
+    if (node.classList.contains('board--empty')) {
+      // 예시가 들어오면 「처음 오셨나요?」 판은 스스로 물러난다
+      if (list.length || !blank) node.remove()
+      continue
+    }
     if (!keep.has(node.dataset.id)) node.remove()
   }
 
@@ -2449,6 +2749,7 @@ function navClick(e) {
 byId('charNav').addEventListener('click', navClick)
 byId('boardNav').addEventListener('click', navClick)
 byId('newChar').addEventListener('click', addChar)
+byId('histMine').addEventListener('click', () => { histMine = !histMine; renderHist() })
 
 const laterChar = debounceBy(160)
 const patchChar = (field, value) => {
@@ -2954,29 +3255,9 @@ byId('print').addEventListener('click', () => window.print())
 
 // ── 상단 기능 탭 ─────────────────────────────────────────────────────────────
 // 스토리보드는 이 화면이고, 스토리 디벨롭·대본화는 story-graph.html, 키비주얼은
-// /key-visual/ 로 넘어간다(모두 링크). 대본 번역만 아직 화면이 없어서 보드 자리에
-// 안내를 띄운다 — 그래서 handled 에 board 와 translate 만 남는다. keyvisual 을
-// 여기 넣으면 버튼이 되어 눌러도 이동하지 않고 빈 안내만 뜬다.
-{
-  const soon = byId('soon')
-  const work = document.querySelector('.work')
-  const openNav = (id) => {
-    const later = isSoonTab(id)
-    setHtml(soon, later ? soonMarkup(id) : '')
-    soon.hidden = !later
-    work.hidden = later
-  }
-  // ?tab= 은 아직 화면이 없는 탭에만 쓴다. 나머지는 이 화면의 기본인 스토리보드다
-  const asked = navTabFromSearch(location.search, 'board')
-  const first = isSoonTab(asked) ? asked : 'board'
-  mountNav({
-    mount: byId('navMount'),
-    active: first,
-    handled: ['board', 'translate'],
-    onSelect: openNav,
-  })
-  openNav(first)
-}
+// key-visual.html 로 넘어갑니다(모두 링크). 그래서 handled 에는 board 하나만 남습니다.
+// keyvisual 을 여기 넣으면 버튼이 되어 눌러도 이동하지 않습니다.
+mountNav({ mount: byId('navMount'), active: 'board', handled: ['board'] })
 
 let picking = false
 
@@ -3045,6 +3326,17 @@ async function boot() {
     renderMe()
     pollGpu()
   }
+
+  /*
+   * 작업판 앞에 프로젝트 보드를 세웁니다. 주소에 ?board= 가 있으면(카드를 눌러 왔거나
+   * 링크를 받았으면) 아무것도 뜨지 않고 그대로 지나갑니다.
+   *
+   * 고르면 그 주소로 화면을 다시 여는 것이라, 여기서 await 이 끝나지 않습니다 —
+   * 아래의 net.connect 도 로그 재생도 시작하지 않습니다. 일부러입니다. 어느 보드인지
+   * 모르는 채로 소켓을 열고 판을 세우면, 고른 뒤에 그것을 다 물려야 합니다.
+   */
+  await pickProject({ step: 'board', actor: me?.id, who: (id) => person(id) })
+
   loadRead()
   net = await connect({
     onOp: recvOp,
@@ -3070,8 +3362,12 @@ async function boot() {
   } else {
     load()
   }
-  if (!Object.keys(state.panels).length) for (const op of seedOps()) push(op)
-
+  /*
+   * 예전에는 여기서 보드가 비어 있으면 예시 데이터를 조용히 밀어 넣었다. 그러면 처음
+   * 들어온 사람이 자기가 만들지도 않은 빵집 프로젝트를 보게 되고, 그것이 예시인지
+   * 남이 만든 것인지 알 방법이 없었다. 이제 비어 있으면 비어 있는 대로 두고,
+   * renderBoard 가 「처음 오셨나요?」를 띄운다. 예시는 눌러서 넣는 것이다.
+   */
   pickView()
   save()
   loadVisit()
@@ -3084,6 +3380,23 @@ async function boot() {
   registerMe()
   booted = true
   beat()
+
+  /*
+   * 처음 온 사람에게 코치마크를 연다. 단, 보드가 비어 있으면 열지 않는다 — 그때는
+   * 화면에 「처음 오셨나요?」 판이 있고, 그 판이 두 갈래를 이미 말해 준다. 막을 덮어
+   * 그 판을 가릴 이유가 없다. 예시를 보거나 직접 시작하면 그 뒤에 코치마크가 열린다.
+   */
+  if (demoActive()) {
+    /*
+     * 예시 프로젝트가 이 화면으로 데려온 것이다. 사람이 「예시 보기」를 한 번 더 누를
+     * 이유가 없으므로 바로 시작한다. 판에 이미 컷이 있어도 시작한다 — 앞의 단계에서
+     * 넘어온 길이고, 예시는 예시 판에만 쌓인다(demo.js 의 DEMO_BOARD).
+     */
+    runExample()
+    return
+  }
+
+  if (!coach.seen(COACH_KEY) && Object.keys(state.panels).length) openCoach()
 }
 
 boot()

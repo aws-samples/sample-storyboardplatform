@@ -232,7 +232,7 @@ class GraphStore {
       const prev = this.nodeById.get(n.id)
       if (prev) {
         prev.props = { ...asProps(n.props), ...asProps(prev.props) }
-        g.warnings.push(`${n.name}: 이미 있는 id "${n.id}" — props 만 합쳤다`)
+        g.warnings.push(`${n.name}: 이미 있는 id "${n.id}" — props 만 합쳤습니다`)
         continue
       }
       this.nodes.push(n)
@@ -256,7 +256,7 @@ class GraphStore {
     const added = []
     for (const e of g.edges) {
       const k = edgeKey(e)
-      if (have.has(k)) { g.warnings.push(`${k}: 이미 있는 엣지 — 넣지 않는다`); continue }
+      if (have.has(k)) { g.warnings.push(`${k}: 이미 있는 엣지 — 넣지 않습니다`); continue }
       have.add(k)
       this.suppressed.delete(k)
       if (isDerived(e)) this.given.push(e)
@@ -285,7 +285,7 @@ class GraphStore {
   }
 
   /**
-   * 전체 그래프를 mock/graph.json 모양으로 내보낸다. 명시 엣지가 먼저 온다.
+   * 전체 그래프를 app-walkthrough/data/graph.json 모양으로 내보낸다. 명시 엣지가 먼저 온다.
    * @returns {{nodes: Array, edges: Array}}
    */
   toJSON() {
@@ -331,7 +331,7 @@ class NeptuneGraphStore extends GraphStore {
   /** Neptune 왕복을 줄에 세운다. 실패는 삼키지 않고 flush 가 돌려줄 자리에 쌓는다 */
   queue(label, run) {
     this.pending = this.pending.then(run).catch((err) => {
-      const msg = `Neptune ${label} 실패 — 화면은 그대로지만 저장되지 않았다: ${err.message}`
+      const msg = `Neptune ${label} 실패 — 화면은 그대로지만 저장되지 않았습니다: ${err.message}`
       this.failures.push(msg)
       this.warnings.push(msg)
     })
@@ -413,7 +413,7 @@ function make(src, normalize, net, projectId) {
  * net 을 넘기면 Neptune 을 사실로 두는 저장소가 나온다. 메서드 이름·인자·반환
  * 모양은 인메모리 판과 같고, save()·reload()·flush() 만 더 있다.
  *
- * @param {Object} graphJson - {nodes, edges}. mock/graph.json 과 같은 모양
+ * @param {Object} graphJson - {nodes, edges}. app-walkthrough/data/graph.json 과 같은 모양
  * @param {Object} [opts]
  * @param {boolean} [opts.normalize=true] normalizeGraph 를 한 번 거칠지.
  *        이미 정규화된 데이터면 결과가 같고 경고만 빈 배열로 나온다

@@ -3,7 +3,7 @@
 //
 // 그래프에서 "이야기가 될 만한 구조적 결함"을 패턴으로 찾는다. 결함이란 비밀이
 // 한쪽에만 있거나, 긴장이 해소되지 않았거나, 사건의 값이 치러지지 않은 자리다.
-// 각 탐지기는 GraphStore 하나를 받아 mock/seeds.json 과 같은 모양의 씨앗 배열을
+// 각 탐지기는 GraphStore 하나를 받아 app-walkthrough/data/seeds.json 과 같은 모양의 씨앗 배열을
 // 돌려준다: {probe, score, title, desc, focus}
 //
 // 씨앗이 0개인 것도 정상이다. 관계가 얇은 대본에서는 아무것도 안 나온다.
@@ -560,7 +560,7 @@ const ALL = [
  * @param {Object} store - GraphStore
  * @param {Object} [opts]
  * @param {number} [opts.limit=40] 전체 상한. 긴 대본에서 씨앗이 수십 개 나올 때 자른다
- * @returns {Array<Object>} mock/seeds.json 과 같은 모양의 씨앗 배열
+ * @returns {Array<Object>} app-walkthrough/data/seeds.json 과 같은 모양의 씨앗 배열
  */
 export function findSeeds(store, { limit = 40 } = {}) {
   if (!store || typeof store.getNodes !== 'function') return []

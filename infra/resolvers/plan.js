@@ -4,7 +4,7 @@
 // 느린 모델(Opus 등)을 동기로 기다리면 Execution timeout 이 난다. 그래서
 //   1) 여기서 Lambda 를 Event 로 띄우고 jobId 만 즉시 돌려준다 (Bedrock 을 기다리지 않는다)
 //   2) Lambda 가 Bedrock 을 끝낸 뒤 결과를 Ops 테이블에 적는다
-//   3) 브라우저가 planResult(jobId) 로 받아 간다 — demo/net.js 의 runPlan
+//   3) 브라우저가 planResult(jobId) 로 받아 간다 — app/net.js 의 runPlan
 // invocationType 이 Event 면 ctx.result 는 null 이다. 그래서 jobId 는 stash 로 넘긴다.
 import { util } from '@aws-appsync/utils'
 
