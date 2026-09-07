@@ -36,6 +36,28 @@ const GPU_TYPE = 'g6e.2xlarge'
 // run-instances --dry-run 으로는 확인할 수 없다. 리전에 없는 타입에도
 // "성공했을 것"이라고 답한다. 문법만 검사하며 가용성도 용량도 보지 않는다.
 const GPU_AZS = ['ap-northeast-2a', 'ap-northeast-2b']
+
+/*
+ * GPU 의 AMI. 리전마다 ID 가 다르므로 리전별로 적는다.
+ *
+ * 예전에는 SSM 의 `.../latest/ami-id` 를 그대로 읽었다. 그러면 AWS 가 새 Deep Learning
+ * AMI 를 내는 날 ImageId 가 바뀌고, ImageId 는 교체가 필요한 속성이라 그날의 배포가
+ * *무엇을 고쳤든* GPU 를 새로 만든다. 프런트엔드 한 줄만 바꾼 배포에서도 그렇다.
+ *
+ * 교체의 대가가 크다. 새 인스턴스는 빈 루트 볼륨으로 뜨므로 모델 가중치 약 67GB 를
+ * 다시 받는다. 옛 볼륨은 deleteOnTermination: false 라서 지워지지는 않지만, 아무것에도
+ * 붙지 않은 채 남아 월 $16~27 이 계속 붙는다(200GB gp3).
+ *
+ * 그래서 지금 돌고 있는 이미지를 적어 둔다. AMI 를 올리는 것은 그 자체로 하나의 작업이다.
+ * 올릴 때는 이 값을 바꾸고, 뜬 뒤에 /gen/health 가 답하는지 보고, 떠도는 옛 볼륨을 지운다.
+ *   aws ssm get-parameter --region ap-northeast-2 \
+ *     --name /aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-22.04/latest/ami-id
+ */
+const GPU_AMI = {
+  // Deep Learning Base OSS Nvidia Driver GPU AMI (Ubuntu 22.04) 20260902
+  'ap-northeast-2': 'ami-0998eac84900cf563',
+}
+
 const MODEL = 'chroma'
 const NEPTUNE_VERSION = '1.3.4.0'
 const NEPTUNE_PORT = 8182
@@ -348,10 +370,14 @@ class StoryboardStack extends Stack {
       vpc: net,
       vpcSubnets: gpuSubnets,
       instanceType: new ec2.InstanceType(GPU_TYPE),
-      machineImage: ec2.MachineImage.fromSsmParameter(
-        '/aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-22.04/latest/ami-id',
-        { os: ec2.OperatingSystemType.LINUX },
-      ),
+      // 적어 둔 AMI 를 쓴다(GPU_AMI). 적어 두지 않은 리전에서는 SSM 의 latest 로
+      // 떨어진다. 그 리전은 첫 배포이므로 교체할 인스턴스도 잃을 볼륨도 없다.
+      machineImage: GPU_AMI[this.region]
+        ? ec2.MachineImage.genericLinux({ [this.region]: GPU_AMI[this.region] })
+        : ec2.MachineImage.fromSsmParameter(
+          '/aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-22.04/latest/ami-id',
+          { os: ec2.OperatingSystemType.LINUX },
+        ),
       securityGroup: sg,
       role: gpuRole,
       userData: ec2.UserData.custom(userData),
