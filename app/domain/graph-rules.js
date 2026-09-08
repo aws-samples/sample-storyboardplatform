@@ -141,6 +141,15 @@ export function normalizeGraph(raw, { maxNodes = 300, maxEdges = 900 } = {}) {
     edges.push(edge)
   }
 
+  /*
+   * 여기 남는 말은 데이터를 고치는 사람에게만 뜻이 있다 — "이름 없는 노드를 버립니다" ·
+   * "없는 노드를 가리킵니다. 엣지를 버립니다" 는 모델이 뽑아온 JSON 의 흠이고, 작가·PD 가
+   * 읽어도 할 수 있는 일이 없다. 판에는 통과한 것만 올라가 있으므로 화면은 그것으로 온전하다.
+   * 그래서 warnings 는 콘솔로만 보낸다. 돌려주는 배열은 그대로 두어 부르는 쪽(테스트·빌드
+   * 스크립트)이 세어 볼 수 있게 한다.
+   */
+  if (warnings.length) console.warn(`[graph-rules] 정규화에서 걸린 것 ${warnings.length}건`, warnings)
+
   return { nodes, edges, warnings }
 }
 

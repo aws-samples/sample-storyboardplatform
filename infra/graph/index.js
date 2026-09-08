@@ -21,7 +21,13 @@
 const gremlin = require('gremlin')
 const { BedrockRuntimeClient, ConverseCommand } = require('@aws-sdk/client-bedrock-runtime')
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb')
-const { DynamoDBDocumentClient, PutCommand, QueryCommand } = require('@aws-sdk/lib-dynamodb')
+const {
+  DynamoDBDocumentClient,
+  PutCommand,
+  QueryCommand,
+  BatchWriteCommand,
+  DeleteCommand,
+} = require('@aws-sdk/lib-dynamodb')
 
 const __ = gremlin.process.statics
 const P = gremlin.process.P
@@ -906,8 +912,6 @@ async function navigate(payload) {
 //
 // 그래서 Query → BatchWrite 를 다 지울 때까지 돈다. Neptune 의 그래프도 같은 자리에서
 // 지운다. 브라우저는 이 오퍼레이션 하나만 부르면 된다.
-
-const { QueryCommand, BatchWriteCommand, DeleteCommand } = require('@aws-sdk/lib-dynamodb')
 
 /** BatchWriteItem 한 번에 담을 수 있는 최대. DynamoDB 가 정한 값이다 */
 const BATCH = 25

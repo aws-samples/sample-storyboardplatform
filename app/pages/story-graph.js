@@ -605,7 +605,11 @@ async function generate(run, key, msg) {
   busyLine(msg)
   const onTry = (i, total) => busyLine(i <= 1 ? msg : `다시 시도 중 (${i}/${total})`)
   try {
-    STORIES.set(key, await run(onTry))
+    const st = await run(onTry)
+    // 검증에서 걸린 것은 콘솔로만 남긴다(logWbWarnings 의 이유와 같다). 여기서 한 번만
+    // 적는다 — 분기 칩을 누를 때마다 다시 그려지므로 renderStory 에서 적으면 쌓인다
+    logWbWarnings('분기 생성', st.warnings)
+    STORIES.set(key, st)
     renderStory()
   } catch (err) {
     console.warn('[story-graph] 분기 생성 실패', err)
@@ -640,12 +644,6 @@ const wbCount = (b) => ({
 const wbRaw = (b) => ({
   nodes: b.writeback.nodes, edges: b.writeback.edges, removes: b.writeback.remove_edges,
 })
-
-function warnBlock(warnings) {
-  if (!warnings?.length) return ''
-  return `<details class="warns"><summary>검증 경고 ${warnings.length}건</summary>
-    <ul>${warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></details>`
-}
 
 function freeBox() {
   return `<div class="free-box" data-coach="free">
@@ -692,7 +690,7 @@ function renderStory() {
   if (!st.branches.length) {
     $('storyPanel').innerHTML = `<div class="story-content">
       <div class="err">쓸 수 있는 분기를 받지 못했습니다. 다시 생성해 주세요.</div>
-      ${warnBlock(st.warnings)}${freeBox()}</div>`
+      ${freeBox()}</div>`
     bindFree()
     return
   }
@@ -770,7 +768,6 @@ function renderStory() {
 
       <div class="sec-label">분기 비교</div>
       ${cmp}
-      ${warnBlock(st.warnings)}
       ${freeBox()}
     </div>`
 
@@ -833,7 +830,7 @@ function expandCtx(x) {
 }
 
 /**
- * 세계관 업데이트 점검 결과를 콘솔에 남긴다.
+ * 검증에서 걸린 것을 콘솔에만 남긴다. 추출·분기 생성·세계관 업데이트가 같이 쓴다.
  *
  * 여기 오는 말은 "id 가 없어 xxx 로 만들었습니다" · "어휘에 없는 술어" 처럼 데이터를 고치는
  * 사람에게 뜻이 있는 것이다. 작가·PD 가 읽는 패널에 올리면 무엇을 해야 하는지 알 수 없는
@@ -1606,11 +1603,17 @@ async function extract() {
      * 담깁니다(각 함수가 자기 실패를 삼킵니다).
      */
     await Promise.all([keepGraph(STORE.toJSON()), keepSource(text)])
-    const bad = [...(g.warnings || []), ...(g.conflicts || []).map((c) => `${c.level}: ${c.msg}`)]
-    hint.className = bad.length ? 'warn' : 'hint'
-    hint.innerHTML = bad.length
-      ? `추출했습니다. 걸린 것 ${bad.length}건:<br>${bad.slice(0, 6).map(esc).join('<br>')}`
-      : `추출했습니다. 노드 ${g.nodes.length} · 씨앗 ${SEEDS.length}개.`
+    /*
+     * 걸린 것은 콘솔로만 보냅니다. 예전에는 「추출했습니다. 걸린 것 7건:」 뒤에 정규화가
+     * 남긴 말을 그대로 붙였습니다 — "이름 없는 노드를 버립니다" · "없는 노드를 가리킵니다.
+     * 엣지를 버립니다" 처럼 모델이 준 JSON 의 흠이라, 방금 대본을 넣은 사람은 자기 대본이
+     * 잘못됐다고 읽으면서도 무엇을 고쳐야 하는지 알 수 없었습니다. 버린 것은 판에 없고
+     * 판은 통과한 것만으로 온전하므로, 화면에는 무엇이 생겼는지만 적습니다.
+     */
+    logWbWarnings('그래프 추출',
+      [...(g.warnings || []), ...(g.conflicts || []).map((c) => `${c.level}: ${c.msg}`)])
+    hint.className = 'hint'
+    hint.innerHTML = `추출했습니다. 노드 ${g.nodes.length} · 씨앗 ${SEEDS.length}개.`
   } catch (err) {
     console.warn('[story-graph] 추출 실패', err)
     hint.className = 'err'
