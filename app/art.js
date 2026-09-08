@@ -210,3 +210,60 @@ function render(img, max, q) {
   c.getContext('2d').drawImage(img, 0, 0, c.width, c.height)
   return c.toDataURL('image/jpeg', q)
 }
+
+/*
+ * 얼굴 여럿을 한 장으로 붙인 참조 시트. 두 사람이 나오는 컷이 둘의 얼굴을 함께 물려받습니다.
+ *
+ * 왜 한 장인가: 생성 서버가 기반 이미지를 하나만 받습니다(infra/gpu/server.py 의 Req.init).
+ * 이름은 그림에 적지 않습니다 — 프롬프트가 「글자를 쓰지 마라」로 시작하는데 참조 그림에
+ * 글자가 있으면 그것이 결과에 따라 들어옵니다. 누가 누구인지는 지시문의 이름이 말합니다.
+ *
+ * 세로로 세워 나란히 붙입니다. 인물 구도가 세로(896×1152)라서 그 비율을 그대로 둡니다.
+ * 잘라 채우지 않고 넣기만 합니다. 얼굴이 잘려 나가면 참조할 것이 없어집니다.
+ *
+ * 같은 묶음은 한 번만 만듭니다. 컷을 옮겨 다닐 때마다 다시 그릴 이유가 없습니다.
+ *
+ * @param {string[]} srcs - 얼굴 그림 주소들. data: 도 되고 같은 출처의 경로도 됩니다
+ * @param {number} [h] - 시트 높이. 칸 폭은 이 값의 0.75 입니다
+ * @returns {Promise<string>} data: URL. 캔버스를 읽을 수 없으면 첫 그림 주소 그대로
+ */
+const sheets = new Map()
+export async function faceSheet(srcs, h = 768) {
+  if (!srcs?.length) return null
+  if (srcs.length === 1) return srcs[0]
+  const key = `${h}|${srcs.join('|')}`
+  if (sheets.has(key)) return sheets.get(key)
+
+  const imgs = await Promise.all(srcs.map((src) => new Promise((resolve, reject) => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => resolve(img)
+    img.onerror = () => reject(new Error('참조 이미지를 읽지 못했습니다'))
+    img.src = src
+  })))
+
+  const w = Math.round(h * 0.75)
+  const c = document.createElement('canvas')
+  c.width = w * imgs.length
+  c.height = h
+  const g = c.getContext('2d')
+  g.fillStyle = '#fff'
+  g.fillRect(0, 0, c.width, c.height)
+  imgs.forEach((img, i) => {
+    const s = Math.min(w / img.width, h / img.height)
+    const iw = img.width * s
+    const ih = img.height * s
+    g.drawImage(img, i * w + (w - iw) / 2, (h - ih) / 2, iw, ih)
+  })
+
+  let out
+  try {
+    out = c.toDataURL('image/jpeg', 0.82)
+  } catch {
+    // 다른 출처의 그림이 섞이면 캔버스를 읽을 수 없습니다. 그때는 첫 얼굴 하나로 갑니다
+    return srcs[0]
+  }
+  if (sheets.size > 20) sheets.clear()
+  sheets.set(key, out)
+  return out
+}

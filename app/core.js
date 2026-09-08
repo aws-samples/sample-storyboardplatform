@@ -270,6 +270,33 @@ export function handBackTo(events, panelId, fallback) {
   return fallback
 }
 
+/*
+ * 씬 이름 두 개가 같은 씬을 가리키는지 견주는 열쇠.
+ *
+ * 씬 이름은 두 군데서 온다. 키비주얼 화면은 대본 슬러그를 읽어 "S01 카페 · 밤" 으로
+ * 붙이고(app/key-visual.js 의 opsForBoard), 보드에서 손으로 적은 컷은 "씬 1 · 새벽 거리"
+ * 다. 글자로 견주면 이 둘은 남남이지만 사람이 보면 같은 첫 씬이다. 그래서 번호가
+ * 읽히면 번호만 본다. 번호가 없으면 이름을 통째로 본다.
+ */
+export function sceneKey(name) {
+  const t = String(name || '').trim().replace(/\s+/g, ' ')
+  const m = t.match(/^(?:s|scene|씬)\s*#?\s*0*(\d+)/i)
+  return m ? `s${Number(m[1])}` : t.toLowerCase()
+}
+
+/**
+ * 씬 이름을 번호와 나머지로 가른다. 카드와 씬 머리줄에서 번호를 굵게 세우려고 쓴다.
+ *
+ *   "S01 카페 · 밤"      → {no: 'S01', where: '카페 · 밤'}
+ *   "씬 1 · 새벽 거리"    → {no: '씬 1', where: '새벽 거리'}
+ *   "골목"               → {no: '',     where: '골목'}
+ */
+export function sceneMeta(name) {
+  const t = String(name || '').trim().replace(/\s+/g, ' ')
+  const m = t.match(/^((?:s|scene|씬)\s*#?\s*\d+)\.?\s*[·\-–]?\s*(.*)$/i)
+  return m ? { no: m[1], where: m[2].trim() } : { no: '', where: t }
+}
+
 export function sceneGroups(panels) {
   const out = []
   for (const p of panels) {
@@ -317,6 +344,250 @@ export function splitScenario(text) {
     const camera = CAMERA_HINTS.find(([re]) => re.test(block))?.[1] || 'MS'
     return { action: action || (dialogue ? '' : block), dialogue, camera }
   })
+}
+
+/*
+ * ── 정형 대본을 컷으로 ──────────────────────────────────────────────────────
+ *
+ * splitScenario 는 산문을 빈 줄로 쪼갠다. 그래서 정형 대본을 붙이면 씬 머리줄과
+ * 대사가 전부 지문 한 덩어리로 들어간다. 여기 있는 splitScript 는 대본으로 알아본
+ * 텍스트만 맡아 씬·지문·대사·인물까지 갈라 준다. 못 알아보면 null 을 돌려주고,
+ * 부르는 쪽이 splitScenario 로 떨어진다. splitScenario 는 그대로 둔다 —
+ * app/key-visual.js 가 그 함수의 지금 모양을 물고 있다.
+ *
+ * 받는 세 형식은 story.js 의 SCRIPT_FORMATS 가 내는 것들과 같다. 그래서 보드에서
+ * 뽑은 대본을 다시 붙여도 컷으로 돌아온다.
+ *
+ *   drama     S#3. 카페 / 밤        등장인물: 가온, 노을      가온: 대사
+ *   film      INT. 카페 - NIGHT     (이름만 한 줄, 아래 들여쓴 대사)
+ *   webdrama  [씬 3 - 빵집]         (가온, 노을)             가온: 대사
+ */
+
+/** 씬 머리줄 세 가지. 번호가 없으면 나온 순서로 매긴다 */
+const SCENE_HEADS = [
+  // S#3. 카페 / 밤 · S3 카페 - 밤 · 씬 3. 카페
+  [/^(?:s#|s|scene|씬)\s*#?\s*(\d+)\s*[.)]?\s*(.*)$/i, (m) => ({ no: Number(m[1]), rest: m[2] })],
+  // INT. 카페 - NIGHT · EXT. 골목 - DAY · I/E. 차 안
+  [/^(?:int|ext|i\/e|int\.?\/ext)\.?\s*[-–—]?\s*(.*)$/i, (m) => ({ no: 0, rest: m[1] })],
+  // [씬 3 - 빵집]
+  [/^\[\s*(?:씬|scene|s)?\s*(\d+)?\s*[-–—]?\s*([^\]]*)\]$/i, (m) => ({ no: Number(m[1]) || 0, rest: m[2] })],
+]
+
+/** 씬이 아니고 컷도 아닌 줄. 형식 표시라서 버린다 */
+const SCRIPT_NOISE = /^(?:fade\s*(?:in|out|to)|cut\s*to|dissolve|smash\s*cut|암전|페이드)\b/i
+/** 등장인물 목록 줄. 이름 줄(NAME_LINE)보다 먼저 봐야 한다 */
+const SCRIPT_ROSTER = /^(?:등장인물|등장|인물|cast)\s*[:：]\s*(.*)$/i
+/** 가온: 대사 — 이름에 문장부호가 없어야 한다. 「그는 말했다: …」 를 대사로 읽지 않으려고 */
+const NAME_LINE = /^([^:：.!?…]{1,16})[:：]\s*(.+)$/
+/** (가온, 노을) 한 줄 — webdrama 가 씬 머리줄 다음에 붙이는 등장 표시 */
+const PARENS_ONLY = /^\(([^)]+)\)$/
+
+/**
+ * 컷 수 상한. 대본 한 편을 붙였을 때 컷이 끝없이 늘지 않게 끊는다.
+ * splitScenario 의 12 보다 큰 이유는 정형 대본은 한 편이 통째로 들어오기 때문이다.
+ */
+const SCRIPT_CUT_MAX = 48
+
+/*
+ * 컷 길이 어림. 한국어 대사는 초당 5자쯤 읽힌다. 지문만 있는 컷은 2초로 둔다
+ * (아래 secsOf 의 기본값과 같은 값). 어디까지나 어림이라 컷마다 손으로 고치게 둔다.
+ */
+const CHARS_PER_SEC = 5
+const guessSecs = (dialogue) => (dialogue
+  ? Math.min(12, Math.max(1.5, Math.round((dialogue.length / CHARS_PER_SEC) * 2) / 2))
+  : 2)
+
+const pad2 = (n) => String(n).padStart(2, '0')
+/** 이름 뒤의 지시를 뗀다. 「가온 (놀라며)」 → 「가온」 */
+const bareName = (s) => String(s).replace(/[(（][^)）]*[)）]/g, '').trim()
+const nameList = (s) => String(s).split(/[,，·/]/).map(bareName).filter(Boolean).slice(0, 8)
+
+/**
+ * 정형 대본을 컷으로 나눈다.
+ *
+ * 씬 이름은 키비주얼 화면이 붙이는 모양(`S01 카페 · 밤`)으로 맞춘다. 그래야 붙여 넣은
+ * 대본의 컷과 키비주얼이 그린 씬 그림이 같은 씬으로 묶인다 (아래 sceneKey).
+ *
+ * 컷 경계는 대사다. 대사 앞에 쌓인 지문은 그 대사 컷의 지문이 된다. 대사가 없는 씬은
+ * 씬 하나가 컷 하나다. 우리 대본화 프롬프트가 「한 동작을 한 줄로」 쓰게 하므로 줄마다
+ * 컷을 세우면 되돌려 붙일 때 컷이 열 배로 늘어난다.
+ *
+ * @param {string} text - 붙여 넣은 대본
+ * @returns {?{cuts: Array<{scene, action, dialogue, camera, cast: string[], secs: number}>,
+ *   names: string[]}} 대본으로 보이지 않으면 null
+ */
+export function splitScript(text) {
+  const lines = String(text || '').replace(/\r\n?/g, '\n').split('\n')
+
+  const head = (raw) => {
+    const t = raw.trim()
+    if (!t || SCRIPT_NOISE.test(t)) return null
+    for (const [re, take] of SCENE_HEADS) {
+      const m = t.match(re)
+      // 「INT.」 계열은 뒤에 장소가 있어야 씬으로 본다. 「Intro」 같은 낱말을 막는다
+      if (m && take(m).rest.trim()) return take(m)
+    }
+    return null
+  }
+
+  const cuts = []
+  const names = new Set()
+  let scene = null
+  let sceneNo = 0
+  let roster = []
+  let pending = []
+
+  const flush = (dialogue = '', who = null) => {
+    const action = pending.join(' ').trim()
+    pending = []
+    // 첫 씬 머리줄 앞의 것은 제목이나 표지다. 컷이 아니다
+    if (!scene) return
+    if (!action && !dialogue) return
+    if (cuts.length >= SCRIPT_CUT_MAX) return
+    const cast = who ? [who] : roster.slice()
+    cuts.push({
+      scene: scene || '',
+      action,
+      dialogue,
+      camera: CAMERA_HINTS.find(([re]) => re.test(`${action} ${dialogue}`))?.[1] || (dialogue ? 'MS' : 'WS'),
+      cast,
+      secs: guessSecs(dialogue),
+    })
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i]
+    const t = raw.trim()
+    if (!t) continue
+
+    const h = head(raw)
+    if (h) {
+      flush()
+      sceneNo = h.no || sceneNo + 1
+      // 장소와 시간을 가른다. 「카페 / 밤」 「카페 - NIGHT」 「카페 · 밤」 모두 같게 본다
+      const [place, ...rest] = h.rest.split(/\s*[/·|]\s*|\s+[-–—]\s+/)
+      const time = rest.join(' ').trim()
+      scene = `S${pad2(sceneNo)} ${place.trim()}${time ? ` · ${time}` : ''}`.trim()
+      roster = []
+      continue
+    }
+    if (SCRIPT_NOISE.test(t)) continue
+
+    const rost = t.match(SCRIPT_ROSTER) || (pending.length === 0 && t.match(PARENS_ONLY))
+    if (rost) {
+      roster = nameList(rost[1])
+      for (const n of roster) names.add(n)
+      continue
+    }
+
+    const said = t.match(NAME_LINE)
+    if (said) {
+      const who = bareName(said[1])
+      if (who) names.add(who)
+      flush(said[2].trim(), who || null)
+      continue
+    }
+
+    /*
+     * film 의 대사: 이름만 한 줄에 있고 그 아래 들여쓴 줄이 대사다. 이름 줄은 짧고
+     * 문장부호로 끝나지 않는다. localScript 가 내는 모양이라 되돌려 붙이는 길이 열린다.
+     */
+    const next = lines[i + 1]
+    if (/^\s{2,}\S/.test(raw) && next && /^\s{2,}\S/.test(next)
+      && t.length <= 24 && !/[.!?…,]$/.test(t)) {
+      const who = bareName(t)
+      if (who) names.add(who)
+      const say = []
+      while (i + 1 < lines.length && /^\s{2,}\S/.test(lines[i + 1])) say.push(lines[++i].trim())
+      flush(say.join(' '), who || null)
+      continue
+    }
+
+    pending.push(t)
+  }
+  flush()
+
+  // 씬 머리줄이 하나도 없었으면 대본이 아니다. 산문으로 되돌려 준다
+  if (!scene || !cuts.length) return null
+  return { cuts, names: [...names] }
+}
+
+/*
+ * ── 대본을 시나리오로 ───────────────────────────────────────────────────────
+ *
+ * 대본화에서 만든 대본을 보드의 시나리오 칸에 그대로 붙이면 대본 한 편이 통째로 들어온다.
+ * 시나리오 칸이 원하는 것은 그것이 아니라 「무엇이 보이는가」 를 씬 순서대로 적은 짧은 글이다.
+ * 여기 있는 함수가 대본을 그 모양으로 줄인다. Bedrock 이 있으면 보드가 모델에 맡기고
+ * (board.js 의 summarizeScript), 없으면 이 함수가 뼈대를 만든다.
+ *
+ * 줄이는 규칙은 셋이다.
+ *   1. 씬 머리줄은 살린다. 키비주얼과 같은 모양이라 그 씬 그림이 컷의 기반이 된다
+ *   2. 지문은 이어 붙인다. 씬 하나가 한 문단이 된다
+ *   3. 대사는 씬마다 하나만, 「」 로 감아서 남긴다. 「이름: 대사」 로 두면 다시 대사 컷이
+ *      되어 버려서 줄인 뜻이 없어진다
+ */
+
+/** 씬 하나에 허용하는 글자 수. 넘으면 문장 경계에서 끊는다 */
+const SCENE_CHARS = 150
+/** 시나리오 전체 글자 수 상한. 시나리오 칸은 읽고 고치는 자리라 길면 쓸모가 없다 */
+const SCENARIO_CHARS = 1500
+
+/** 문장 경계에서 자른다. 자를 자리가 없으면 그냥 끊고 줄임표를 붙인다 */
+function clipAt(text, max) {
+  const s = String(text || '').trim()
+  if (s.length <= max) return s
+  const cut = s.slice(0, max)
+  const stop = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '))
+  return stop > max * 0.4 ? cut.slice(0, stop + 1) : `${cut.trim()}…`
+}
+
+/**
+ * 대본을 시나리오 산문으로 줄인다.
+ *
+ * @param {string} text - 대본 원문
+ * @param {object} [opts]
+ * @param {number} [opts.max=1500] 전체 글자 수 상한
+ * @returns {string} 씬마다 한 문단인 시나리오. 대본으로 안 읽히면 빈 문자열
+ */
+export function scenarioFromScript(text, opts = {}) {
+  const got = splitScript(text)
+  if (!got) return ''
+  const max = Number(opts.max) > 0 ? Number(opts.max) : SCENARIO_CHARS
+
+  // 씬 번호가 같은 컷을 한 문단으로 모은다 (sceneKey)
+  const scenes = []
+  for (const cut of got.cuts) {
+    const key = sceneKey(cut.scene)
+    const last = scenes.at(-1)
+    if (last && last.key === key) {
+      if (cut.action) last.action.push(cut.action)
+      if (cut.dialogue) last.said.push({ who: cut.cast[0] || '', line: cut.dialogue })
+      continue
+    }
+    scenes.push({
+      key,
+      name: cut.scene,
+      action: cut.action ? [cut.action] : [],
+      said: cut.dialogue ? [{ who: cut.cast[0] || '', line: cut.dialogue }] : [],
+    })
+  }
+
+  const out = []
+  let used = 0
+  for (const s of scenes) {
+    const say = s.said[0]
+    const body = clipAt([
+      s.action.join(' '),
+      // 씬의 뜻을 쥐고 있는 대사 한 줄만 남긴다. 여럿이면 첫 줄이 씬을 여는 말이다
+      say ? `${say.who ? `${say.who}${josa(say.who, '이', '가')} ` : ''}「${clipAt(say.line, 40)}」라고 말한다.` : '',
+    ].filter(Boolean).join(' '), SCENE_CHARS)
+    const para = `${s.name}\n${body || '(지문 없음)'}`
+    // 상한을 넘기면 거기서 멈춘다. 반쪽 문단을 남기지 않는다
+    if (used + para.length > max) break
+    out.push(para)
+    used += para.length + 2
+  }
+  return out.join('\n\n')
 }
 
 export const CAMERAS = ['WS', 'MS', 'CU', 'ECU', 'MCU', 'OTS', 'POV',

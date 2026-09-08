@@ -187,6 +187,33 @@ const CSS = `
   font-size: 12.5px; border-left: 1px solid var(--sb-line, #e4e7ec);
 }
 .navhome:hover { color: var(--sb-accent, #1a56db); }
+
+/*
+ * 권한 관리. 홈과 같은 오른쪽 묶음입니다. perm.js 가 아니라 여기 두는 이유는, 그
+ * 파일은 눌러야 불려 오는데 단추는 처음부터 보여야 하기 때문입니다.
+ */
+.navperm {
+  display: flex; align-items: center; margin-left: auto; padding: 0 12px;
+  background: none; border: 0; border-left: 1px solid var(--sb-line, #e4e7ec);
+  font: inherit; font-size: 12.5px; white-space: nowrap; cursor: pointer;
+  color: var(--sb-ink-3, #767f8c);
+}
+.navperm:hover { color: var(--sb-accent, #1a56db); }
+/* 권한 단추가 오른쪽 자리를 잡았으니 뒤따르는 것들은 그 옆에 붙습니다 */
+.navperm ~ .navhome, .navperm ~ .navarch { margin-left: 0; }
+
+/*
+ * 아키텍처. 오른쪽 묶음의 맨 앞이고 작게 둡니다. 일하는 단추가 아니라 설명이라서,
+ * 눈에 먼저 들어오면 다섯 번째 작업 단계로 읽힙니다.
+ */
+.navarch {
+  display: flex; align-items: center; gap: 4px; margin-left: auto; padding: 0 10px;
+  background: none; border: 0; border-left: 1px solid var(--sb-line, #e4e7ec);
+  font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer;
+  color: var(--sb-ink-3, #767f8c); opacity: .8;
+}
+.navarch:hover { color: var(--sb-accent, #1a56db); opacity: 1; }
+.navarch ~ .navperm, .navarch ~ .navhome { margin-left: 0; }
 `
 
 let styled = false
@@ -211,11 +238,15 @@ function injectCss(doc) {
  * @param {boolean} o.home - 오른쪽 끝에 홈으로 가는 길을 둡니다
  * @param {string} o.board - 고른 프로젝트. 다른 화면으로 가는 링크에 ?board= 로 달립니다.
  *        기본값은 주소에서 읽습니다. 화면마다 따로 챙기지 않아도 프로젝트가 따라갑니다
+ * @param {boolean} o.arch - 오른쪽 끝에 「아키텍처」를 둡니다
+ * @param {boolean} o.perm - 오른쪽 끝에 「권한 관리」를 둡니다
+ * @param {() => void} o.onPerm - 그것을 눌렀을 때. 없으면 perm.js 의 창을 띄웁니다.
+ *        보드는 자기 관리 화면 안에 같은 판을 들고 있어서 이것을 넘깁니다
  * @returns {{ setActive: (id: string) => void, active: () => string }}
  */
 export function mountNav({
   mount, active = 'develop', handled = [], onSelect = () => {},
-  slim = true, home = true, board = boardParam(),
+  slim = true, home = true, board = boardParam(), arch = true, perm = true, onPerm = null,
 }) {
   const doc = mount.ownerDocument
   injectCss(doc)
@@ -245,6 +276,49 @@ export function mountNav({
     }
     els.set(t.id, el)
     nav.appendChild(el)
+  }
+
+  /*
+   * 권한 관리. 탭이 아니라 오른쪽 끝의 단추입니다.
+   *
+   * 감독이 어느 화면에서 일하다가도 권한을 보고 고칠 수 있어야 해서 네 화면 모두에
+   * 답니다. 탭 바가 네 화면의 공통 부품이므로 여기 한 곳에 달면 넷이 함께 얻습니다.
+   *
+   * 역할을 보고 감추지 않습니다. 이 바는 로그인이 끝나기 전에 붙는 화면도 있어서
+   * 그때 역할을 물으면 아직 없습니다. 대신 판 자체가 감독·관리자가 아니면 읽기 전용
+   * 으로 열립니다. 권한이 왜 막혔는지는 막힌 사람도 봐야 하는 것이기도 합니다.
+   *
+   * perm.js 는 눌렀을 때 불러옵니다. 보드 밖의 세 화면은 열지 않으면 쓰지 않는
+   * 파일이라 처음 그리는 길에 얹지 않습니다.
+   */
+  /*
+   * 아키텍처. 「이게 어디서 도는 겁니까」의 답을 화면 안에 둡니다.
+   *
+   * 탭이 아니라 오른쪽 끝의 작은 단추입니다. 네 단계와 나란히 두면 다섯 번째 작업
+   * 단계로 읽히는데, 이것은 일이 아니라 설명입니다. arch.js 도 눌렀을 때 불러옵니다.
+   */
+  if (arch) {
+    const a = doc.createElement('button')
+    a.type = 'button'
+    a.className = 'navarch'
+    a.dataset.navArch = '1'
+    a.title = '아키텍처 · 이 데모가 무엇으로 도는지'
+    a.innerHTML = '<span aria-hidden="true">⌗</span><span>아키텍처</span>'
+    a.onclick = () => import('./arch.js').then((m) => m.openArch())
+    nav.appendChild(a)
+  }
+
+  if (perm) {
+    const p = doc.createElement('button')
+    p.type = 'button'
+    p.className = 'navperm'
+    p.dataset.navPerm = '1'
+    p.title = '권한 관리 · 역할과 사람마다 무엇을 할 수 있는지'
+    p.textContent = '권한 관리'
+    p.onclick = () => (onPerm
+      ? onPerm()
+      : import('./perm.js').then((m) => m.openPerm({ board: board || undefined })))
+    nav.appendChild(p)
   }
 
   if (home) {

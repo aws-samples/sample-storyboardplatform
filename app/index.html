@@ -201,6 +201,19 @@
     border-radius: var(--sb-r-lg); padding: 14px 15px; overflow-x: auto;
   }
 
+  /* 커넥터 한 칸. 내용은 app/home.js 가 넣습니다 */
+  .conn {
+    background: var(--sb-panel); border: 1px solid var(--sb-line);
+    border-radius: var(--sb-r-lg); padding: 14px 15px; margin-bottom: 12px;
+  }
+  .conn__row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px }
+  .conn__row input {
+    flex: 1 1 240px; min-width: 0; font: inherit; font-family: var(--sb-mono); font-size: 12px;
+    padding: 7px 9px; border: 1px solid var(--sb-line); border-radius: var(--sb-r);
+    background: var(--sb-bg); color: var(--sb-ink);
+  }
+  .conn [data-bad="1"] { color: var(--sb-bad, #b4232a) }
+
   /* 처음 온 사람에게 보이는 판. 모양은 app/onboard.js 가 넣습니다 */
   .onbslot { margin-top: 26px }
   .onbslot[hidden] { display: none }
@@ -378,6 +391,20 @@
         </h2>
         <div class="tabbox" id="act" data-coach="actbox"></div>
         <p class="view__note" id="actNote"></p>
+      </section>
+
+      <!-- ④ 모델 커넥터 ─ 관리자만. 왼쪽 메뉴에도 관리자에게만 뜹니다 -->
+      <section class="view" id="viewConn" hidden aria-labelledby="connH">
+        <div class="view__eyebrow">모델 커넥터</div>
+        <h1 class="view__h" id="connH">밖의 모델 붙이기</h1>
+        <p class="view__p">
+          API 키를 넣으면 그 제공자의 이미지·영상 모델이 스토리보드의 모델 목록에 뜹니다.
+          키는 넣을 때 한 번 실제로 찔러 보고, 통과한 것만 서버에 저장합니다. 저장된 키는
+          다시 내려오지 않습니다 — 넣은 직후에만 끝 네 글자를 보여드리고, 그 뒤로는 넣은
+          시각만 남습니다.
+        </p>
+        <div id="connList"></div>
+        <p class="view__note" id="connNote"></p>
       </section>
 
       <!-- 처음 온 사람에게 뜨는 판. 활동 기록이 하나도 없을 때만 보입니다 -->

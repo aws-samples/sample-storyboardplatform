@@ -1,0 +1,14 @@
+{
+  "name": "storyboard-connector",
+  "version": "1.0.0",
+  "private": true,
+  "description": "커넥터 Lambda. 배포 전에 이 디렉터리에서 npm install 을 한 번 돌려야 한다. CDK 가 디렉터리를 그대로 올린다.",
+  "main": "index.js",
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.700.0",
+    "@aws-sdk/client-dynamodb": "^3.700.0",
+    "@aws-sdk/client-s3": "^3.700.0",
+    "@aws-sdk/client-ssm": "^3.700.0",
+    "@aws-sdk/lib-dynamodb": "^3.700.0"
+  }
+}

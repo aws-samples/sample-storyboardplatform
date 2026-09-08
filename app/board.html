@@ -180,6 +180,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
   box-shadow: var(--sb-sh-lg);
   animation: toastIn .22s cubic-bezier(.2,1.3,.4,1);
 }
+/* 권한 때문에 막혔다는 알림. 남이 한 일이 아니라 지금 내가 못 하는 것이라 붉은 띠로 가른다 */
+.toast[data-tone="warn"] { border-left-color: var(--stamp-red); }
+.toast__ask { display: block; margin-top: 3px; font-family: var(--mono); font-size: 10px; color: var(--stamp-red); }
 .toast__top { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
 .toast__who { font-weight: 600; }
 .toast__act {
@@ -451,6 +454,17 @@ dialog#keys::backdrop { background: rgba(17,19,24,.5); }
 .cut__no { font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: .1em; }
 .cut__cam { font-family: var(--mono); font-size: 9.5px; color: var(--pencil-2); border: 1px solid var(--edge); padding: 1px 4px; }
 .cut__ver { font-family: var(--mono); font-size: 9.5px; color: var(--pencil-2); margin-left: auto; }
+/*
+ * 이 컷이 어디서 왔는지 (board.js 의 ORIGINS). 키비주얼에서 온 것만 파랑으로 세운다.
+ * 그 컷에는 이미 그림이 있어서 옆 컷들이 그것을 기반으로 삼을 수 있다는 표시다.
+ */
+.cut__from {
+  font-family: var(--mono); font-size: 9px; letter-spacing: .06em;
+  color: var(--pencil-2); border: 1px solid var(--edge); padding: 1px 4px;
+}
+.cut__from[data-from="keyvisual"] {
+  color: var(--stamp-blue); border-color: var(--sb-accent-line);
+}
 .cut__body { padding: 6px 10px 10px; }
 .cut__action { font-size: 12.5px; line-height: 1.5; margin: 0; color: var(--ink); }
 .cut__dialogue {
@@ -595,6 +609,12 @@ dialog#keys::backdrop { background: rgba(17,19,24,.5); }
 .gen__lab { color: var(--pencil); flex: 0 0 auto; }
 .gen__val { color: var(--ink); font-size: 10.5px; min-width: 34px; text-align: right; }
 .gen__row input[type=range] { flex: 1; min-width: 90px; accent-color: var(--ink); }
+/* 고른 기반 이미지 미리보기. 이름만 있으면 무엇을 물려받는지 안 보인다 */
+.gen__ref { margin-top: 8px; border: 1px solid var(--edge); background: var(--paper-2); }
+.gen__ref img, .gen__ref video { display: block; width: 100%; max-height: 128px; object-fit: cover; }
+/* 인물 여럿을 함께 참조할 때. 실제로 보내는 그림도 이렇게 나란히 붙인 한 장이다 */
+.gen__ref--many { display: flex; gap: 1px; }
+.gen__ref--many img { width: auto; flex: 1 1 0; min-width: 0; object-fit: contain; }
 .chip {
   font-size: 11.5px; background: var(--paper); border: 1px solid var(--edge);
   border-radius: 12px; padding: 3px 10px 2px; cursor: pointer; color: var(--pencil);
@@ -624,7 +644,19 @@ dialog#keys::backdrop { background: rgba(17,19,24,.5); }
 }
 .scene:not(:first-child) { margin-top: 12px; }
 .scene__name { font-size: 13.5px; font-weight: 600; letter-spacing: -.01em; }
+.scene__where { color: var(--pencil); }
 .scene__meta { color: var(--pencil-2); margin-left: auto; }
+/*
+ * 씬 머리줄에 세우는 그 씬의 키 비주얼. .scene 이 baseline 정렬이라 그림만 가운데로
+ * 내린다. 작게 둔다. 이 줄의 주인은 씬 이름이고 그림은 어느 씬인지 알아보는 표다.
+ */
+.scene__kv {
+  flex: 0 0 auto; align-self: center; padding: 0; cursor: pointer;
+  width: 54px; height: 30px; overflow: hidden;
+  background: var(--paper-2); border: 1px solid var(--edge);
+}
+.scene__kv:hover { border-color: var(--stamp-blue); }
+.scene__kv img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 .tl { margin-bottom: 20px; }
 .tl__lab { color: var(--pencil-2); display: flex; align-items: center; gap: 9px; margin-bottom: 6px; }
@@ -939,6 +971,34 @@ dialog.plan { width: min(680px, 95vw); }
 .plan__chars b { margin-right: 6px; }
 .plan__meta { display: block; font-family: var(--mono); font-size: 9.5px; color: var(--pencil-2); }
 
+/*
+ * 뽑아낸 대본. 들여쓰기와 빈 줄이 대본 형식 그 자체라 pre 로 둔다. 창을 넘기지 않게
+ * 높이를 묶고 안에서 굴린다.
+ */
+.sc__text {
+  margin: 12px 0 0; padding: 12px; max-height: 46vh; overflow: auto;
+  background: var(--paper); border: 1px solid var(--edge); border-radius: var(--r);
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.75;
+  white-space: pre-wrap; color: var(--ink);
+}
+
+/*
+ * 대본 불러오기 창의 두 칸. 위는 받은 대본 원문, 아래는 줄인 시나리오다. 둘 다 손으로
+ * 고칠 수 있어야 해서 pre 가 아니라 textarea 다.
+ */
+.imp__raw, .imp__out {
+  width: 100%; margin: 8px 0 0; padding: 10px 12px; resize: vertical;
+  background: var(--paper); border: 1px solid var(--edge); border-radius: var(--r);
+  font-size: 12.5px; line-height: 1.7; color: var(--ink);
+}
+.imp__raw { height: 108px; font-family: var(--mono); font-size: 11.5px; }
+.imp__out { height: 200px; }
+
+/*
+ * 권한 표의 모양은 perm.js 가 들고 있습니다. 같은 판이 스토리 디벨롭·대본화·키비주얼
+ * 에서도 열려서, 그 화면들이 이 파일의 CSS 를 베끼지 않아도 되게 옮겼습니다.
+ */
+
 @media (max-width: 1180px) {
   body { overflow: auto; }
   .work { grid-template-columns: 1fr; }
@@ -995,7 +1055,12 @@ dialog.plan { width: min(680px, 95vw); }
     <button class="btn btn--ghost" id="hold" aria-pressed="false" title="남의 변경을 잠시 멈춰둡니다. 멈춘 동안의 변경은 모아두고 다시 누르면 한꺼번에 적용합니다.">
       <span class="mono" id="holdTxt">실시간</span>
     </button>
-    <button class="btn btn--ghost" id="adminBtn" aria-haspopup="dialog" aria-expanded="false" hidden title="업무 배정과 팀 현황을 한 화면에서 봅니다"><span class="mono">관리</span></button>
+    <!--
+      관리. 로그·기여도·권한 세 장이 여기 들어 있습니다. 「권한 관리」라는 따로 된 단추가
+      있었는데 같은 질문(누가 무엇을 하는가)의 답이 두 곳에 갈라져 있어 합쳤습니다.
+      탭 바 오른쪽의 「권한 관리」가 이 화면의 권한 장으로 바로 옵니다(nav-tabs.js).
+    -->
+    <button class="btn btn--ghost" id="adminBtn" aria-haspopup="dialog" aria-expanded="false" title="로그 · 기여도 · 권한"><span class="mono">관리</span></button>
     <button class="btn btn--ghost" id="print" title="브라우저 인쇄로 PDF를 만듭니다"><span class="mono">인쇄 · PDF</span></button>
     <div class="peers" id="peers"></div>
     <div class="bellwrap">
@@ -1030,13 +1095,22 @@ dialog.plan { width: min(680px, 95vw); }
     <a class="btn btn--ghost btn--wide" id="graphBtn" href="./story-graph.html" target="_blank" rel="noopener" hidden
        style="display:block; margin-top:6px; text-align:center; text-decoration:none"
        title="대본에서 관계 그래프를 뽑고, 씨앗과 분기를 봅니다">관계 그래프로 디벨롭 ↗</a>
+    <button class="btn btn--ghost btn--wide" id="scriptBtn" aria-haspopup="dialog" aria-expanded="false" hidden
+            style="margin-top:6px" title="지금 회차의 컷을 정식 대본 형식으로 옮깁니다">컷을 대본으로</button>
 
     <div id="scriptBlock">
       <h2 class="mono h" style="margin-top:22px">시나리오</h2>
       <textarea id="scenario" spellcheck="false" data-coach="scenario"></textarea>
       <button class="btn btn--solid" id="breakdown">컷으로 분해</button>
-      <p class="hint">빈 줄을 기준으로 컷을 나눕니다. 나눈 뒤 컷마다 화면 설명·대사·카메라를 고칠 수 있습니다.
-        이야기부터 만들려면 위의 <b>이야기 기획</b>을 씁니다.</p>
+      <button class="btn btn--line" id="importBtn" aria-haspopup="dialog" aria-expanded="false" hidden
+              style="margin-left:6px" title="대본화에서 받은 대본을 시나리오로 줄여 넣습니다">대본 불러오기</button>
+      <!--
+        이 문구는 board.js 의 renderBreakdown 이 다시 씁니다. 붙여 넣은 것이 정형 대본이면
+        누르기 전에 씬·컷·인물 수를 보여줍니다. 여기 적힌 것은 아무것도 안 붙인 처음 모양입니다.
+      -->
+      <p class="hint" id="breakdownHint">빈 줄을 기준으로 컷을 나눕니다. 나눈 뒤 컷마다 화면 설명·대사·카메라를 고칠 수 있습니다.
+        이야기부터 만들려면 위의 <b>이야기 기획</b>을 씁니다.
+        <b>정형 대본</b>(S#·INT./EXT.·「이름: 대사」)을 붙이면 씬과 대사까지 알아서 갈라 붙입니다.</p>
     </div>
 
     <div id="charMeta" hidden>
@@ -1094,12 +1168,22 @@ dialog.plan { width: min(680px, 95vw); }
   </dl>
   <form method="dialog"><button class="btn btn--solid"><span class="mono">닫기</span></button></form>
 </dialog>
+<!--
+  관리. 세 장입니다.
+    로그   이 판에서 무슨 일이 있었는지. 사람으로 좁혀 볼 수 있습니다
+    기여도 누가 얼마나 들고 있고 얼마를 끝냈는지
+    권한   역할과 사람마다 무엇을 할 수 있는지. 감독·관리자는 고치고, 나머지는 왜 막혔는지 봅니다
+
+  권한이 따로 된 창(#perm)이었는데 「관리」와 묻는 것이 같아서 한 창으로 합쳤습니다.
+  로그·기여도는 관리 권한이 있어야 보이고, 권한 장은 누구에게나 열립니다.
+-->
 <dialog class="adm" id="admin" aria-label="관리 화면">
   <header class="adm__bar">
     <h2 class="mono">관리</h2>
     <div class="adm__tabs" role="group" aria-label="관리 화면 탭">
-      <button class="adm__tab" data-tab="assign">업무 배정</button>
-      <button class="adm__tab" data-tab="team">팀 현황</button>
+      <button class="adm__tab" data-tab="log">로그</button>
+      <button class="adm__tab" data-tab="credit">기여도</button>
+      <button class="adm__tab" data-tab="perm">권한</button>
     </div>
     <button class="btn btn--line" id="admClose"><span class="mono">닫기</span></button>
   </header>
@@ -1111,6 +1195,29 @@ dialog.plan { width: min(680px, 95vw); }
     <button class="btn btn--line" id="planClose"><span class="mono">닫기</span></button>
   </header>
   <div class="adm__body" id="planBody"></div>
+</dialog>
+<!--
+  컷을 대본으로. 대본을 쓰는 일 자체는 story.js 의 planScript 가 하고, 이 창은 형식을
+  고르고 결과를 보여주는 자리다. 대본화 화면과 같은 엔진을 보드의 컷에 붙인다.
+-->
+<dialog class="adm plan" id="script" aria-label="컷을 대본으로">
+  <header class="adm__bar">
+    <h2 class="mono">컷을 대본으로</h2>
+    <button class="btn btn--line" id="scriptClose"><span class="mono">닫기</span></button>
+  </header>
+  <div class="adm__body" id="scriptBody"></div>
+</dialog>
+
+<!--
+  대본 불러오기. 대본화 화면은 만든 대본을 저장하지 않으므로(화면 안 변수와 복사·다운로드가
+  전부다) 이 창이 파일과 붙여넣기를 받는다. 받은 대본은 시나리오로 줄여서 넣는다.
+-->
+<dialog class="adm plan" id="imp" aria-label="대본 불러오기">
+  <header class="adm__bar">
+    <h2 class="mono">대본 불러오기</h2>
+    <button class="btn btn--line" id="impClose"><span class="mono">닫기</span></button>
+  </header>
+  <div class="adm__body" id="impBody"></div>
 </dialog>
 
 <input type="file" accept="image/*" hidden id="file">

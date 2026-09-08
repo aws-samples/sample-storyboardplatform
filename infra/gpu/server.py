@@ -33,6 +33,13 @@ MODELS = {
         repo="lodestones/Chroma1-HD", label="Chroma1-HD", note="정밀 · 마감",
         family="chroma", steps=26, guide=4.0, guide_ref=4.0, gb=26,
     ),
+    # 주의: SD 3.5 는 Apache-2.0 이 아니라 Stability Community License 다.
+    # gated 저장소라서 HF 토큰이 있어야 내려온다. 토큰은 커넥터 화면에서 넣고
+    # hf_token() 이 SSM 에서 읽는다. 없으면 이 모델만 못 올라가고 사유가 화면에 뜬다.
+    "sd35": dict(
+        repo="stabilityai/stable-diffusion-3.5-large", label="SD 3.5 Large", note="정밀 · SD 계열",
+        family="sd3", steps=28, guide=3.5, guide_ref=3.5, gb=28, gated=True,
+    ),
 }
 _env = os.environ.get("SB_MODEL", "chroma")
 DEFAULT = _env if _env in MODELS else next(
@@ -86,7 +93,38 @@ def _flux2(spec: dict) -> dict:
     p.set_progress_bar_config(disable=True)
     return {"txt": p, "ref": p}
 
-FAMILY = {"chroma": _chroma, "flux2": _flux2}
+def _sd3(spec: dict) -> dict:
+    import torch
+    from diffusers import StableDiffusion3Img2ImgPipeline, StableDiffusion3Pipeline
+
+    p = StableDiffusion3Pipeline.from_pretrained(spec["repo"], torch_dtype=torch.bfloat16).to("cuda")
+    q = StableDiffusion3Img2ImgPipeline(**p.components)
+    for x in (p, q):
+        x.set_progress_bar_config(disable=True)
+    return {"txt": p, "ref": q}
+
+FAMILY = {"chroma": _chroma, "flux2": _flux2, "sd3": _sd3}
+
+# 커넥터가 SSM SecureString 에 넣어 둔 Hugging Face 키. 게이트된 저장소를 받을 때만 쓴다.
+HF_PARAM = os.environ.get("SB_HF_PARAM", "/storyboard/connector/huggingface")
+_hf: str | None = None
+
+def hf_token() -> str:
+    """부팅 때 한 번 읽지 않는다. 커넥터로 키를 나중에 넣거나 갈아도 재부팅 없이 먹어야 한다."""
+    global _hf
+    if _hf is None:
+        try:
+            import json
+
+            import boto3
+
+            raw = boto3.client("ssm", region_name=REGION).get_parameter(
+                Name=HF_PARAM, WithDecryption=True)["Parameter"]["Value"]
+            # 커넥터는 JSON({"key": …})으로 적는다. 손으로 넣은 평문 토큰도 그대로 받는다
+            _hf = (json.loads(raw).get("key", "") if raw.lstrip().startswith("{") else raw).strip()
+        except Exception:
+            _hf = ""
+    return _hf
 
 def _unload() -> None:
     global pipes, cur
@@ -107,12 +145,20 @@ def _load(mid: str) -> None:
     if cur == mid:
         loading = None
         return
+    global _hf
     try:
+        if MODELS[mid].get("gated"):
+            tok = hf_token()
+            if not tok:
+                load_error = f"{mid}: Hugging Face 키가 없습니다. 커넥터에서 키를 넣어주세요"
+                return
+            os.environ["HF_TOKEN"] = tok
         _unload()
         pipes = FAMILY[MODELS[mid]["family"]](MODELS[mid])
         cur, load_error = mid, None
     except Exception as e:
         load_error = f"{mid}: {type(e).__name__}: {e}"
+        _hf = None  # 키를 갈아 끼웠을 수 있다. 다음 시도에서 SSM 을 다시 읽는다
     finally:
         if loading == mid:
             loading = None
@@ -166,8 +212,13 @@ def en(text: str) -> str:
     if text not in _en:
         try:
             import boto3
+            from botocore.config import Config
 
-            out = boto3.client("bedrock-runtime", region_name=REGION).converse(
+            # 짧게 끊는다. 이 호출이 매달리면 그림이 한 장도 안 나온다. 못 옮기면 원문으로 간다
+            out = boto3.client(
+                "bedrock-runtime", region_name=REGION,
+                config=Config(connect_timeout=4, read_timeout=20, retries={"max_attempts": 2}),
+            ).converse(
                 modelId=EN_MODEL,
                 system=[{"text": EN_SYSTEM}],
                 messages=[{"role": "user", "content": [{"text": text[:900]}]}],
@@ -232,7 +283,7 @@ def build(spec: dict, req: Req) -> str:
     pre = NOTEXT if spec["family"] == "flux2" else ""
     if not req.init:
         return f"{pre}{head}{body}. {STYLE}"
-    if spec["family"] == "chroma":
+    if spec["family"] in ("chroma", "sd3"):
         return f"{head}{FINISH}{body}. {STYLE}"
     return f"{pre}{KEEP}{head}{body}. {STYLE}"
 
@@ -240,7 +291,7 @@ def args_for(spec: dict, prompt: str, w: int, h: int, steps: int, guide: float,
              g, ref: Image.Image | None, strength: float) -> dict:
     fam = spec["family"]
     a = dict(prompt=prompt, num_inference_steps=steps, width=w, height=h, generator=g)
-    if fam == "chroma":
+    if fam in ("chroma", "sd3"):
         a.update(negative_prompt=NEG, guidance_scale=guide)
         if ref is not None:
             a.update(image=lamp(ref.resize((w, h), Image.LANCZOS)), strength=clamp(strength))
@@ -259,11 +310,14 @@ def run(req: Req, seed: int) -> Image.Image:
     ref = decode(req.init).convert("RGB") if req.init else None
     steps = min(int(req.steps or spec["steps"]), MAX_STEPS)
     guide = float(req.guidance or (spec["guide_ref"] if ref is not None else spec["guide"]))
+    # 프롬프트를 잠금 밖에서 먼저 만든다. 한국어면 build 안에서 Bedrock 을 부르는데,
+    # 그 네트워크 대기를 잠금 안에서 하면 그 시간만큼 팀 전원의 생성이 밀린다
+    prompt = build(spec, req)
     with gpu:
         if cur != mid:
             raise HTTPException(503, f"{spec['label']}을 올리는 중입니다. 잠시 뒤 다시 눌러주세요.")
         g = torch.Generator("cuda").manual_seed(seed)
-        a = args_for(spec, build(spec, req), w, h, steps, guide, g, ref, req.strength)
+        a = args_for(spec, prompt, w, h, steps, guide, g, ref, req.strength)
         return pipes["ref" if ref is not None else "txt"](**a).images[0]
 
 @app.post("/gen")
@@ -317,7 +371,7 @@ def health():
         "model": MODELS[cur]["label"] if cur else None, "modelId": cur,
         "loading": loading, "wait": wait_s(loading) if loading else 0,
         "models": [{"id": k, "label": v["label"], "note": v["note"], "wait": wait_s(k),
-                    "strength": v["family"] == "chroma"} for k, v in MODELS.items()],
+                    "strength": v["family"] in ("chroma", "sd3")} for k, v in MODELS.items()],
         "gpu": name, "error": load_error,
     }
 
@@ -341,7 +395,8 @@ if __name__ == "__main__":
     assert lit.getpixel((2, 16))[0] < lit.getpixel((61, 16))[0] < 256
     assert sum(lit.getpixel((2, 16))) < 3 * 255 * 0.4
 
-    assert set(MODELS) == {"chroma", "klein", "hd"}
+    assert set(MODELS) == {"chroma", "klein", "hd", "sd35"}
+    assert MODELS["sd35"]["gated"] and not any(v.get("gated") for k, v in MODELS.items() if k != "sd35")
     for k, v in MODELS.items():
         assert v["family"] in FAMILY, k
         assert all(v.get(f) for f in ("repo", "label", "note", "steps", "guide", "guide_ref", "gb"))
@@ -355,13 +410,13 @@ if __name__ == "__main__":
     assert min(int(Req().steps or MODELS["chroma"]["steps"]), MAX_STEPS) == 12
 
     r = Req(prompt="a baker", init="x", kind="cut")
-    for k in ("chroma", "hd"):
+    for k in ("chroma", "hd", "sd35"):
         assert FINISH in build(MODELS[k], r) and KEEP not in build(MODELS[k], r)
     assert KEEP in build(MODELS["klein"], r) and FINISH not in build(MODELS["klein"], r)
     assert SHEET in build(MODELS["klein"], Req(prompt="x", kind="pose"))
     assert NOTEXT in build(MODELS["klein"], Req(prompt="x"))
     assert NOTEXT in build(MODELS["klein"], r)
-    assert all(NOTEXT not in build(MODELS[k], r) for k in ("chroma", "hd"))
+    assert all(NOTEXT not in build(MODELS[k], r) for k in ("chroma", "hd", "sd35"))
     assert all(KEEP not in build(v, Req(prompt="x")) and FINISH not in build(v, Req(prompt="x"))
                for v in MODELS.values())
 
@@ -371,6 +426,8 @@ if __name__ == "__main__":
     ak = args_for(MODELS["klein"], "p", 64, 32, 8, 4.0, None, ref, 0.85)
     assert ac["strength"] == 0.85 and ac["image"].size == (64, 32)
     assert ah["strength"] == 0.85 and ah["negative_prompt"] == NEG
+    ax = args_for(MODELS["sd35"], "p", 64, 32, 28, 3.5, None, ref, 0.85)
+    assert ax["strength"] == 0.85 and ax["negative_prompt"] == NEG
     assert "strength" not in ak
     assert ak["image"] == [ref]
     assert "negative_prompt" not in ak and ak["guidance_scale"] == 4.0
@@ -380,7 +437,13 @@ if __name__ == "__main__":
     if "prefetch" in sys.argv:
         from diffusers import DiffusionPipeline
 
+        tok = hf_token()
+        if tok:
+            os.environ["HF_TOKEN"] = tok
         for k, v in MODELS.items():
+            if v.get("gated") and not tok:
+                print(f"건너뜀 {k} — Hugging Face 키가 없다 (커넥터에서 넣으면 그때 받는다)", flush=True)
+                continue
             print(f"내려받기 {k} {v['repo']} 약 {v['gb']}GB", flush=True)
             try:
                 DiffusionPipeline.download(v["repo"])

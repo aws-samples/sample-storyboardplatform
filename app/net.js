@@ -277,6 +277,74 @@ export function graphClient() {
   }
 }
 
+const Q_CONNECTORS = 'query Connectors { connectors }'
+const M_PUT_CONNECTOR = `mutation PutConnector($spec: AWSJSON!) { putConnector(spec: $spec) }`
+const M_DELETE_CONNECTOR = `mutation DeleteConnector($spec: AWSJSON!) { deleteConnector(spec: $spec) }`
+const M_GEN_CONNECTOR = `mutation GenConnector($spec: AWSJSON!) { genConnector(spec: $spec) { jobId status } }`
+const Q_GEN_RESULT = `query GenResult($jobId: ID!) { genResult(jobId: $jobId) }`
+
+/** 커넥터 잡 상한. ConnFn 의 타임아웃(10분)과 같다. 이보다 오래 걸리면 결과가 올 곳이 없다 */
+export const GEN_TIMEOUT_MS = 600_000
+/** plan 보다 느긋하게 묻는다. 밖의 제공자는 빨라도 십수 초다 */
+const GEN_POLL_MS = 2500
+
+/**
+ * 커넥터 모델로 한 장 만들고 끝날 때까지 기다린다. runPlanJob 과 같은 잡 방식이다.
+ * 다른 점은 상한뿐이다 — 영상은 몇 분 걸린다.
+ *
+ * @param {Function} post - (query, variables) => Promise<data>
+ * @param {Object} spec - {model:'제공자:모델', prompt, kind?, init?, strength?, seed?}
+ * @returns {Promise<{url: string, kind: string, model: string, ms: number}>}
+ */
+export async function runGenJob(post, spec, opts = {}) {
+  const pollMs = opts.pollMs ?? GEN_POLL_MS
+  const timeoutMs = opts.timeoutMs ?? GEN_TIMEOUT_MS
+
+  const started = await post(M_GEN_CONNECTOR, { spec: JSON.stringify(spec) })
+  const jobId = started?.genConnector?.jobId
+  if (!jobId) throw new Error('커넥터 jobId 를 받지 못했습니다')
+
+  const deadline = Date.now() + timeoutMs
+  let fails = 0
+  while (Date.now() < deadline) {
+    await sleep(pollMs)
+
+    let got
+    try {
+      got = parseField((await post(Q_GEN_RESULT, { jobId })).genResult)
+      fails = 0
+    } catch (e) {
+      if (++fails > PLAN_POLL_FAILS) throw e
+      continue
+    }
+
+    if (got?.status === 'done') return got
+    if (got?.status === 'error') throw new Error(got.error || '커넥터 생성 실패')
+  }
+  throw new Error(`커넥터가 ${Math.round(timeoutMs / 1000)}초 안에 끝나지 않았습니다`)
+}
+
+/**
+ * 커넥터 클라이언트. 밖의 이미지·영상 모델을 API 키로 붙인다.
+ *
+ * 키는 put 으로 올라가고 다시는 내려오지 않는다. list 는 어떤 제공자가 붙어 있고
+ * 어떤 모델을 고를 수 있는지만 준다. 넣고 지우는 것은 서버에서 admin 만 통과한다.
+ *
+ * @returns {{list: Function, put: Function, remove: Function, gen: Function}|null}
+ */
+export function connectorClient() {
+  const cfg = window.SB_CONFIG
+  if (!cfg?.graphqlUrl) return null
+  const post = (query, variables) => gqlPost(cfg, query, variables)
+  const ask = async (query, field, variables) => parseField((await post(query, variables))[field])
+  return {
+    list: () => ask(Q_CONNECTORS, 'connectors', {}),
+    put: (payload) => ask(M_PUT_CONNECTOR, 'putConnector', { spec: JSON.stringify(payload) }),
+    remove: (provider) => ask(M_DELETE_CONNECTOR, 'deleteConnector', { spec: JSON.stringify({ provider }) }),
+    gen: (spec, opts) => runGenJob(post, spec, opts),
+  }
+}
+
 async function awsTransport(cfg, h) {
   const boardId = new URL(location.href).searchParams.get('board') || cfg.boardId || 'demo'
   let latency = 0

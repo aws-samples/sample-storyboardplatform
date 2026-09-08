@@ -23,6 +23,7 @@ const {
 const HERE = __dirname
 const APP = path.join(HERE, '..', '..', 'app')
 const GRAPH_FN = path.join(HERE, '..', 'graph')
+const CONN_FN = path.join(HERE, '..', 'connector')
 const WALKTHROUGH = path.join(HERE, '..', '..', 'app-walkthrough')
 const read = (...p) => fs.readFileSync(path.join(HERE, '..', ...p), 'utf8')
 
@@ -249,6 +250,75 @@ class StoryboardStack extends Stack {
     // Query 가 아니라 Mutation 이다. 리졸버가 Lambda 를 Event 로 띄우고 jobId 만 돌려준다
     js(graphDs, 'Plan', 'Mutation', 'plan', 'plan.js')
 
+    /*
+     * ── 커넥터: 밖의 이미지·영상 모델 ────────────────────────────────────────
+     * API 키를 넣으면 그 모델이 그림판의 모델 목록에 뜨고 호출된다.
+     *
+     * 이 함수만 VPC 밖에 있다. GraphFn 은 퍼블릭 서브넷의 Lambda ENI 라서 퍼블릭 IP 를
+     * 받지 못하고 인터넷으로 나가지 못한다. 제공자 API(api.openai.com 등)로 나가는 일만
+     * 떼어 놓았다. 이 함수는 VPC 안의 것을 하나도 건드리지 않는다.
+     *
+     * GPU 서버와 붙는 곳이 하나 있다: Hugging Face 키다. 같은 SSM 자리를 GPU 가 읽어
+     * 게이트된 저장소(SD 3.5)를 내려받는다. 아래 gpuRole 에 읽기 권한을 준다.
+     */
+    const CONN_PREFIX = '/storyboard/connector'
+    if (!fs.existsSync(path.join(CONN_FN, 'node_modules', '@aws-sdk', 'client-ssm'))) {
+      throw new Error('infra/connector 의 의존성이 없다. `cd infra/connector && npm install` 을 먼저 돌려라. CDK 는 이 디렉터리를 그대로 올린다.')
+    }
+
+    const connFn = new lambda.Function(this, 'ConnFn', {
+      functionName: `${id}-conn`,
+      runtime: lambda.Runtime.NODEJS_24_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromAsset(CONN_FN, { exclude: ['package-lock.json'] }),
+      // 그림은 십수 초, 영상은 몇 분이다. 잡이 Event 로 들어와 결과를 테이블에 적으니
+      // 브라우저는 이 시간을 붙잡고 있지 않는다. 여기 상한이 영상 한 편의 상한이다.
+      timeout: Duration.minutes(10),
+      // Event 호출이다. 기본값 2 면 실패한 잡이 남의 API 를 세 번 부른다(돈이 세 번 나간다)
+      retryAttempts: 0,
+      memorySize: 512,
+      environment: {
+        CONN_PREFIX,
+        IMAGES_BUCKET: images.bucketName,
+        OPS_TABLE: table.tableName,
+      },
+    })
+    table.grantWriteData(connFn)
+    images.grantPut(connFn)
+    // 키는 SecureString 이다. 이 함수만 넣고 읽고 지운다
+    connFn.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['ssm:GetParameter', 'ssm:PutParameter', 'ssm:DeleteParameter', 'ssm:GetParametersByPath'],
+      resources: [
+        `arn:aws:ssm:${this.region}:${this.account}:parameter${CONN_PREFIX}`,
+        `arn:aws:ssm:${this.region}:${this.account}:parameter${CONN_PREFIX}/*`,
+      ],
+    }))
+    // SecureString 은 기본 키(alias/aws/ssm)로 싸여 있다. 별칭은 리소스로 쓸 수 없으니
+    // SSM 을 거친 호출만 허용하는 조건을 붙인다. 키를 직접 쓰는 길은 열리지 않는다.
+    const viaSsm = new iam.PolicyStatement({
+      actions: ['kms:Decrypt', 'kms:Encrypt'],
+      resources: ['*'],
+      conditions: { StringEquals: { 'kms:ViaService': `ssm.${this.region}.amazonaws.com` } },
+    })
+    connFn.addToRolePolicy(viaSsm)
+    // 한국어 프롬프트를 영어로 옮긴다(index.js 의 en). server.py 와 같은 이유다
+    connFn.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['bedrock:InvokeModel'],
+      resources: [
+        'arn:aws:bedrock:*::foundation-model/anthropic.claude-*',
+        `arn:aws:bedrock:${this.region}:${this.account}:inference-profile/*`,
+      ],
+    }))
+
+    const connDs = api.addLambdaDataSource('ConnDs', connFn)
+    js(connDs, 'Connectors', 'Query', 'connectors', 'connectors.js')
+    js(connDs, 'PutConnector', 'Mutation', 'putConnector', 'putConnector.js')
+    js(connDs, 'DeleteConnector', 'Mutation', 'deleteConnector', 'deleteConnector.js')
+    // plan 과 같다. Event 로 띄우고 jobId 만 돌려준다
+    js(connDs, 'GenConnector', 'Mutation', 'genConnector', 'genConnector.js')
+    // 결과는 커넥터 Lambda 가 Ops 테이블에 적어 둔 것을 읽어 온다
+    js(ops, 'GenResult', 'Query', 'genResult', 'genResult.js')
+
     const sg = new ec2.SecurityGroup(this, 'GpuSg', { vpc: net, description: 'storyboard gpu' })
 
     const gpuRole = new iam.Role(this, 'GpuRole', {
@@ -260,7 +330,12 @@ class StoryboardStack extends Stack {
     images.grantPut(gpuRole)
     // 손으로 한국어를 적은 프롬프트를 영어로 옮길 때만 쓴다(server.py 의 en).
     // 예전에는 Amazon Translate 를 불렀다. 부르는 서비스를 Bedrock 하나로 모았다.
-    // GPU 는 퍼블릭 서브넷에 퍼블릭 IP 로 있어서 엔드포인트 없이 그냥 닿는다.
+    //
+    // 퍼블릭 IP 가 있어도 인터넷으로 나가지 못한다. 위 인터페이스 엔드포인트가
+    // privateDnsEnabled 라서 bedrock-runtime 호스트명이 VPC 안에서 엔드포인트 ENI 로
+    // 풀린다. 그러니 이 인스턴스도 그 엔드포인트를 통과해야 한다. 안 열어 주면
+    // 이름은 풀리고 443 만 조용히 막혀서 SDK 가 응답 없이 매달린다.
+    bedrockEp.connections.allowFrom(sg, ec2.Port.tcp(443), 'GPU to Bedrock')
     gpuRole.addToPrincipalPolicy(new iam.PolicyStatement({
       actions: ['bedrock:InvokeModel'],
       resources: [
@@ -268,6 +343,15 @@ class StoryboardStack extends Stack {
         `arn:aws:bedrock:${this.region}:${this.account}:inference-profile/*`,
       ],
     }))
+
+    // 커넥터가 넣어 둔 Hugging Face 키를 읽는다. 게이트된 저장소(SD 3.5)를 내려받을 때만 쓴다.
+    // server.py 의 hf_token() 이 모델을 올릴 때마다 읽으므로, 키를 나중에 넣어도
+    // 인스턴스를 다시 띄울 필요가 없다.
+    gpuRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: ['ssm:GetParameter'],
+      resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter${CONN_PREFIX}/huggingface`],
+    }))
+    gpuRole.addToPrincipalPolicy(viaSsm)
 
     const serverPy = new s3assets.Asset(this, 'GpuServer', { path: path.join(HERE, '..', 'gpu', 'server.py') })
     serverPy.grantRead(gpuRole)
@@ -485,6 +569,10 @@ class StoryboardStack extends Stack {
       // 다른 배포가 만든 폴더를 통째로 지웁니다. 두 배포의 실행 순서는 보장되지
       // 않으므로 이 예외가 없으면 배포마다 폴더가 있다 없다 합니다.
       exclude: ['app-walkthrough/*'],
+      // 파일 이름에 해시가 없습니다. 빌드 단계가 없으니 app.js 는 언제나 app.js 입니다.
+      // 캐시를 막지 않으면 배포 뒤에도 브라우저가 예전 모듈을 그대로 씁니다. CloudFront
+      // 무효화는 브라우저 캐시에 닿지 않으므로 그것만으로는 부족합니다.
+      cacheControl: [s3deploy.CacheControl.noCache()],
       distribution: cdn,
       distributionPaths: ['/*'],
     })
@@ -502,6 +590,7 @@ class StoryboardStack extends Stack {
       sources: [s3deploy.Source.asset(WALKTHROUGH, {
         exclude: ['.DS_Store', 'screens/*'],
       })],
+      cacheControl: [s3deploy.CacheControl.noCache()],
       distribution: cdn,
       distributionPaths: ['/app-walkthrough/*'],
     })

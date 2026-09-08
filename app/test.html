@@ -12,9 +12,9 @@
   const {
     orderKeyBetween, orderKeyForIndex, canTransition, canEditContent, canMakeArt, ART_ROLES,
     canSeeAdmin, ADMIN_VIEW_ROLES,
-    splitScenario, mergeField, handBackTo, notifFor, POSES, STATUS, TRANSITIONS,
+    splitScenario, splitScript, scenarioFromScript, mergeField, handBackTo, notifFor, POSES, STATUS, TRANSITIONS,
     canPlan, normalizePlan, epLabel, CAMERAS,
-    mentionsIn, sceneGroups, clock, startTimes, scrub, debounceBy,
+    mentionsIn, sceneGroups, sceneKey, sceneMeta, clock, startTimes, scrub, debounceBy,
     lostEdit, isActionable, changedSince, liveVer, deadVer,
     canGrantRole, workload, NEEDS, ROLES, ACTIONS,
     tally, stalls, retakes, flow, pace, actorPace, firstPass, reviewLag, fmtDur,
@@ -46,6 +46,7 @@
   const { emptyPanel, guide, guiding, guideAt, guideMarks, stop: stopGuide,
   } = await import(`./onboard.js?t=${Date.now()}`)
   const coach = await import(`./coach.js?t=${Date.now()}`)
+  const { faceSheet, srcOf } = await import(`./art.js?t=${Date.now()}`)
 
   const out = document.getElementById('out')
   let failed = 0
@@ -365,6 +366,25 @@
     return fired.length === 2 && fired.includes('scene') && fired.includes('secs2')
   })())
 
+  /*
+   * 씬 이름 견주기. 키비주얼이 붙인 "S01 카페 · 밤" 과 보드에서 손으로 적은
+   * "씬 1 · 새벽 거리" 가 같은 씬으로 묶여야 보드가 그 씬의 키 비주얼을 찾아낸다.
+   * 이 짝이 깨지면 기반 이미지에 '씬 키 비주얼' 이 영영 안 뜬다.
+   */
+  ok('키비주얼 슬러그와 손으로 적은 씬 이름이 같은 열쇠', sceneKey('S01 카페 · 밤') === sceneKey('씬 1 · 새벽 거리'))
+  ok('S 는 앞의 0 을 무시한다', sceneKey('S007 골목') === 's7' && sceneKey('scene 7') === 's7')
+  ok('번호가 다르면 다른 씬', sceneKey('S01 카페') !== sceneKey('S02 카페'))
+  ok('번호가 없으면 이름을 통째로 본다', sceneKey('  옥상   새벽 ') === '옥상 새벽' && sceneKey('옥상 새벽') === sceneKey('옥상  새벽'))
+  ok('빈 이름은 빈 열쇠', sceneKey('') === '' && sceneKey(null) === '')
+  ok('씬 이름을 번호와 나머지로 가른다', (() => {
+    const a = sceneMeta('S01 카페 · 밤')
+    const b = sceneMeta('씬 1 · 새벽 거리')
+    const c = sceneMeta('골목')
+    return a.no === 'S01' && a.where === '카페 · 밤'
+      && b.no === '씬 1' && b.where === '새벽 거리'
+      && c.no === '' && c.where === '골목'
+  })())
+
   ok('빈 시나리오는 빈 배열', splitScenario('').length === 0)
   ok('문단 수만큼 컷 생성', splitScenario('아침 거리.\n\n남자가 걷는다.').length === 2)
   ok('대사 인식', (() => {
@@ -375,6 +395,112 @@
   ok('대사만 있는 블록은 설명이 비어 있음', (() => {
     const [cut] = splitScenario('"누군가의 아침은 밤에 시작된다."')
     return cut.action === '' && cut.dialogue.includes('누군가의')
+  })())
+
+  /*
+   * 정형 대본을 컷으로 (splitScript).
+   *
+   * 여기서 받는 세 형식은 story.js 의 SCRIPT_FORMATS 가 내는 것들과 같다. 즉 대본화로 뽑은
+   * 대본을 다시 시나리오 칸에 붙이면 컷으로 돌아와야 한다. 그 왕복이 깨지지 않게 지킨다.
+   */
+  const DRAMA = [
+    'S#3. 카페 / 밤',
+    '등장인물: 가온, 노을',
+    '',
+    '가온이 문을 밀고 들어온다.',
+    '가온: 늦었네.',
+    '노을: 기다렸어.',
+    '',
+    'S#4. 골목 / 새벽',
+    '빈 골목에 셔터 소리만 남는다.',
+  ].join('\n')
+  ok('drama 대본을 씬과 컷으로 가른다', (() => {
+    const got = splitScript(DRAMA)
+    return got.cuts.length === 3 && got.cuts[0].dialogue === '늦었네.'
+      && got.cuts[0].action === '가온이 문을 밀고 들어온다.'
+      && got.cuts[2].scene.includes('골목') && got.cuts[2].dialogue === ''
+  })())
+  ok('대본의 등장인물을 모은다', (() => {
+    const got = splitScript(DRAMA)
+    return got.names.length === 2 && got.names.includes('가온') && got.names.includes('노을')
+  })())
+  ok('대사한 사람만 그 컷에 붙인다', (() => {
+    const got = splitScript(DRAMA)
+    return got.cuts[0].cast.join() === '가온' && got.cuts[1].cast.join() === '노을'
+  })())
+  /*
+   * 이 짝이 깨지면 붙여 넣은 대본의 컷이 키비주얼이 그린 씬 그림을 못 찾는다.
+   * splitScript 는 씬 이름을 키비주얼과 같은 모양(S03 …)으로 맞춰야 한다.
+   */
+  ok('대본의 씬이 키비주얼 씬과 같은 열쇠', (() => {
+    const got = splitScript(DRAMA)
+    return sceneKey(got.cuts[0].scene) === sceneKey('S03 카페 · 밤')
+  })())
+  ok('film 대본의 들여쓴 대사를 읽는다', (() => {
+    const got = splitScript([
+      '빵집',
+      '',
+      'INT. 카페 - NIGHT',
+      '',
+      '가온이 문을 밀고 들어온다.',
+      '',
+      '        가온',
+      '    늦었네.',
+    ].join('\n'))
+    // 첫 씬 머리줄 앞의 「빵집」은 제목이다. 컷이 되면 안 된다
+    return got.cuts.length === 1 && got.cuts[0].dialogue === '늦었네.'
+      && got.cuts[0].scene === 'S01 카페 · NIGHT' && got.names.join() === '가온'
+  })())
+  ok('webdrama 대본의 대괄호 씬과 괄호 등장을 읽는다', (() => {
+    const got = splitScript(['[씬 3 - 빵집]', '(가온, 노을)', '가온: 늦었네.'].join('\n'))
+    return got.cuts.length === 1 && got.cuts[0].scene === 'S03 빵집'
+      && got.names.length === 2
+  })())
+  ok('대사 길이로 컷 길이를 어림한다', (() => {
+    const got = splitScript('S#1. 카페 / 밤\n가온: 늦었네.')
+    return got.cuts[0].secs > 0 && got.cuts[0].secs <= 12
+  })())
+  ok('산문은 대본이 아니다', splitScript('아침 거리.\n\n남자가 걷는다.') === null)
+  ok('빈 글은 대본이 아니다', splitScript('') === null && splitScript(null) === null)
+  // 「그는 말했다: 좋아」 는 대사 줄이 아니다. 이름 자리에 문장부호가 있으면 지문으로 둔다
+  ok('문장 안의 콜론을 대사로 읽지 않는다', (() => {
+    const got = splitScript('S#1. 카페 / 밤\n그는 이렇게 말했다. 좋아: 가자.')
+    return got.cuts.length === 1 && got.cuts[0].dialogue === '' && got.names.length === 0
+  })())
+  ok('컷 수 상한을 지킨다', (() => {
+    const lines = ['S#1. 카페 / 밤']
+    for (let i = 0; i < 80; i++) lines.push(`가온: 대사 ${i}`)
+    return splitScript(lines.join('\n')).cuts.length === 48
+  })())
+
+  /*
+   * 대본을 시나리오로 (scenarioFromScript).
+   *
+   * 대본화에서 받은 대본을 시나리오 칸에 넣기 전에 줄이는 자리다. 줄인 글이 다시
+   * 「컷으로 분해」를 지나야 하므로, 씬 머리줄이 살아 있고 대사 줄 모양(「이름: 대사」)이
+   * 남아 있지 않아야 한다. 남아 있으면 줄인 뜻이 없어지고 컷이 대본만큼 늘어난다.
+   */
+  ok('씬마다 한 문단으로 줄인다', (() => {
+    const out = scenarioFromScript(DRAMA)
+    const paras = out.split(/\n{2,}/)
+    return paras.length === 2 && paras[0].startsWith('S03 ') && paras[1].startsWith('S04 ')
+  })())
+  ok('줄인 글에 대사 줄 모양이 남지 않는다', (() => {
+    const out = scenarioFromScript(DRAMA)
+    return !/^[^\n:]{1,16}:/m.test(out) && out.includes('「늦었네.」')
+  })())
+  ok('줄인 글을 다시 컷으로 분해할 수 있다', (() => {
+    const back = splitScript(scenarioFromScript(DRAMA))
+    // 씬 하나가 컷 하나다. 대사가 없으니 컷이 늘지 않는다
+    return back && back.cuts.length === 2 && sceneKey(back.cuts[0].scene) === sceneKey('S03 카페')
+  })())
+  ok('대본이 아니면 빈 문자열', scenarioFromScript('아침 거리.\n\n남자가 걷는다.') === ''
+    && scenarioFromScript('') === '')
+  ok('글자 수 상한을 지킨다', (() => {
+    const lines = []
+    for (let i = 1; i <= 40; i++) lines.push(`S#${i}. 카페 ${i} / 밤`, `사람이 걷는다. `.repeat(8), '')
+    const out = scenarioFromScript(lines.join('\n'), { max: 400 })
+    return out.length > 0 && out.length <= 400
   })())
 
   ok('기획은 기획·감독만', canPlan('planner') && canPlan('director') && !canPlan('artist') && !canPlan('reviewer'))
@@ -3815,6 +3941,46 @@
   } catch (err) {
     ok(`목데이터 를 읽지 못했다. HTTP 로 열어야 한다 (${err.message})`, false)
   }
+
+  // ── art.js: 인물 얼굴을 한 장으로 붙이는 참조 시트 ─────────────────────────
+  // 컷에 인물 둘을 붙이면 board.js 가 이것으로 한 장을 만들어 기반 이미지로 보낸다.
+  // 생성 서버가 그림을 하나만 받기 때문이다.
+  const swatch = (w, h, fill) => {
+    const c = document.createElement('canvas')
+    c.width = w; c.height = h
+    const g = c.getContext('2d')
+    g.fillStyle = fill; g.fillRect(0, 0, w, h)
+    return c.toDataURL('image/png')
+  }
+  const sizeOf = (src) => new Promise((res, rej) => {
+    const img = new Image()
+    img.onload = () => res({ w: img.width, h: img.height })
+    img.onerror = () => rej(new Error('못 읽었다'))
+    img.src = src
+  })
+  const faceA = swatch(60, 80, '#c33')
+  const faceB = swatch(120, 80, '#33c')
+
+  ok('얼굴이 없으면 시트도 없다', await faceSheet([]) === null)
+  ok('얼굴 하나는 붙일 것이 없어 그대로 쓴다', await faceSheet([faceA]) === faceA)
+  ok('얼굴 둘은 한 장으로 붙는다', await (async () => {
+    const sheet = await faceSheet([faceA, faceB], 64)
+    if (!sheet.startsWith('data:image/jpeg')) return false
+    const { w, h } = await sizeOf(sheet)
+    // 칸 폭은 높이의 0.75. 인물 구도가 세로라서 그 비율을 그대로 둔다
+    return h === 64 && w === Math.round(64 * 0.75) * 2
+  })())
+  ok('가로로 긴 얼굴도 잘리지 않는다', await (async () => {
+    // 120x80 을 48x64 칸에 넣으면 폭에 맞춰 줄어든다. 잘라 채우면 얼굴이 날아간다
+    const sheet = await faceSheet([faceB, faceB], 64)
+    const { w } = await sizeOf(sheet)
+    return w === 96
+  })())
+  ok('같은 얼굴 묶음은 다시 만들지 않는다',
+    await faceSheet([faceA, faceB], 64) === await faceSheet([faceA, faceB], 64))
+  ok('묶음이 다르면 다른 시트다',
+    await faceSheet([faceA, faceB], 64) !== await faceSheet([faceB, faceA], 64))
+  ok('srcOf 는 버전의 주소를 그대로 돌려준다', srcOf({ src: '/img/x.png' }) === '/img/x.png')
 
   out.insertAdjacentHTML('beforeend',
     `\n<span class="${failed ? 'fail' : 'pass'}">${failed ? failed + '개 실패' : '전부 통과'}</span>\n`)

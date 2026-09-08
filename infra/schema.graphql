@@ -68,6 +68,14 @@ type Query {
   # loadGraph 는 {nodes, edges}, queryGraph 는 spec.type 에 따라 모양이 달라진다.
   loadGraph(projectId: String): AWSJSON!
   queryGraph(spec: AWSJSON!): AWSJSON!
+
+  # 붙어 있는 커넥터와 고를 수 있는 모델. 키는 절대 나오지 않는다.
+  # {providers:[{id, label, hint, fields, configured, at, models:[...]}]}
+  connectors: AWSJSON!
+
+  # 커넥터 잡 결과 한 건. planResult 와 같은 방식이다.
+  # {status:"pending"} / {status:"done", url, kind, model, ms} / {status:"error", error}
+  genResult(jobId: ID!): AWSJSON!
 }
 
 type Mutation {
@@ -86,6 +94,15 @@ type Mutation {
   # saveGraph 는 프로젝트를 통째로 덮어쓰고, updateGraph 는 역기입 한 묶음을 얹는다
   saveGraph(spec: AWSJSON!): AWSJSON!
   updateGraph(spec: AWSJSON!): AWSJSON!
+
+  # 커넥터 키를 넣고 지운다. admin 만. 넣을 때 제공자를 한 번 찔러 보고 통과할 때만 저장한다.
+  # spec: {provider, key}. 응답에 키는 없고 끝 네 글자만 있다.
+  putConnector(spec: AWSJSON!): AWSJSON!
+  deleteConnector(spec: AWSJSON!): AWSJSON!
+
+  # 커넥터 모델로 한 장 만든다. plan 과 같은 이유로 Mutation 이고 접수증만 돌려준다.
+  # spec: {model:"제공자:모델", prompt, kind, init, strength, seed}
+  genConnector(spec: AWSJSON!): PlanJob!
 }
 
 type Subscription {

@@ -29,7 +29,7 @@ import { NAV_TABS, navHref, newHref } from './nav-tabs.js'
 import { configured, session, logout } from './auth.js'
 import { showLogin, DEMO_USERS } from './login.js'
 import { setHtml } from './dom.js'
-import { opsClient } from './net.js'
+import { opsClient, connectorClient } from './net.js'
 import { entries, group, paintTable } from './history.js'
 import { emptyPanel } from './onboard.js'
 import { list as listProjects, paintCards } from './projects.js'
@@ -53,7 +53,14 @@ const VIEWS = [
   { id: 'new', sect: 'viewNew', ico: '+', label: '새로 생성' },
   { id: 'projects', sect: 'viewPj', ico: '▤', label: '프로젝트', count: () => projects.length },
   { id: 'activity', sect: 'viewAct', ico: '◔', label: '팀원들의 작업 상황 확인하기', count: () => acts.length },
+  // 키를 다루는 판입니다. 관리자에게만 메뉴에 뜨고, 주소로 직접 들어와도 열리지 않습니다.
+  // 서버가 한 번 더 막습니다(putConnector 리졸버가 admin 만 통과시킵니다).
+  { id: 'conn', sect: 'viewConn', ico: '⚿', label: '모델 커넥터', admin: true, count: () => connN },
 ]
+
+const amAdmin = () => (configured ? session()?.role : null) === 'admin'
+/** 지금 이 사람에게 보여 줄 메뉴 */
+const views = () => VIEWS.filter((v) => !v.admin || amAdmin())
 
 const viewParam = () =>
   new URLSearchParams(location.search.replace(/^\?/, '')).get('view')
@@ -69,7 +76,7 @@ let view = 'new'
  */
 function firstView() {
   const want = viewParam()
-  if (VIEWS.some((v) => v.id === want)) return want
+  if (views().some((v) => v.id === want)) return want
   return projects.length ? 'projects' : 'new'
 }
 
@@ -79,7 +86,7 @@ function firstView() {
  * @param {boolean} [push] - 주소에도 남깁니다. 처음 그릴 때는 남기지 않습니다
  */
 function show(id, push = true) {
-  if (!VIEWS.some((v) => v.id === id)) id = 'new'
+  if (!views().some((v) => v.id === id)) id = 'new'
   view = id
   for (const v of VIEWS) byId(v.sect).hidden = v.id !== id
   paintSide()
@@ -98,7 +105,7 @@ function show(id, push = true) {
 }
 
 function paintSide() {
-  setHtml(byId('sideList'), VIEWS.map((v) => {
+  setHtml(byId('sideList'), views().map((v) => {
     const n = v.count?.()
     return `<li>
       <button class="side__go" type="button" data-view="${esc(v.id)}"
@@ -335,6 +342,100 @@ function pickHref(e) {
   return e.ref && e.refKind === 'panel' ? `${base}#cut=${encodeURIComponent(e.ref)}` : base
 }
 
+/* ══ 모델 커넥터 ═══════════════════════════════════ */
+
+/*
+ * 관리자가 API 키를 넣는 자리입니다. 넣으면 서버가 그 제공자를 한 번 찔러 보고,
+ * 통과한 것만 SSM SecureString 에 담습니다. 담긴 키는 여기로 다시 내려오지 않습니다.
+ * 목록에 오는 것은 「붙어 있다 / 언제 넣었다 / 어떤 모델을 쓸 수 있다」뿐입니다.
+ *
+ * 타이핑 중인 키를 connDraft 에 들고 있는 이유는 다시 그릴 때마다 칸이 비어 버리기
+ * 때문입니다. 저장이 끝나면 바로 지웁니다.
+ */
+let conns = []
+let connN = 0
+const connDraft = {}
+const connSay = {}
+
+async function loadConns() {
+  const c = amAdmin() && connectorClient()
+  if (!c) return
+  try {
+    const got = await c.list()
+    conns = got?.providers || []
+    connN = conns.filter((p) => p.configured).length
+  } catch (e) {
+    console.warn('[home] 커넥터를 읽지 못했습니다', e.message)
+    setHtml(byId('connNote'), `커넥터 목록을 읽지 못했습니다: ${esc(e.message)}`)
+  }
+  paintConns()
+  paintSide()
+}
+
+function connRow(p) {
+  const say = connSay[p.id]
+  return `<div class="conn" data-p="${esc(p.id)}">
+    <h2 class="sect__h">${esc(p.label)}
+      <span class="sect__n">${p.configured ? '붙어 있음' : '아직 없음'}</span>
+    </h2>
+    <p class="view__note">${esc(p.hint)}${p.gate ? ` · ${esc(p.gate)}` : ''}</p>
+    <div class="conn__row">
+      <input type="password" autocomplete="off" spellcheck="false" data-key="${esc(p.id)}"
+             placeholder="${p.configured ? '새 키로 갈아 끼우기' : 'API 키를 붙여 넣으세요'}"
+             value="${esc(connDraft[p.id] || '')}">
+      <button class="btn btn--solid" type="button" data-save="${esc(p.id)}"><span class="mono">확인하고 저장</span></button>
+      ${p.configured ? `<button class="btn btn--line" type="button" data-drop="${esc(p.id)}"><span class="mono">지우기</span></button>` : ''}
+    </div>
+    ${p.configured && p.at ? `<p class="view__note">${esc(p.at.slice(0, 16).replace('T', ' '))} 에 넣었습니다.</p>` : ''}
+    ${p.models.length
+    ? `<p class="view__note">쓸 수 있는 모델: ${p.models.map((m) => esc(m.label)).join(' · ')}</p>`
+    : p.configured ? '<p class="view__note">이 키로 고를 모델은 없습니다. 위에 적은 용도로만 씁니다.</p>' : ''}
+    ${say ? `<p class="view__note" data-bad="${say.bad ? 1 : 0}">${esc(say.text)}</p>` : ''}
+  </div>`
+}
+
+function paintConns() {
+  setHtml(byId('connList'), conns.map(connRow).join(''))
+  setHtml(byId('connNote'), conns.length
+    ? '키를 저장하면 아티스트와 기획의 스토리보드 화면에 그 모델이 바로 뜹니다. '
+      + 'GPU 를 켜 두지 않아도 커넥터 모델은 동작합니다.'
+    : '')
+}
+
+byId('connList').addEventListener('input', (e) => {
+  const id = e.target.dataset.key
+  if (id) connDraft[id] = e.target.value
+})
+
+byId('connList').addEventListener('click', async (e) => {
+  const save = e.target.closest('[data-save]')?.dataset.save
+  const drop = e.target.closest('[data-drop]')?.dataset.drop
+  const c = connectorClient()
+  if (!c || (!save && !drop)) return
+
+  const id = save || drop
+  const busy = (on) => { for (const b of byId('connList').querySelectorAll('button')) b.disabled = on }
+  busy(true)
+  try {
+    if (save) {
+      const key = (connDraft[id] || '').trim()
+      if (!key) throw new Error('키를 붙여 넣어 주세요')
+      const r = await c.put({ provider: id, key })
+      connDraft[id] = ''
+      connSay[id] = { text: `${r.note} · 저장했습니다 (${r.tail})` }
+    } else {
+      if (!confirm(`${id} 키를 지웁니다. 그 모델은 목록에서 사라집니다.`)) { busy(false); return }
+      await c.remove(id)
+      connSay[id] = { text: '지웠습니다' }
+    }
+  } catch (err) {
+    // 검증에 실패하면 저장되지 않았습니다. 실패한 사유를 그대로 보여줍니다
+    connSay[id] = { text: err.message, bad: true }
+  }
+  busy(false)
+  await loadConns()
+})
+
 /* ══ 사람 ══════════════════════════════════════════ */
 
 function paintMe() {
@@ -468,6 +569,8 @@ async function boot() {
   // 이미 로그인돼 있으면 문을 띄우지 않습니다. 아니면 여기서 받습니다
   if (!session()) await showLogin(byId('gate'))
   paintMe()
+  // 관리자에게만 있는 판입니다. 메뉴의 숫자(붙어 있는 커넥터 수)도 여기서 채워집니다
+  await loadConns()
 
   /*
    * 프로젝트를 먼저 읽습니다. 어느 판의 로그를 읽어야 하는지가 그 목록에서 나옵니다.
