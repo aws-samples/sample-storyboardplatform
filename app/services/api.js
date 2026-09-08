@@ -296,6 +296,10 @@ const M_PUT_PROJECT = `mutation PutProject($boardId: ID!, $name: String, $actor:
   putProject(boardId: $boardId, name: $name, actor: $actor, what: $what, ts: $ts) { ${PROJECT_FIELDS} }
 }`
 
+const M_DEL_PROJECT = `mutation DeleteProject($boardId: ID!) {
+  deleteProject(boardId: $boardId) { boardId ops assets card left graph }
+}`
+
 /**
  * 프로젝트 카드를 읽고 쓰는 클라이언트. 작업판 앞에 세우는 보드가 씁니다.
  *
@@ -304,8 +308,8 @@ const M_PUT_PROJECT = `mutation PutProject($boardId: ID!, $name: String, $actor:
  * 한 달 쉰 프로젝트는 이름까지 사라집니다. 카드는 pk='PROJECTS' 한 자리에 모으고
  * TTL 을 걸지 않습니다.
  *
- * @returns {{list: Function, put: Function}|null} 설정이 없으면 null · 부르는 쪽이
- *          브라우저 저장소로 내려갑니다
+ * @returns {{list: Function, put: Function, remove: Function}|null} 설정이 없으면 null ·
+ *          부르는 쪽이 브라우저 저장소로 내려갑니다
  */
 export function projectsClient() {
   const cfg = window.SB_CONFIG
@@ -326,6 +330,18 @@ export function projectsClient() {
         boardId, name: name ?? null, actor, what: what ?? null, ts: pad(ts ?? Date.now()),
       })
       return d.putProject
+    },
+    /*
+     * 프로젝트 하나를 지웁니다. 카드 · 에셋 · op 로그 · Neptune 그래프 전부입니다.
+     *
+     * 지운 수를 세어 돌려주는 이유는 사람에게 무엇을 잃었는지 말해 주려는 것입니다.
+     * 「지웠습니다」만으로는 컷 340개가 같이 사라진 것을 모릅니다. left 가 0 이 아니면
+     * 다 못 지운 것이고, 그때 카드는 서버가 일부러 남깁니다 — 다시 지울 수 있어야
+     * 합니다(infra/resolvers/deleteProject.js).
+     */
+    remove: async (boardId) => {
+      const d = await gqlPost(cfg, M_DEL_PROJECT, { boardId })
+      return d.deleteProject
     },
   }
 }

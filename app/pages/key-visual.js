@@ -30,6 +30,8 @@ import { paintList } from '../components/history-list.js'
 import { pickProject } from '../components/project-picker.js'
 import { touch as touchProject } from '../services/projects.js'
 import { saveAsset, loadAsset } from '../services/assets.js'
+import { JOB_ROLES, allowed, denyReason, isDenied } from '../domain/permissions.js'
+import { confirmAsk } from '../components/confirm.js'
 import { wire as wireTour, demoActive, demoAdvance, demoSay, demoTitle } from '../../app-walkthrough/tour.js'
 
 /*
@@ -61,6 +63,7 @@ const S = {
   seedOn: false,
   model: null,
   busy: null,           // 'split'(머리글 없는 글을 모델이 나누는 중) | 'prompt' | 'batch'
+  stop: false,          // 「남은 씬 멈추기」를 눌렀나. 갈래들이 이걸 보고 다음 씬을 집지 않는다
   gpu: { state: 'unknown', text: '확인 중', models: [], resident: null, loading: null, wait: 0 },
   jobs: {},             // sceneId → { status, ms, url, err, code, tries }
   pick: null,
@@ -89,6 +92,22 @@ const canGen = () => !!cfg.genUrl
 const canPlan = () => !!S.net?.plan
 const myRole = () => S.me?.role || 'reviewer'
 const mayGen = () => ART_ROLES.includes(myRole())
+/*
+ * plan() 을 부를 수 있는 역할인가. 「연결이 있나」(canPlan)와 다른 물음입니다.
+ *
+ * 아티스트는 그림은 그릴 수 있지만 plan 은 못 부릅니다(infra/resolvers/plan.js). 그래서
+ * 이 화면에서 씬 나누기와 프롬프트 쓰기는 막히고 생성은 되는, 반쯤 열린 자리가 나옵니다.
+ * 로컬 모드는 리졸버를 지나지 않으므로 역할을 보지 않습니다.
+ */
+const mayPlan = () => !configured || allowed('plan', myRole())
+/*
+ * 에셋을 담을 수 있는 역할인가(infra/resolvers/putAsset.js). 리뷰어만 막힙니다.
+ *
+ * 로컬 모드는 막지 않습니다. 브라우저 저장소라 리졸버를 지나지 않고, 무엇보다 로컬은
+ * 자리를 돌려 가며 앉히므로 다섯 명 중 한 명이 리뷰어입니다(pages/board.js 의 resolveMe).
+ * 그 자리에 앉은 사람만 저장이 안 되면 까닭을 알 수 없습니다.
+ */
+const mayKeep = () => !configured || allowed('putAsset', myRole())
 
 /* ══ 로그 · 기록 ══════════════════════════════════ */
 
@@ -224,9 +243,14 @@ async function restoreAssets() {
  * 요약이 「씬 2개 · 프롬프트 1/2」로 그것을 센다(domain/assets.js).
  */
 async function keepScenes() {
-  // 리뷰 역할은 에셋을 쓰지 못한다(infra/resolvers/putAsset.js). 막힐 것을 보내지 않는다.
-  // 로컬 모드는 막지 않는다. 그때는 브라우저 저장소라 리졸버를 지나지 않는다
-  if (configured && myRole() === 'reviewer') return
+  /*
+   * 담을 권한이 없으면 보내지 않고, 못 담았다는 것을 말합니다.
+   *
+   * 전에는 여기서 조용히 돌아섰습니다. 「씬 14개로 나눴습니다」만 보이고 새로고침하면
+   * 다 없어지는데, 그 사이에 아무 말도 없었습니다. 사라진 뒤에 알게 되는 것이 가장
+   * 나쁩니다. 로컬 모드는 막지 않습니다 — 브라우저 저장소라 리졸버를 지나지 않습니다.
+   */
+  if (!mayKeep()) { noteKeepDenied(); return }
   try {
     await saveAsset({
       boardId: boardFromSearch(), kind: 'scenes',
@@ -253,12 +277,20 @@ async function splitScript() {
   // 지난번 경고를 지웁니다. 이번에 다시 걸리면 아래에서 다시 답니다
   S.warn = null
   const ai = needsAiSplit(S.script)
-  const useAi = ai && canPlan()
+  const useAi = ai && canPlan() && mayPlan()
 
   if (ai && !canPlan()) {
     // 로컬 모드입니다. 무엇이 없어서 못 하는지 그대로 말합니다. 흉내내지 않습니다
     S.warn = '머리글이 없는 글은 문장 모델이 나눕니다. 로컬 모드에서는 씬 하나로 들어갑니다. '
       + 'S#1. 장소 / 밤 처럼 머리글을 붙이면 모델 없이도 나뉩니다.'
+  } else if (ai && !mayPlan()) {
+    /*
+     * 연결은 있는데 역할이 막힙니다. 보내 봐야 서버가 튕기므로 보내지 않고, 왜 안 되는지와
+     * 이 사람이 지금 할 수 있는 것을 같이 적습니다. 머리글을 붙이는 길은 모델도 권한도
+     * 필요 없어서 아티스트·리뷰어도 스스로 나눌 수 있습니다.
+     */
+    S.warn = `${denyReason('plan', myRole())} 규칙으로 씬 하나로 넣었습니다. `
+      + 'S#1. 장소 / 밤 처럼 머리글을 붙이면 권한 없이도 나뉩니다.'
   }
 
   if (useAi) {
@@ -296,9 +328,37 @@ async function splitScript() {
   if (canPlan()) writePrompts()
 }
 
+/**
+ * 프롬프트를 못 쓸 때 그 까닭을 S.warn 에 적습니다. 쓸 수 있으면 아무것도 하지 않습니다.
+ *
+ * 씬 나누기에서 이미 적어 둔 경고를 덮지 않습니다. 「권한이 없어 규칙으로 나눴습니다」와
+ * 「권한이 없어 프롬프트를 못 씁니다」는 같은 한 가지 이야기이고, 두 번째 문장이 첫 번째를
+ * 지우면 사람이 방금 읽던 안내가 눈앞에서 바뀝니다.
+ */
+function notePlanDenied() {
+  if (mayPlan() || S.warn) return
+  S.warn = `${denyReason('plan', myRole())} 씬은 나뉘었습니다. `
+    + '프롬프트 칸은 비어 있으니 직접 써주시거나 기획·감독에게 부탁해 주세요.'
+}
+
+/**
+ * 에셋을 못 담을 때 그 까닭을 적습니다. 담을 수 있으면 아무것도 하지 않습니다.
+ *
+ * 「저장되지 않는다」는 사실은 늘 말해야 하므로 S.warn 이 차 있어도 덮습니다.
+ * notePlanDenied 와 반대인 이유는, 저쪽은 「이번 것을 못 했다」이고 이쪽은 「지금 보이는
+ * 것이 새로고침하면 사라진다」라서 더 급한 이야기입니다. paint 는 부르는 쪽이 합니다.
+ */
+function noteKeepDenied() {
+  if (mayKeep()) return
+  S.warn = `${denyReason('putAsset', myRole())} `
+    + '지금 화면의 것은 새로고침하면 사라집니다. 필요하시면 대본을 복사해 두세요.'
+}
+
 /** 대본을 프로젝트에 담는다. 실패는 적어만 둔다. 대본은 칸에 그대로 남아 있다 */
 async function keepScript() {
-  if (!S.script.trim() || (configured && myRole() === 'reviewer')) return
+  if (!S.script.trim()) return
+  // 권한 안내는 keepScenes 가 합니다. 둘이 나란히 불려서 같은 말을 두 번 적을 이유가 없습니다
+  if (!mayKeep()) return
   try {
     await saveAsset({
       boardId: boardFromSearch(), kind: 'script', body: S.script, actor: S.me?.id,
@@ -310,6 +370,8 @@ async function keepScript() {
 
 async function writePrompts() {
   if (!canPlan()) { paint(); return }
+  // 역할이 막히면 보내지 않고 까닭을 적습니다. 보내 봐야 리졸버가 튕깁니다
+  if (!mayPlan()) { notePlanDenied(); paint(); return }
   S.busy = 'prompt'; paint()
   wire('u', `plan()  씬 ${S.scenes.length}개 → 이미지 프롬프트`)
   try {
@@ -343,7 +405,11 @@ async function writePrompts() {
     keepScenes()
   } catch (e) {
     wire('r', `실패  ${e.message}`)
-    S.warn = e.message
+    // 서버가 권한으로 튕겼습니다. 「Not Authorized to access plan on type Mutation」 을
+    // 그대로 띄우면 사람은 자기가 뭘 잘못했는지 모릅니다. 우리 말로 바꿔 적습니다
+    S.warn = isDenied(e)
+      ? (denyReason('plan', myRole()) || '이미지 프롬프트를 쓸 권한이 없습니다.')
+      : e.message
   } finally {
     S.busy = null; paint()
   }
@@ -459,6 +525,44 @@ async function runBatch(ids) {
   const targets = (ids || S.scenes.map((s) => s.id)).map(scene).filter((s) => s?.prompt)
   if (!targets.length) { S.warn = '프롬프트가 있는 씬이 없습니다. STEP 2 에서 먼저 받아주세요.'; paint(); return }
 
+  /*
+   * 여러 장이면 한 번 더 묻습니다. 이 화면에서 가장 오래 걸리고 가장 비싼 자리입니다 —
+   * 장당 10초 남짓이 순서대로 쌓이고(LANES 위의 머리글), 그리는 것은 우리 EC2 의 GPU 라
+   * 그 시간만큼 장비가 붙어 있습니다. 이미 그린 장이 있으면 그것도 다시 그립니다.
+   *
+   * 한 장은 묻지 않습니다. 「이 씬만 다시 생성」은 프롬프트를 고쳐 가며 여러 번 누르는
+   * 자리이고, 10초짜리 한 장 앞에 창을 세우면 그 손질이 창 닫기만 반복하는 일이 됩니다.
+   * 창을 여는 기준은 「비싼 일인가」이지 「생성인가」가 아닙니다.
+   */
+  if (targets.length > 1) {
+    const had = targets.filter((s) => job(s.id).status === 'done').length
+    const ok = await confirmAsk({
+      title: '키 비주얼을 생성하시겠습니까?',
+      body: canGen()
+        ? '씬 순서대로 한 장씩 그립니다. 그리는 동안 다른 씬은 대기하고, 「남은 씬 멈추기」로 멈출 수 있습니다.'
+        : 'aws-config.js 에 생성 서버가 없어 실제로 그리지 못합니다. 눌러도 씬마다 오류로 돌아옵니다.',
+      list: [
+        `씬 ${targets.length}개 · ${SIZES[S.size].label}`,
+        `모델 ${S.model || '기본'}${S.seedOn && S.seed ? ` · seed ${S.seed} 고정` : ''}`,
+        // 장당 10초를 targets 수로 곱합니다. 갈래가 셋이어도 서버가 한 장씩 그립니다
+        `장당 10초 남짓 · 모두 ${Math.max(1, Math.round(targets.length * 10 / 60))}분쯤 걸립니다`,
+        ...(had ? [`이미 그린 ${had}장을 다시 그립니다`] : []),
+      ],
+      yes: '생성합니다',
+    })
+    if (!ok) return
+  }
+
+  /*
+   * 대기열 단계로 넘깁니다. 전에는 부르는 쪽이 S.step = 3 을 먼저 박았는데, 물어보는
+   * 창이 생기면서 그만둔 사람도 빈 대기열 앞에 서게 됐습니다. 진행이 보일 자리로
+   * 옮기는 것은 실제로 시작하는 여기의 일입니다.
+   *
+   * 이미 3보다 뒤라면 두고 갑니다. 「대본과 맞춰 보기」(4단계)에서 한 씬을 다시 그리는
+   * 사람을 3단계로 끌어내리면 보고 있던 것이 사라집니다.
+   */
+  if (S.step < 3) S.step = 3
+
   S.busy = 'batch'; S.warn = null; S.t0 = now()
   for (const s of targets) { const j = job(s.id); j.status = 'queued'; delete j.err }
   paint()
@@ -478,14 +582,19 @@ async function runBatch(ids) {
     }
   }
   await Promise.all(Array.from({ length: Math.min(LANES, targets.length) }, lane))
+  // 멈춰서 끝났는지를 깃발을 내리기 전에 챙긴다. 아래 안내가 이것을 봐야 한다
+  const stopped = S.stop
   S.stop = false
 
   S.busy = null
   paint()
   const d = doneJobs().length, f = failedJobs().length
-  say(`${d}장 완료${f ? `, ${f}장 실패` : ''}`)
+  // 멈춰서 끝난 것과 다 그려서 끝난 것은 다른 일이다. 「3장 완료」만 적으면 멈춘 사람이
+  // 자기가 멈춘 것인지 나머지가 실패한 것인지 알 수 없다
+  const how = stopped ? ' · 남은 씬은 멈췄습니다' : ''
+  say(`${d}장 완료${f ? `, ${f}장 실패` : ''}${how}`)
   // 장마다 남기지 않는다. 한 배치가 한 줄이다. 8장을 8줄로 남기면 목록이 그것만으로 찬다
-  mark(`키 비주얼 ${d}장을 생성했습니다${f ? ` (${f}장 실패)` : ''}`)
+  mark(`키 비주얼 ${d}장을 생성했습니다${f ? ` (${f}장 실패)` : ''}${how}`)
   keepKeyVisual()
 }
 
@@ -500,7 +609,6 @@ async function runBatch(ids) {
  * 사람은 예시를 본 것뿐인 자리가 생긴다.
  */
 async function keepKeyVisual() {
-  if (configured && myRole() === 'reviewer') return
   const shots = S.scenes
     .map((s) => ({ s, j: job(s.id) }))
     .filter(({ j }) => j.status === 'done' && j.url && !j.example)
@@ -508,7 +616,10 @@ async function keepKeyVisual() {
       sceneId: s.id, place: s.place, url: j.url, seed: j.seed ?? null,
       model: j.modelLabel || null, size: S.size,
     }))
+  // 담을 것이 있는지를 먼저 봅니다. 없으면 권한 이야기를 꺼낼 자리가 아닙니다 —
+  // 아무것도 안 만든 사람에게 「담을 권한이 없습니다」는 뜬금없는 말입니다
   if (!shots.length) return
+  if (!mayKeep()) { noteKeepDenied(); paint(); return }
   try {
     await saveAsset({
       boardId: boardFromSearch(), kind: 'keyvisual',
@@ -928,10 +1039,15 @@ function step2() {
   go.type = 'button'
   go.dataset.coach = 'gen'      // 예시 안내가 짚는 자리입니다
   go.disabled = !S.scenes.some((s) => s.prompt)
-  go.onclick = () => { S.step = 3; paint(); runBatch() }
+  // 단계를 여기서 넘기지 않습니다. 물어보는 창을 그만둔 사람이 빈 대기열 앞에 서지
+  // 않도록 runBatch 가 실제로 시작할 때 넘깁니다
+  go.onclick = () => runBatch()
   b.append(go)
+  // 권한이 없으면 버튼을 눌리게 두지 않습니다. 눌러 봐야 403 이 오고, 그 왕복이
+  // 알려 주는 것은 이 줄이 미리 말해 주는 것과 같습니다
   if (!mayGen()) {
-    b.append(el('p', 'note', `지금 역할은 ${ROLE_KO[myRole()]} 입니다. 버튼은 눌립니다. 서버가 역할을 보고 거절합니다.`))
+    go.disabled = true
+    b.append(el('p', 'note note--no', denyReason('gen', myRole())))
   }
   w.append(b)
   return w
@@ -968,8 +1084,31 @@ function step3() {
 
   const row = el('div', 'row')
   if (S.busy === 'batch') {
-    const st = el('button', 'btn btn--line', '남은 씬 멈추기')
-    st.type = 'button'; st.onclick = () => { S.stop = true; say('멈추는 중입니다') }
+    /*
+     * 이미 눌렀으면 누른 것이 보이게 합니다.
+     *
+     * 전에는 이 버튼이 S.stop 만 세우고 say() 로 끝났습니다. say 는 화면에 안 보이는
+     * 칸에 적으므로(key-visual.html 의 .sr #live) 눈에는 아무 일도 일어나지 않고,
+     * 버튼은 그대로 눌리는 채였습니다. 게다가 이미 GPU 로 떠난 요청 세 개는 끝까지
+     * 그려집니다(LANES). 그래서 사람은 30초 넘게 그림이 계속 나오는 것을 보며
+     * 「안 먹는다」고 판단하고 다시 누릅니다. 눌린 것과 남은 것을 여기서 말합니다.
+     */
+    const left = S.scenes.filter((s) => job(s.id).status === 'running').length
+    const st = el('button', 'btn btn--line', S.stop
+      ? `멈추는 중 · 보낸 ${left}장은 끝까지 그립니다` : '남은 씬 멈추기')
+    st.type = 'button'
+    st.disabled = S.stop
+    st.onclick = () => {
+      S.stop = true
+      wire('u', '남은 씬 멈추기 · 대기 중인 씬을 취소합니다')
+      say('멈추는 중입니다. 이미 보낸 장은 끝까지 그립니다')
+      // 대기였던 씬을 그 자리에서 대기열에서 뺍니다. 이것이 눈에 보이는 유일한 변화입니다
+      for (const s of S.scenes) {
+        const j = job(s.id)
+        if (j.status === 'queued') j.status = 'idle'
+      }
+      paint()
+    }
     row.append(st)
     row.append(el('span', 'hint', `${doneJobs().length}/${S.scenes.length} 완료`))
   } else {
@@ -1005,10 +1144,19 @@ function step3() {
     r2.append(el('b', null, k), el('span', null, v))
     tbl.append(r2)
   }
-  line('아티스트 · 기획', '생성 요청이 통과합니다', true)
-  line('감독 · 리뷰어 · 관리자', '서버가 403 으로 거절합니다', false)
+  /*
+   * 두 줄을 표에서 만듭니다(domain/permissions.js). 손으로 적어 두면 서버의 허용 목록이
+   * 바뀔 때 이 카드만 옛말을 하는데, 하필 「누가 할 수 있나」를 알려 주는 카드입니다.
+   */
+  const kos = (list) => list.map((r) => ROLE_KO[r] || r).join(' · ')
+  const may = JOB_ROLES.gen
+  const mayNot = Object.keys(ROLE_KO).filter((r) => !may.includes(r))
+  line(kos(may), '생성 요청이 통과합니다', true)
+  line(kos(mayNot), '서버가 403 으로 거절합니다', false)
   p.append(tbl)
-  p.append(el('p', 'note', `지금 역할은 ${ROLE_KO[myRole()]} 입니다. ${mayGen() ? '생성이 통과합니다.' : '버튼은 눌리고, 요청은 서버에서 거절됩니다.'}`))
+  p.append(el('p', mayGen() ? 'note' : 'note note--no', mayGen()
+    ? `지금 역할은 ${ROLE_KO[myRole()]} 입니다. 생성이 통과합니다.`
+    : denyReason('gen', myRole())))
   b.append(p)
 
   b.append(scaleCard())

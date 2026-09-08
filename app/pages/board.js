@@ -21,6 +21,7 @@ import { paintList } from '../components/history-list.js'
 import { pickProject } from '../components/project-picker.js'
 import { touch as touchProject } from '../services/projects.js'
 import { saveAsset } from '../services/assets.js'
+import { allowed, denyReason } from '../domain/permissions.js'
 import { wire as wireTour, demoActive, demoAdvance, demoSay, demoTitle } from '../../app-walkthrough/tour.js'
 
 /*
@@ -192,11 +193,16 @@ function touchCard(op) {
      * op 이므로 여기를 지나는데, 막힐 것을 보내고 401 을 받아 로그에 적기만 하는 것은
      * 왕복만 늘립니다. 리뷰가 남긴 메모로 콘티 요약이 바뀔 일도 없습니다.
      *
+     * 여기서만 아무 말도 하지 않습니다. 다른 화면들은 못 담았다고 알리는데(키비주얼의
+     * noteKeepDenied), 그쪽은 대본·씬처럼 사람이 방금 만든 것이 사라지는 자리입니다.
+     * 이쪽에서 못 담는 것은 서랍에 보일 요약 숫자이고, 컷과 메모는 op 로그에 그대로
+     * 남습니다. 잃는 것이 없는 일로 안내문을 띄우면 다음 안내문이 안 읽힙니다.
+     *
      * 로컬 모드는 막지 않습니다. 그때는 브라우저 저장소에 쓰는 것이라 리졸버를 지나지
      * 않고, 무엇보다 로컬에서는 자리를 돌려 가며 앉히므로(resolveMe) 다섯 명 중 한 명이
      * 리뷰어입니다. 그 자리에 앉은 사람만 콘티가 서랍에 안 보이면 까닭을 알 수 없습니다.
      */
-    if (configured && me.role === 'reviewer') return
+    if (configured && !allowed('putAsset', me.role)) return
     keepConti()
     keepSynopsis()
   }, 600)

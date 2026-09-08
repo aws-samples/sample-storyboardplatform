@@ -2913,6 +2913,140 @@
       && src.includes(key))
   }
 
+  /* ── permissions.js ↔ 서버의 허용 목록 ───────────────────────────────────────
+   *
+   * domain/permissions.js 의 표는 화면이 버튼을 미리 막는 근거이고, 실제로 튕기는 것은
+   * 리졸버의 ROLES 와 server.py 의 ART_ROLES 입니다. 두 곳은 같은 사실을 두 번 적은
+   * 것이라 한쪽만 고쳐지고, 그 어긋남은 두 방향 다 나쁩니다. 화면이 열어 두고 서버가
+   * 튕기면 사람은 왜 안 되는지 모르고, 서버는 되는데 화면이 막으면 되는 일을 못 합니다.
+   *
+   * 그래서 소스를 읽어 맞대어 봅니다. import 하지 않는 이유는 리졸버가 APPSYNC_JS
+   * 런타임의 @aws-appsync/utils 를 부르고 server.py 는 파이썬이라는 것입니다. 어차피
+   * 여기서 실행할 수 없으니 「무엇을 적어 두었나」를 봅니다. permissions.js 의 머리글과
+   * infra/resolvers/deleteProject.js 의 머리글이 이 검사가 있다고 약속하고 있습니다.
+   */
+  const { JOB_ROLES, JOB_NAMES, allowed, denyReason, isDenied, roleName,
+  } = await import(`./domain/permissions.js?t=${Date.now()}`)
+
+  const text = async (p) => {
+    const r = await fetch(`${p}?t=${Date.now()}`)
+    if (!r.ok) throw new Error(`${p} ${r.status}`)
+    return r.text()
+  }
+  // `const ROLES = ['planner', 'director']` 한 줄에서 역할 이름만 뽑는다
+  const rolesIn = (src, name = 'ROLES') => {
+    const m = src.match(new RegExp(`${name}\\s*=\\s*[\\[{]([^\\]}]*)[\\]}]`))
+    return m ? [...m[1].matchAll(/["']([a-z]+)["']/g)].map((x) => x[1]).sort() : null
+  }
+
+  try {
+    /*
+     * 일감 → 그 일을 실제로 막는 서버 쪽 파일. 한 일감이 리졸버 여럿에 걸려 있으면
+     * (plan 은 plan.js 와 planResult.js) 대표 하나만 봅니다. 나머지는 같은 상수를
+     * 베껴 둔 자리라서, 대표가 맞으면 어긋난 쪽은 리졸버끼리 어긋난 것입니다.
+     */
+    const SERVER = {
+      plan: ['../infra/resolvers/plan.js', 'ROLES'],
+      navigate: ['../infra/resolvers/navigate.js', 'ROLES'],
+      saveGraph: ['../infra/resolvers/saveGraph.js', 'ROLES'],
+      putAsset: ['../infra/resolvers/putAsset.js', 'ROLES'],
+      deleteProject: ['../infra/resolvers/deleteProject.js', 'ROLES'],
+      gen: ['../infra/gpu/server.py', 'ART_ROLES'],
+    }
+    for (const [job, [file, name]] of Object.entries(SERVER)) {
+      const server = rolesIn(await text(file), name)
+      const mine = [...(JOB_ROLES[job] || [])].sort()
+      ok(`${job} 의 허용 역할이 ${file.split('/').pop()} 와 같다`,
+        !!server && server.join() === mine.join(), `화면 ${mine.join('·')} / 서버 ${server?.join('·')}`)
+    }
+    // 표에 적힌 일감은 모두 사람이 읽을 이름을 가집니다. 없으면 오류 문장에 키가 그대로 섭니다
+    ok('모든 일감에 사람이 읽을 이름이 있다', Object.keys(JOB_ROLES).every((j) => JOB_NAMES[j]))
+    // 표의 역할도 모두 이름을 가집니다. panels.js 의 ROLES 와 짝입니다
+    ok('표의 역할은 모두 이름을 가진다',
+      [...new Set(Object.values(JOB_ROLES).flat())].every((r) => ROLES[r]))
+  } catch (err) {
+    ok(`서버 쪽 허용 목록을 읽지 못했다 (${err.message})`, false)
+  }
+
+  ok('지우기는 감독만이다',
+    allowed('deleteProject', 'director')
+    && !['planner', 'artist', 'reviewer', 'admin', undefined].some((r) => allowed('deleteProject', r)))
+  // 표에 없는 일감은 막지 않습니다. 모르는 이름 하나로 되는 일을 막는 편이 더 나쁩니다
+  ok('표에 없는 일감은 막지 않는다', allowed('없는일감', 'reviewer'))
+  // 프로토타입의 키로 표를 넘겨다볼 수 없어야 합니다(hasOwnProperty 로 봅니다)
+  ok('프로토타입 키로는 표가 열리지 않는다',
+    allowed('toString', 'reviewer') && allowed('constructor', 'reviewer'))
+
+  ok('막힌 사유가 무엇을·지금·누구면 되는지를 담는다', (() => {
+    const why = denyReason('deleteProject', 'artist')
+    return why.includes(JOB_NAMES.deleteProject) && why.includes(roleName('director'))
+      && why.includes(roleName('artist')) && !why.includes('다시 시도')
+  })())
+  ok('되는 역할에는 사유가 없다', denyReason('deleteProject', 'director') === null)
+  // 조사가 앞말의 받침을 따릅니다. 「프로젝트 삭제는」·「그래프 추출과 이야기 기획은」
+  ok('사유의 조사가 받침을 따른다',
+    denyReason('deleteProject', 'artist').includes('프로젝트 삭제는')
+    && denyReason('plan', 'artist').includes('기획은')
+    && denyReason('plan', 'artist').includes('아티스트로 로그인'))
+  ok('서버의 거부를 권한 문제로 알아본다',
+    isDenied(new Error('Not Authorized to access deleteProject on type Mutation'))
+    && isDenied('Unauthorized') && !isDenied(new Error('네트워크 오류')))
+
+  /* ── components/confirm.js: 한 번 더 묻는 창 ─────────────────────────────────
+   *
+   * 애매한 자리를 「하려는 쪽」으로 해석하지 않는 것이 이 창의 요점입니다. 그만두기 ·
+   * Esc · 바깥 누르기가 모두 false 이고 「예」만 true 입니다. 한 곳이라도 true 로
+   * 새면 되돌릴 수 없는 일이 사람이 고르지 않은 채로 진행됩니다.
+   */
+  const { confirmAsk } = await import(`./components/confirm.js?t=${Date.now()}`)
+  const lastDlg = () => [...document.querySelectorAll('dialog.cfm')].at(-1)
+
+  ok('「예」를 누르면 true 다', await (async () => {
+    const p = confirmAsk({ title: '물음', list: ['컷 3개'] })
+    lastDlg().querySelector('.cfm__yes').click()
+    return await p === true
+  })())
+  ok('「그만두기」를 누르면 false 다', await (async () => {
+    const p = confirmAsk({ title: '물음' })
+    lastDlg().querySelector('.cfm__no').click()
+    return await p === false
+  })())
+  ok('Esc 로 닫아도 false 다', await (async () => {
+    const p = confirmAsk({ title: '물음' })
+    lastDlg().close()      // Esc 가 dialog 를 닫는 것과 같은 길입니다
+    return await p === false
+  })())
+  ok('바깥을 눌러도 false 다', await (async () => {
+    const p = confirmAsk({ title: '물음' })
+    const d = lastDlg()
+    d.dispatchEvent(new MouseEvent('click', { bubbles: true }))   // target 이 dialog 자신
+    return await p === false
+  })())
+  ok('답한 뒤에는 창을 남기지 않는다', await (async () => {
+    const before = document.querySelectorAll('dialog.cfm').length
+    const p = confirmAsk({ title: '물음' })
+    lastDlg().querySelector('.cfm__yes').click()
+    await p
+    return document.querySelectorAll('dialog.cfm').length === before
+  })())
+  ok('엔터를 눌러 온 사람이 그대로 진행하지 않는다', await (async () => {
+    const p = confirmAsk({ title: '물음' })
+    const d = lastDlg()
+    const onNo = document.activeElement === d.querySelector('.cfm__no')
+    d.querySelector('.cfm__no').click()
+    await p
+    return onNo
+  })())
+  ok('넘긴 글을 HTML 로 세우지 않는다', await (async () => {
+    const p = confirmAsk({ title: '<img src=x onerror="window.__cfm=1">', list: ['<b>표시</b>'] })
+    const d = lastDlg()
+    const clean = !d.querySelector('img') && !d.querySelector('.cfm__list b')
+      && d.querySelector('.cfm__list').textContent.includes('<b>표시</b>')
+    d.querySelector('.cfm__no').click()
+    await p
+    return clean && !window.__cfm
+  })())
+
   // ── net.js: AWSJSON 필드 풀기 ─────────────────────────────────────────────
   // 배포된 리졸버들은 JSON.stringify 한 문자열을 AWSJSON 으로 내보내고 AppSync 가 한 번 더
   // 감싼다. plan 응답이 '"{\"text\":...}"' 로 오던 자리다. 한 번만 풀면 문자열이 남는다.

@@ -517,7 +517,15 @@ export function mountNavigatorChat(container, { onSend } = {}) {
       console.warn('[navigator] 답변 실패', err)
       if (era !== epoch) return
       wait.remove()
-      bubble('err', err?.message || '답변을 받지 못했습니다. 잠시 뒤 다시 물어봐 주세요.')
+      /*
+       * err.retry 가 false 면 「잠시 뒤 다시」를 붙이지 않는다. 권한이 없어 막힌 것처럼
+       * 기다려서 바뀌지 않는 실패가 있고, 그때 다시 물어보라고 하면 사람을 같은 자리로
+       * 계속 돌려보낸다. 무엇이 안 되고 누구면 되는지는 onSend 를 넘긴 화면이 안다
+       * (이 모듈은 네트워크도 로그인도 모른다). 그래서 문장은 그쪽에서 온다.
+       */
+      bubble('err', err?.retry === false
+        ? err.message
+        : (err?.message || '답변을 받지 못했습니다. 잠시 뒤 다시 물어봐 주세요.'))
     } finally {
       lock(false)
       scroll()

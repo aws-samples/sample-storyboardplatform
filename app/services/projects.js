@@ -72,19 +72,55 @@ const localPut = ({ boardId, name, actor, what, ts }) => {
   return row
 }
 
+/*
+ * 로컬 모드의 삭제. 배포 쪽 deleteProject.js 와 같은 것을 지웁니다.
+ *
+ * 배포에서 지우는 세 갈래가 로컬에서는 세 칸입니다. 카드 목록 한 줄(LOCAL_KEY), 에셋
+ * (sb.assets.<boardId> — services/assets.js 의 localKey), 보드 상태(sb.state.<boardId> —
+ * pages/board.js). 셋을 다 지우지 않으면 같은 이름으로 판을 새로 만들 때 옛 컷이 따라
+ * 나옵니다.
+ *
+ * 세는 것도 배포 쪽과 모양을 맞춥니다. 로컬에는 op 줄이라는 것이 따로 없어서(보드 상태
+ * 한 칸에 뭉쳐 있습니다) ops 는 그 칸이 있었으면 1 입니다. 정확한 수를 셀 수 없는
+ * 자리이고, 화면은 이 값으로 「무엇을 잃었나」만 말합니다.
+ */
+const localRemove = (boardId) => {
+  const list = localList()
+  const at = list.findIndex((p) => p.boardId === boardId)
+  const card = at >= 0
+  if (card) {
+    list.splice(at, 1)
+    try { localStorage.setItem(LOCAL_KEY, JSON.stringify(list)) } catch { /* 꽉 찬 저장소 */ }
+  }
+  let assets = 0
+  let ops = 0
+  try {
+    const kept = localStorage.getItem(`sb.assets.${boardId}`)
+    if (kept) {
+      const v = JSON.parse(kept)
+      assets = v && typeof v === 'object' ? Object.keys(v).length : 0
+    }
+    localStorage.removeItem(`sb.assets.${boardId}`)
+    if (localStorage.getItem(`sb.state.${boardId}`)) ops = 1
+    localStorage.removeItem(`sb.state.${boardId}`)
+  } catch { /* 못 읽어도 지우기는 끝난 것으로 봅니다 */ }
+  return { boardId, ops, assets, card, left: 0, graph: 'skipped' }
+}
+
 /**
  * 프로젝트 저장소. 배포에서는 AppSync, 로컬에서는 브라우저 저장소입니다.
  * 두 판의 메서드 이름·인자·반환 모양이 같아서 부르는 쪽은 어디인지 모릅니다.
  *
- * @returns {{mode: string, list: Function, put: Function}}
+ * @returns {{mode: string, list: Function, put: Function, remove: Function}}
  */
 export function store() {
   const net = projectsClient()
-  if (net) return { mode: 'aws', list: net.list, put: net.put }
+  if (net) return { mode: 'aws', list: net.list, put: net.put, remove: net.remove }
   return {
     mode: 'local',
     list: async () => localList(),
     put: async (o) => localPut({ ...o, ts: o.ts ?? Date.now() }),
+    remove: async (boardId) => localRemove(boardId),
   }
 }
 
@@ -124,5 +160,29 @@ export async function touch({ boardId, actor, what, name } = {}) {
 export async function list() {
   const rows = await store().list()
   return [...rows].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
+}
+
+/**
+ * 프로젝트 하나를 지웁니다. 카드 · 에셋 · op 로그 · Neptune 그래프 전부입니다.
+ *
+ * ══ touch 와 달리 실패를 던집니다
+ *
+ * 그쪽은 목록에 보이는 한 줄이라 못 붙어도 사실이 남습니다. 이쪽은 반대입니다. 못
+ * 지웠는데 「지웠습니다」로 넘어가면 목록을 새로 읽을 때 그 프로젝트가 그대로 있고,
+ * 사람은 자기가 뭘 잘못 눌렀는지 모릅니다.
+ *
+ * ══ 권한은 서버가 봅니다
+ *
+ * 감독만 지울 수 있습니다(infra/resolvers/deleteProject.js 의 ROLES). 여기서 역할을
+ * 다시 보지 않는 이유는 이 파일이 세션을 모른다는 것입니다 — 화면이 누르기 전에
+ * domain/permissions.js 로 미리 막고, 서버의 거부는 그대로 올라옵니다.
+ *
+ * @param {string} boardId
+ * @returns {Promise<{boardId: string, ops: number, assets: number, card: boolean,
+ *   left: number, graph: string}>} 지운 셈. left 가 0 이 아니면 다 못 지웠습니다
+ */
+export async function remove(boardId) {
+  if (!boardId) throw new Error('어느 프로젝트인지 모릅니다')
+  return store().remove(boardId)
 }
 

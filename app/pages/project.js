@@ -27,7 +27,8 @@
  */
 import { ASSET_KINDS, summarize } from '../domain/assets.js'
 import { loadAssets } from '../services/assets.js'
-import { list as listProjects } from '../services/projects.js'
+import { list as listProjects, remove as removeProject } from '../services/projects.js'
+import { allowed, denyReason, isDenied, roleName, JOB_ROLES } from '../domain/permissions.js'
 import { navHref, boardParam } from '../domain/routes.js'
 import { configured, session } from '../services/auth.js'
 import { showLogin, DEMO_USERS } from '../components/login-form.js'
@@ -155,6 +156,127 @@ function paintGone(why) {
   setHtml(g, `${why} <a href="/?view=projects">우리 팀 프로젝트로 돌아가기</a>`)
 }
 
+/* ══ 지우기 ════════════════════════════════════════ */
+
+/*
+ * 감독만 지울 수 있습니다.
+ *
+ * 로컬 모드(configured 가 거짓)에서는 막지 않습니다. 로그인이 없어서 역할이라는 것이
+ * 없고, 지워지는 것도 이 브라우저의 저장소뿐입니다. 다른 화면들이 권한을 보는 방식과
+ * 같습니다(story-graph.js · key-visual.js).
+ */
+const myRole = () => session()?.role || 'reviewer'
+const mayDelete = () => !configured || allowed('deleteProject', myRole())
+
+/**
+ * 이 프로젝트를 지우면 무엇이 사라지는지. 확인 창에 그대로 섭니다.
+ *
+ * 에셋의 요약을 그대로 씁니다(위의 rows). 서랍이 이미 「대본 5,614자 · 92줄」을 세어
+ * 두었으므로, 지우기 창에서 다른 말로 다시 세면 두 곳이 어긋날 자리가 생깁니다.
+ *
+ * 컷은 여기 없습니다. 컷은 에셋이 아니라 op 로그에 있고 이 화면은 그것을 읽지 않습니다.
+ * 그래서 개수를 세지 못하고, 세지 못하는 것을 「0개」로 적으면 거짓이 됩니다. 대신
+ * 「보드의 컷과 댓글도 함께」라고 말로 적습니다.
+ */
+const losing = (list) => list.filter((r) => !r.none)
+  .map((r) => `<b>${esc(r.kind.label)}</b> ${esc(r.sum)}`)
+
+function paintDanger(list) {
+  const box = byId('danger')
+  box.hidden = false
+  const why = byId('dangerWhy')
+  const btn = byId('delBtn')
+  const no = byId('delNo')
+
+  const have = losing(list).length
+  why.textContent = have
+    ? `이 프로젝트에 담긴 ${have}가지와 보드의 컷·댓글이 모두 사라집니다. 되돌릴 수 없습니다.`
+    : '담긴 것이 없는 프로젝트입니다. 카드와 보드의 기록이 사라집니다. 되돌릴 수 없습니다.'
+
+  if (mayDelete()) {
+    btn.hidden = false
+    no.hidden = true
+    btn.onclick = () => ask(list)
+    return
+  }
+  /*
+   * 막힌 채로 보여 줍니다. 버튼을 숨기면 사람은 이 기능이 없는 줄로 알고 찾아다니고,
+   * 감독에게 부탁할 일이라는 것도 모릅니다. 문장은 다른 화면들과 같은 곳에서 옵니다.
+   */
+  btn.hidden = true
+  no.hidden = false
+  no.textContent = denyReason('deleteProject', myRole())
+    || `삭제는 ${JOB_ROLES.deleteProject.map(roleName).join('·')}만 할 수 있습니다.`
+}
+
+/** 확인 창. 무엇을 잃는지 세어 보여준 뒤에 묻습니다 */
+function ask(list) {
+  const dlg = byId('ask')
+  const lose = losing(list)
+  byId('askP').textContent = `「${card?.name || BOARD}」를 지웁니다. 되돌릴 수 없습니다.`
+  setHtml(byId('askLose'), [
+    ...lose.map((l) => `<div>${l}</div>`),
+    // 컷은 세지 못합니다. 세지 못하는 것을 수로 적지 않고 있다는 사실만 적습니다
+    '<div>스토리보드의 <b>컷과 댓글</b> 전부</div>',
+    lose.length ? '' : '<div>담긴 에셋은 없습니다</div>',
+  ].filter(Boolean).join(''))
+
+  const yes = byId('askYes')
+  const nope = byId('askNo')
+  yes.disabled = false
+  yes.textContent = '지웁니다'
+  nope.onclick = () => dlg.close()
+  yes.onclick = () => run(dlg, yes)
+  dlg.showModal()
+}
+
+/** 실제로 지웁니다. 창은 끝난 뒤에 닫습니다 — 도는 동안 버튼이 사라지면 멈춘 것처럼 보입니다 */
+async function run(dlg, yes) {
+  yes.disabled = true
+  yes.textContent = '지우는 중입니다'
+  const done = byId('delDone')
+  try {
+    const r = await removeProject(BOARD)
+    dlg.close()
+    /*
+     * 지운 수를 그대로 적습니다. 「지웠습니다」만으로는 컷 340줄이 같이 사라진 것을
+     * 모릅니다. 이 화면은 이제 없는 프로젝트를 보고 있으므로 서랍을 접습니다.
+     */
+    const bits = [
+      r.ops ? `기록 ${r.ops.toLocaleString('ko-KR')}줄` : '',
+      r.assets ? `에셋 ${r.assets}개` : '',
+    ].filter(Boolean).join(' · ')
+    if (r.left) {
+      /*
+       * 다 못 지웠습니다. 카드는 서버가 일부러 남겨 두었으므로(deleteProject.js) 다시
+       * 지울 수 있습니다. 「지웠습니다」로 덮지 않는 것이 요점입니다.
+       */
+      byId('danger').hidden = false
+      done.hidden = false
+      done.textContent = `${bits ? `${bits}을 지웠지만 ` : ''}`
+        + `${r.left.toLocaleString('ko-KR')}줄이 남았습니다. 한 번에 지울 수 있는 양을 넘었습니다. `
+        + '다시 눌러 주세요. 남은 것부터 이어서 지웁니다.'
+      say(done.textContent)
+      return
+    }
+    paintGone(`「${esc(card?.name || BOARD)}」를 지웠습니다.${bits ? ` ${esc(bits)}이 사라졌습니다.` : ''}`)
+    say(`프로젝트를 지웠습니다. ${bits}`)
+  } catch (err) {
+    console.warn('[project] 프로젝트를 지우지 못했습니다', err)
+    dlg.close()
+    done.hidden = false
+    /*
+     * 권한 때문이면 「다시 시도해 주세요」를 붙이지 않습니다. 역할은 다시 눌러서 바뀌지
+     * 않습니다. 화면이 미리 막았는데도 여기 오는 경우가 있습니다 — 탭을 열어 둔 사이에
+     * 관리자가 역할을 바꾸면 서버의 거부가 유일한 신호입니다.
+     */
+    done.textContent = isDenied(err)
+      ? (denyReason('deleteProject', myRole()) || '프로젝트를 지울 권한이 없습니다.')
+      : `프로젝트를 지우지 못했습니다. ${err.message} 다시 시도해 주세요.`
+    say(done.textContent)
+  }
+}
+
 /* ══ 시작 ══════════════════════════════════════════ */
 
 async function boot() {
@@ -211,6 +333,7 @@ async function boot() {
   byId('body').hidden = false
   paintAssets(list)
   paintNote(list)
+  paintDanger(list)
   say(`${card?.name || BOARD} 프로젝트를 열었습니다. `
     + `에셋 ${list.filter((r) => !r.none).length}개가 있습니다.`)
 }

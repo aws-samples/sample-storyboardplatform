@@ -611,12 +611,147 @@ async function navigate(payload) {
   return { jobId, status: 'accepted' }
 }
 
+// ── 프로젝트 삭제 ────────────────────────────────────────────────────────────
+//
+// 리졸버가 아니라 여기서 하는 이유는 지울 것이 몇 개인지 모른다는 것이다. 한 프로젝트에
+// 남는 것은 세 갈래다.
+//
+//   pk='PROJECTS'   sk='P#<boardId>'   카드 한 장
+//   pk=BOARD#<id>   sk='ASSET#…'       에셋 여섯 개까지
+//   pk=BOARD#<id>   sk='OP#…'          컷·댓글·명부. 수백 줄이 된다
+//
+// 마지막 것이 문제다. AppSync 의 JS 리졸버는 한 번에 한 요청만 보내고 그 안에서 돌 수
+// 없어서, op 가 BatchWriteItem 한 번(25건)을 넘으면 나머지가 남는다. 반쯤 지워진
+// 프로젝트는 지우지 않은 것보다 나쁘다 — 카드는 사라졌는데 보드를 주소로 열면 컷이
+// 그대로 있고, 아무 화면에서도 그것을 다시 지울 수 없다.
+//
+// 그래서 Query → BatchWrite 를 다 지울 때까지 돈다. Neptune 의 그래프도 같은 자리에서
+// 지운다. 브라우저는 이 오퍼레이션 하나만 부르면 된다.
+
+const { QueryCommand, BatchWriteCommand, DeleteCommand } = require('@aws-sdk/lib-dynamodb')
+
+/** BatchWriteItem 한 번에 담을 수 있는 최대. DynamoDB 가 정한 값이다 */
+const BATCH = 25
+/*
+ * 한 번의 삭제에서 돌 수 있는 배치의 상한. 25 × 200 = 5,000 줄이다.
+ *
+ * 상한을 두는 이유는 Lambda 가 120초에 끊긴다는 것이다. 끊기면 반쯤 지워진 채로 남고
+ * 그것이 위에 적은 최악의 상태다. 상한에 닿으면 남은 수를 세어 돌려주고, 부르는 쪽이
+ * 「다 못 지웠다」고 말한다. 조용히 멈추지 않는 것이 요점이다.
+ */
+const MAX_ROUNDS = 200
+
+/** 키 한 묶음을 지운다. DynamoDB 가 처리하지 못하고 돌려준 것은 다시 넣는다 */
+async function dropKeys(keys) {
+  let left = keys
+  let tries = 0
+  while (left.length && tries < 5) {
+    tries += 1
+    const res = await openDdb().send(new BatchWriteCommand({
+      RequestItems: { [TABLE]: left.slice(0, BATCH).map((Key) => ({ DeleteRequest: { Key } })) },
+    }))
+    const un = res.UnprocessedItems?.[TABLE] || []
+    // 처리하지 못한 것 + 아직 보내지 않은 것
+    left = [...un.map((r) => r.DeleteRequest.Key), ...left.slice(BATCH)]
+  }
+  return left.length
+}
+
+/**
+ * 프로젝트 하나를 지운다. 카드 · 에셋 · op 로그 · Neptune 그래프 전부다.
+ *
+ * 지우는 순서가 있다. 카드를 마지막에 지운다. 중간에 끊기면 카드가 남아 있어야 사람이
+ * 목록에서 그 프로젝트를 다시 찾아 다시 지울 수 있다. 카드를 먼저 지우면 남은 op 를
+ * 어느 화면에서도 가리킬 수 없다.
+ *
+ * Neptune 이 실패해도 DynamoDB 는 계속 지운다. 그래프만 남는 것은 되돌릴 수 있다 —
+ * 대본을 다시 넣고 추출하면 saveGraph 가 projectId 째로 덮어쓴다(위의 saveGraph).
+ *
+ * @param {Object} payload - {boardId, projectId?}
+ * @returns {Promise<Object>} {deleted:{ops,assets,card}, left, graph}
+ */
+async function deleteProject(payload) {
+  const boardId = str(payload?.boardId)
+  if (!boardId) throw new Error('deleteProject 에 boardId 가 없다')
+  if (!TABLE) throw new Error('OPS_TABLE 이 비어 있다')
+
+  const ddbc = openDdb()
+  const pk = `BOARD#${boardId}`
+  let ops = 0
+  let assets = 0
+  let left = 0
+  let round = 0
+  let more = true
+
+  /*
+   * 한 판의 op 와 에셋은 같은 pk 에 산다. 그래서 Query 한 번이 둘을 같이 집는다.
+   * 세는 것만 sk 로 갈라 둔다 — 「op 340줄과 에셋 3개를 지웠습니다」가 「343줄을
+   * 지웠습니다」보다 사람에게 무엇을 잃었는지 말해 준다.
+   *
+   * LastEvaluatedKey 를 이어받지 않고 늘 처음부터 다시 묻는다. 방금 지운 자리를 커서로
+   * 가리키면 그 뒤부터 읽게 되고, 지우는 중에 남는 것이 생긴다. 앞이 비어 있으므로
+   * 다시 묻는 값도 같다.
+   */
+  while (more && round < MAX_ROUNDS) {
+    round += 1
+    const page = await ddbc.send(new QueryCommand({
+      TableName: TABLE,
+      KeyConditionExpression: '#pk = :pk',
+      ExpressionAttributeNames: { '#pk': 'pk' },
+      ExpressionAttributeValues: { ':pk': pk },
+      ProjectionExpression: 'pk, sk',
+      Limit: BATCH,
+    }))
+    const items = page.Items || []
+    for (const it of items) {
+      if (str(it.sk).startsWith('ASSET#')) assets += 1
+      else ops += 1
+    }
+    if (items.length) left += await dropKeys(items.map(({ pk: p, sk }) => ({ pk: p, sk })))
+    // 한 페이지를 꽉 채워 받았으면 더 있을 수 있다. 덜 받았으면 그것이 마지막이다
+    more = items.length === BATCH
+  }
+  // 상한에 닿았는데 아직 남아 있다. 카드를 남겨 다시 지울 수 있게 한다
+  if (more) left += 1
+
+  // Neptune. 실패해도 던지지 않는다
+  let graph = 'skipped'
+  if (ENDPOINT) {
+    try {
+      await open().V().has('projectId', str(payload?.projectId || boardId)).drop().iterate()
+      graph = 'dropped'
+    } catch (err) {
+      reset()
+      console.error('[graph] 그래프를 지우지 못했다', boardId, err)
+      graph = `failed: ${str(err?.message)}`
+    }
+  }
+
+  // 카드는 마지막이다. 이것이 남아 있으면 다시 지울 수 있다
+  let card = 0
+  if (!left) {
+    await ddbc.send(new DeleteCommand({
+      TableName: TABLE,
+      Key: { pk: 'PROJECTS', sk: `P#${boardId}` },
+    }))
+    card = 1
+  }
+
+  return { boardId, deleted: { ops, assets, card }, left, graph }
+}
+
 // ── 핸들러 ───────────────────────────────────────────────────────────────────
 
 /** Neptune 을 여는 오퍼레이션. 끊긴 소켓 재연결이 붙는다 */
 const GRAPH_OPS = { loadGraph, saveGraph, queryGraph, updateGraph }
-/** Neptune 을 쓰지 않는 오퍼레이션. payload 하나만 받는다 */
-const PLAIN_OPS = { plan, navigate }
+/*
+ * Neptune 을 쓰지 않는 오퍼레이션. payload 하나만 받는다.
+ *
+ * deleteProject 는 Neptune 도 만지지만 여기에 둔다. GRAPH_OPS 쪽은 g 를 인자로 받고
+ * 실패하면 통째로 다시 돌리는데(재연결), 이 일은 두 번 돌면 이미 지운 것을 또 세어
+ * 「op 340줄을 지웠다」를 두 번 말한다. 그래프 실패는 자기 안에서 삼킨다.
+ */
+const PLAIN_OPS = { plan, navigate, deleteProject }
 
 /** 프로토타입의 값('constructor' 등)이 오퍼레이션으로 잡히지 않게 자기 키만 본다 */
 const pick = (table, name) => (Object.hasOwn(table, name) ? table[name] : null)

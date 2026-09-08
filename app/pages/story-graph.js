@@ -42,6 +42,8 @@ import * as coach from '../components/coachmark.js'
 import { pickProject } from '../components/project-picker.js'
 import { touch as touchProject } from '../services/projects.js'
 import { saveAsset, loadAsset } from '../services/assets.js'
+import { allowed, denyReason, isDenied } from '../domain/permissions.js'
+import { confirmAsk } from '../components/confirm.js'
 
 /*
  * 예시가 쓸 제품 쪽 함수를 넣습니다. app-walkthrough 는 app/ 을 import 할 수 없습니다.
@@ -76,6 +78,15 @@ const GRAPH_NET = graphClient()
  * @returns {string} 'haiku-4.5' | 'sonnet-5' | 'opus-4.8'
  */
 const MODEL = () => $('modelSel')?.value || 'sonnet-5'
+
+/*
+ * 지금 앉아 있는 역할. 로그인 정보가 없으면 가장 권한이 적은 리뷰어로 봅니다.
+ *
+ * 없을 때 리뷰어로 떨어지는 것이 중요합니다. 기획으로 떨어뜨리면 로그인 정보를 읽지 못한
+ * 김에 화면이 「됩니다」라고 열어 두고, 서버가 그 뒤에 튕깁니다. 막힌 것을 열어 보이는 쪽이
+ * 열린 것을 막아 보이는 쪽보다 나쁩니다. pages/key-visual.js 의 myRole 과 같은 규칙입니다.
+ */
+const myRole = () => session()?.role || 'reviewer'
 
 /** 고른 모델의 짧은 이름. 진행 안내에 적어 무엇으로 돌고 있는지 보이게 한다 */
 const modelLabel = () =>
@@ -475,6 +486,40 @@ async function pickSeed(i, local = false) {
   openTab('story')
   highlight(SEEDS[i].focus || [])
   if (STORIES.has(String(i))) return renderStory()
+  /*
+   * 여기서 한 번 더 묻습니다. 씨앗 카드의 「스토리 생성」은 누르는 순간 모델 왕복이
+   * 시작되고 그 사이 이 패널이 다른 일을 받지 않습니다. 카드가 열두 장 깔린 화면에서
+   * 옆 씨앗을 보려다 누르는 자리라 특히 그렇습니다.
+   *
+   * 씨앗을 고르는 것 자체는 막지 않았습니다. 위에서 이미 카드가 켜지고 초점 노드가
+   * 판에서 빛납니다 — 무엇을 생성하려는지 보고 나서 결정하는 편이 맞습니다.
+   *
+   * 예시 안내(local)는 묻지 않습니다. 그 길은 POOL 의 목데이터로만 서고 모델을 부르지
+   * 않습니다. 기다릴 것이 없는 자리에서 창을 세우면 배우던 흐름만 끊깁니다.
+   */
+  if (!local) {
+    const ok = await confirmAsk({
+      title: '스토리를 생성하시겠습니까?',
+      body: NET
+        ? '고른 씨앗에서 분기 여러 개를 만듭니다. 만드는 동안 이 패널은 기다립니다.'
+        : '로컬 모드입니다. 미리 받아 둔 이야기 묶음에서 분기를 세웁니다.',
+      list: [
+        `씨앗 「${SEEDS[i].title}」`,
+        ...(NET ? [`모델 ${modelLabel()} · 10~30초쯤 걸립니다`] : ['모델을 부르지 않습니다']),
+      ],
+      yes: '생성합니다',
+    })
+    /*
+     * 그만두었습니다. 씨앗은 고른 채로 둡니다 — 판의 초점이 이미 그 씨앗을 가리키고
+     * 있고, 그것을 되돌리면 무엇을 보다가 그만두었는지 사라집니다.
+     *
+     * 다만 패널은 비워 둡니다. 여기에는 아직 아무것도 없는데(STORIES 에 이 씨앗이 없음)
+     * 화면을 그대로 두면 먼저 보던 다른 씨앗의 분기가 남아, 그것이 이 씨앗의 것으로
+     * 보입니다.
+     */
+    if (!ok) return renderFreeOnly(`「${SEEDS[i].title}」를 고른 채로 두었습니다. `
+      + '카드의 「스토리 생성」을 다시 누르시거나, 아래에 방향을 직접 적어도 됩니다.')
+  }
   await generate((onTry) => (local
     ? localBranches(SEEDS[i], STORE, POOL)
     : planBranches(NET, SEEDS[i], STORE, { pool: POOL, onTry, model: MODEL() })),
@@ -1089,6 +1134,40 @@ async function runScript() {
     renderScriptPanel()
     return
   }
+  // 권한을 먼저 봅니다. 대본화는 컷을 묶음으로 나눠 여러 번 보내므로(planScript 의
+  // SCRIPT_BATCH), 막힐 것을 보내면 거부만 여러 번 받습니다
+  if (NET && configured) {
+    const no = denyReason('plan', myRole())
+    if (no) {
+      SCRIPT = { ...SCRIPT, err: no }
+      renderScriptPanel()
+      return
+    }
+  }
+  /*
+   * 한 번 더 묻습니다. 형식 드롭다운 바로 아래에 버튼이 있어서, 형식을 고르다가 그대로
+   * 눌러 버리는 자리입니다. 대본은 컷을 SCRIPT_BATCH 개씩 나눠 여러 번 보내므로 컷이
+   * 많으면 가장 오래 걸리는 생성이고, 이미 만들어 둔 대본이 있으면 그것을 덮습니다.
+   *
+   * 그래서 무엇을 · 몇 개를 · 어느 형식으로 옮기는지 세어서 보여줍니다. 사람이 한 번 더
+   * 생각할 재료가 「계속할까요?」가 아니라 그 셈이라는 것이 components/confirm.js 의
+   * 요점입니다.
+   */
+  const fmt = SCRIPT_FORMATS[SCRIPT.format]?.label || SCRIPT.format
+  const ok = await confirmAsk({
+    title: '이대로 대본을 생성하시겠습니까?',
+    body: SCRIPT.text
+      ? '화면에 있는 대본을 새로 만든 것으로 덮습니다. 먼저 「복사」나 「다운로드」로 챙겨 두셔도 됩니다.'
+      : '컷을 순서대로 읽어 대본 텍스트로 옮깁니다. 만드는 동안 이 탭은 기다립니다.',
+    list: [
+      `「${ep.title || '제목 없음'}」`,
+      `컷 ${ep.cuts.length}개 → ${fmt} 대본`,
+      ...(NET ? [`모델 ${modelLabel()} · 컷이 많으면 1~2분 걸립니다`] : ['로컬 모드 · 모델을 부르지 않습니다']),
+    ],
+    yes: '생성합니다',
+  })
+  if (!ok) return
+
   SCRIPT = { ...SCRIPT, busy: true, err: '', text: '' }
   renderScriptPanel()
   try {
@@ -1109,7 +1188,10 @@ async function runScript() {
     await keepScript(SCRIPT.text)
   } catch (err) {
     console.warn('[story-graph] 대본화 실패', err)
-    SCRIPT.err = `${err.message || '서버 연결에 실패했습니다.'} 다시 시도해 주세요.`
+    // 권한 때문이면 「다시 시도해 주세요」를 붙이지 않습니다. 역할은 다시 눌러서 바뀌지 않습니다
+    SCRIPT.err = isDenied(err)
+      ? (denyReason('plan', myRole()) || err.message)
+      : `${err.message || '서버 연결에 실패했습니다.'} 다시 시도해 주세요.`
   } finally {
     SCRIPT.busy = false
     renderScriptPanel()
@@ -1125,22 +1207,34 @@ async function runScript() {
  */
 async function keepScript(text) {
   if (!text?.trim()) return
-  /*
-   * 리뷰 역할은 에셋을 쓰지 못합니다(infra/resolvers/putAsset.js). 보내면 401 이 오고
-   * 그 문구가 안내문 자리에 뜨는데, 이 사람이 잘못한 것이 아니라서 겁만 줍니다.
-   * 대본은 화면에 그대로 있고 복사·다운로드도 그대로입니다.
-   */
-  if ((session()?.role || 'reviewer') === 'reviewer' && configured) return
   const note = $('scNote')
+  const say = (msg) => {
+    if (!note) return
+    note.className = 'warn'
+    note.textContent = msg
+  }
+  /*
+   * 리뷰 역할은 에셋을 쓰지 못합니다(infra/resolvers/putAsset.js). 보내지 않고 여기서
+   * 말합니다. 전에는 조용히 돌아섰는데, 담기지 않은 것을 담긴 것처럼 두면 새로고침
+   * 뒤에야 알게 됩니다. 대본은 화면에 그대로 있고 복사·다운로드도 그대로라서, 지금
+   * 받아 두면 잃지 않습니다 — 그 길을 같이 알려 줍니다.
+   */
+  if (configured && !allowed('putAsset', myRole())) {
+    say(`${denyReason('putAsset', myRole())} `
+      + '대본은 화면에 그대로 있습니다. 아래 「다운로드」로 받아 두세요.')
+    return
+  }
   try {
     await saveAsset({ boardId: BOARD, kind: 'script', body: text, actor: session()?.id })
   } catch (err) {
     console.warn('[story-graph] 대본을 담지 못했습니다', err)
-    if (note) {
-      note.className = 'warn'
-      note.textContent = `대본을 프로젝트에 담지 못했습니다. ${err.message} `
-        + '아래 「다운로드」로 받아 두시는 것이 안전합니다.'
-    }
+    // 서버가 권한으로 튕겼습니다(위를 지나온 뒤 역할이 바뀐 경우). 영어 오류를 그대로
+    // 띄우지 않습니다
+    say(isDenied(err)
+      ? `${denyReason('putAsset', myRole()) || '대본을 담을 권한이 없습니다.'} `
+        + '아래 「다운로드」로 받아 두세요.'
+      : `대본을 프로젝트에 담지 못했습니다. ${err.message} `
+        + '아래 「다운로드」로 받아 두시는 것이 안전합니다.')
   }
 }
 
@@ -1180,6 +1274,20 @@ async function extract() {
     hint.textContent = '그래프 추출에는 Bedrock 연결이 필요합니다. 목데이터로는 아래 흐름을 그대로 볼 수 있습니다.'
     return
   }
+  /*
+   * 권한을 여기서 먼저 본다. 서버(infra/resolvers/plan.js)가 기획·감독만 받으므로
+   * 아티스트·리뷰어·관리자는 조각을 열두 개 보내도 열두 번 다 거부된다. 그 왕복을 하지
+   * 않고, 무엇이 안 되고 누구면 되는지 바로 적는다.
+   *
+   * 이것만으로 끝나지 않는다. 역할은 관리자가 바꿀 수 있고 열어 둔 탭은 그대로 남으므로,
+   * 아래 catch 가 서버의 거부도 같은 말로 받는다.
+   */
+  const why = denyReason('plan', myRole())
+  if (configured && why) {
+    hint.className = 'err'
+    hint.textContent = why
+    return
+  }
   $('extractBtn').disabled = true
   hint.className = 'hint'
   hint.innerHTML = `<span class="spin"></span> ${esc(modelLabel())} 로 그래프를 뽑고 있습니다.`
@@ -1198,7 +1306,14 @@ async function extract() {
   } catch (err) {
     console.warn('[story-graph] 추출 실패', err)
     hint.className = 'err'
-    hint.innerHTML = `${esc(err.message || '서버 연결에 실패했습니다.')}<br>잠시 뒤 그래프 추출을 다시 눌러 주세요.`
+    /*
+     * 권한 때문이면 「잠시 뒤 다시」를 붙이지 않는다. 역할은 기다려서 바뀌지 않으므로
+     * 그 한 줄이 사람을 같은 버튼으로 계속 돌려보낸다. 대신 무엇이 안 되고 누구면 되는지
+     * 적는다(domain/permissions.js).
+     */
+    hint.innerHTML = isDenied(err)
+      ? esc(denyReason('plan', myRole()) || err.message)
+      : `${esc(err.message || '서버 연결에 실패했습니다.')}<br>잠시 뒤 그래프 추출을 다시 눌러 주세요.`
   } finally {
     $('extractBtn').disabled = false
   }
@@ -1357,17 +1472,33 @@ function mountChat() {
       if (!NET) {
         return '지금은 로컬 모드입니다. 네비게이터는 Bedrock 연결이 필요합니다. 배포된 화면에서 물어봐 주세요.'
       }
-      // 히스토리는 navigator-ui.js 가 sessionStorage 에 적어 둔 것을 그대로 읽는다.
-      // 이번 질문은 아직 들어 있지 않다. Lambda 가 마지막 user 메시지로 따로 붙인다
-      return runNavigateJob(NET, {
-        projectId: STORE.projectId || DEFAULT_PROJECT,
-        question,
-        // 스냅샷에 최근 역기입의 변경 요약을 얹어 보낸다. 역기입을 한 적이 없으면
-        // null 이고, 그때는 Lambda 가 스냅샷만으로 답한다
-        graphData: { ...STORE.toJSON(), recentWriteback: LAST_WRITEBACK },
-        conversationHistory: readHistory(),
-        model: MODEL(),
-      })
+      /*
+       * 권한은 보내기 전에 여기서 봅니다. 챗봇은 로그인도 서버도 모르는 부품이라
+       * (components/navigator-chat.js) 문장을 만들 수 있는 곳이 이 자리뿐입니다.
+       * retry:false 를 달아 「잠시 뒤 다시 물어봐 주세요」 가 붙지 않게 합니다 —
+       * 역할은 기다려서 바뀌지 않습니다.
+       */
+      const why = denyReason('navigate', myRole())
+      if (why) throw Object.assign(new Error(why), { retry: false })
+      try {
+        // 히스토리는 navigator-ui.js 가 sessionStorage 에 적어 둔 것을 그대로 읽는다.
+        // 이번 질문은 아직 들어 있지 않다. Lambda 가 마지막 user 메시지로 따로 붙인다
+        return await runNavigateJob(NET, {
+          projectId: STORE.projectId || DEFAULT_PROJECT,
+          question,
+          // 스냅샷에 최근 역기입의 변경 요약을 얹어 보낸다. 역기입을 한 적이 없으면
+          // null 이고, 그때는 Lambda 가 스냅샷만으로 답한다
+          graphData: { ...STORE.toJSON(), recentWriteback: LAST_WRITEBACK },
+          conversationHistory: readHistory(),
+          model: MODEL(),
+        })
+      } catch (err) {
+        // 위의 미리 보기를 지나왔는데도 서버가 권한으로 튕겼습니다. 관리자가 방금 역할을
+        // 바꿨거나 열어 둔 탭이 오래된 것입니다. 서버 문장을 우리 말로 바꿔 답합니다
+        if (!isDenied(err)) throw err
+        throw Object.assign(new Error(denyReason('navigate', myRole())
+          || '세계관 네비게이터를 쓸 권한이 없습니다.'), { retry: false })
+      }
     },
   })
 }

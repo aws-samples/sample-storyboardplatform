@@ -256,8 +256,13 @@ class StoryboardStack extends Stack {
       },
     })
     graphFn.node.addDependency(graphInstance)
-    // plan 결과를 적는다. 읽기는 planResult 리졸버(OpsDs)가 한다
-    table.grantWriteData(graphFn)
+    /*
+     * plan 결과를 적는다. 그것만이면 grantWriteData 로 충분했다. 읽기가 붙은 것은
+     * deleteProject 때문이다 — 지울 것을 먼저 Query 로 세어야 하고, 그 수가 몇인지
+     * 아무도 모른다(op 는 한 판에 수백 줄이 된다). grantReadWriteData 가 Query 와
+     * BatchWriteItem 을 함께 연다. plan 결과 읽기는 여전히 planResult 리졸버가 한다.
+     */
+    table.grantReadWriteData(graphFn)
     history.grantReadWriteData(graphFn)
 
     // 교차 리전 추론 프로필을 부르면 Bedrock 이 뒤에서 다른 리전의 파운데이션 모델을
@@ -279,6 +284,18 @@ class StoryboardStack extends Stack {
     js(graphDs, 'Plan', 'Mutation', 'plan', 'plan.js')
     // 네비게이터 챗봇도 같은 Lambda·같은 Event 패턴이다. 새 권한은 필요 없다
     js(graphDs, 'Navigate', 'Mutation', 'navigate', 'navigate.js')
+    /*
+     * 프로젝트 삭제. OpsDs 가 아니라 GraphFn 이 받는다.
+     *
+     * op 는 한 판에 수백 줄이 되고 JS 리졸버는 한 요청 안에서 돌 수 없다.
+     * BatchDeleteItem 한 번은 25건이라 그것을 넘는 판은 반쯤만 지워지고, 그러면 카드는
+     * 사라졌는데 주소로 열면 컷이 남아 아무 화면에서도 다시 지울 수 없다. Lambda 는
+     * Query → BatchWrite 를 다 지울 때까지 돈다. Neptune 도 같은 자리에서 지운다.
+     *
+     * Event 가 아니라 동기다(plan 과 다르다). 「몇 줄을 지웠나」와 「몇 줄이 남았나」는
+     * 사람이 다음에 할 일이 달라서 결과를 봐야 한다.
+     */
+    js(graphDs, 'DeleteProject', 'Mutation', 'deleteProject', 'deleteProject.js')
 
     const sg = new ec2.SecurityGroup(this, 'GpuSg', { vpc: net, description: 'storyboard gpu' })
 
