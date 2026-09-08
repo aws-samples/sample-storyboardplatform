@@ -4,15 +4,39 @@
  * 방식입니다. 무엇을 그릴지(op → 한 줄)는 services/activity-log.js 가 정합니다.
  */
 
-/** 사람이 읽는 시각. 오늘이면 시:분, 아니면 월/일 */
-export function when(ts, nowMs = Date.now()) {
+/*
+ * 달 이름. 「9/7」 대신 「Sep 7」로 적을 때 씁니다.
+ *
+ * toLocaleDateString 을 쓰지 않습니다. 그 값은 브라우저의 로케일이 정해서 같은 화면이
+ * 사람마다 「9월 7일」·「9/7」·「Sep 7」로 달라지고, 검사에서 무엇이 나올지도 미리
+ * 말할 수 없습니다. 열두 개를 적어 두는 편이 값이 늘 같습니다.
+ */
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/**
+ * 사람이 읽는 시각. 오늘이면 시:분, 아니면 날짜.
+ *
+ * style 이 'name' 이면 날짜를 「Sep 7」로 적습니다. 프로젝트 카드가 이것을 씁니다.
+ * 카드의 날짜는 목록의 것과 달리 옆에 견줄 줄이 없어서, 「9/7」이 9월 7일인지 7월
+ * 9일인지 짚어 줄 것이 화면에 없습니다. 달 이름이 있으면 한 조각만 보고도 읽힙니다.
+ * 표와 목록은 여러 줄이 세로로 늘어서 숫자끼리 자리가 맞는 편이 훑기 좋으므로 'num'
+ * 을 그대로 씁니다.
+ *
+ * @param {string|number} ts
+ * @param {number} [nowMs]
+ * @param {'num'|'name'} [style] - 'num' 은 9/7, 'name' 은 Sep 7
+ */
+export function when(ts, nowMs = Date.now(), style = 'num') {
   const d = new Date(Number(ts) || 0)
   if (!Number.isFinite(d.getTime())) return ''
   const p = (n) => String(n).padStart(2, '0')
   const today = new Date(nowMs)
   const sameDay = d.getFullYear() === today.getFullYear()
     && d.getMonth() === today.getMonth() && d.getDate() === today.getDate()
-  return sameDay ? `${p(d.getHours())}:${p(d.getMinutes())}` : `${d.getMonth() + 1}/${d.getDate()}`
+  if (sameDay) return `${p(d.getHours())}:${p(d.getMinutes())}`
+  return style === 'name'
+    ? `${MONTHS[d.getMonth()]} ${d.getDate()}`
+    : `${d.getMonth() + 1}/${d.getDate()}`
 }
 
 /* ══ 그리기 ════════════════════════════════════════ */

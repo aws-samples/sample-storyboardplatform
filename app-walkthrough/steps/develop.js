@@ -22,18 +22,21 @@ import { demoActive, demoAdvance, demoSay, demoTitle } from '../tour.js'
  *   boot mark openTab pickSeed
  *   playing      예시 재생 중임을 화면에 알립니다(그 사이의 기록에 표시가 붙습니다)
  *   afterDone    예시가 끝났습니다. 화면이 다시 그립니다
- *   openCoach    그 뒤에 코치마크. 예시가 남긴 것을 짚으므로 순서가 이래야 합니다
+ *
+ * 예전에는 afterDone 뒤에 openCoach 를 하나 더 받아 코치마크를 이어 열었습니다.
+ * 예시가 이미 화면을 다 짚은 뒤라 「여기까지가 예시입니다」 를 읽고 끝났다고 생각한
+ * 사람에게 막이 한 번 더 덮였습니다. 예시 하나로 충분해서 그 자리를 없앴습니다.
  *
  * STORE · SEEDS · STORIES 는 예시가 도는 사이에 값이 바뀝니다. 그래서 값이 아니라
  * 읽는 함수를 받습니다. 값으로 받으면 예시가 시작할 때의 빈 판을 계속 들고 있습니다.
  */
 let $, NET, modelLabel, store, stories, seeds, boot, mark, openTab, pickSeed
-let playing, afterDone, openCoach
+let playing, afterDone
 
 /** 예시를 시작합니다. 화면의 「예시 보기」와 코치마크가 부릅니다 */
 export function developExample(o) {
   ;({ $, NET, modelLabel, store, stories, seeds, boot, mark, openTab, pickSeed,
-    playing, afterDone, openCoach } = o)
+    playing, afterDone } = o)
   return runExample()
 }
 
@@ -198,8 +201,7 @@ function runExample() {
       playing(false)
       afterDone()
       // 예시 프로젝트를 밟고 있으면 다음 화면(키비주얼)으로 넘어간다 (tour.js)
-      if (demoAdvance('develop')) return
-      openCoach()
+      demoAdvance('develop')
     },
   })
 }

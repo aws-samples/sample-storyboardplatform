@@ -2,7 +2,7 @@
  * 키 비주얼 · 씬 단위 이미지 생성
  *
  * 실제 배포된 경로만 쓴다.
- *   대본 자르기      빈 줄로 블록을 나누고 슬러그가 같으면 한 씬으로 합친다
+ *   대본 자르기      domain/scene-split.js 가 씬 머리글에서 끊는다
  *   프롬프트 쓰기    net.plan()  → AppSync → Bedrock Converse
  *   그림 그리기      POST /gen   → ALB → EC2 GPU
  *   보드에 남기기    net.sendOp  → AppSync → DynamoDB
@@ -12,20 +12,26 @@
  */
 
 import { ART_ROLES, orderKeyBetween } from '../domain/panels.js'
+import { toScenes, readSlug, needsAiSplit, aiSplitScenes } from '../domain/scene-split.js'
 import { configured, idToken, session } from '../services/auth.js'
 import { connect } from '../services/api.js'
 import { showLogin } from '../components/login-form.js'
 import { NAV_TABS, navHref, boardFromSearch } from '../domain/routes.js'
 import { mountNav } from '../components/nav-tabs.js'
+import { mountBrand } from '../components/brand.js'
 import * as coach from '../components/coachmark.js'
 import { emptyPanel } from '../components/empty-panel.js'
 import { guiding } from '../../app-walkthrough/guide.js'
 import { keyVisualExample } from '../../app-walkthrough/steps/key-visual.js'
 import { makeArt } from '../lib/placeholder-art.js'
+import { gpuDownHint } from '../lib/gpu-hours.js'
 import { entries, group, markOp } from '../services/activity-log.js'
 import { paintList } from '../components/history-list.js'
 import { pickProject } from '../components/project-picker.js'
 import { touch as touchProject } from '../services/projects.js'
+import { saveAsset, loadAsset } from '../services/assets.js'
+import { JOB_ROLES, allowed, denyReason, isDenied } from '../domain/permissions.js'
+import { confirmAsk } from '../components/confirm.js'
 import { wire as wireTour, demoActive, demoAdvance, demoSay, demoTitle } from '../../app-walkthrough/tour.js'
 
 /*
@@ -56,7 +62,8 @@ const S = {
   seed: '',
   seedOn: false,
   model: null,
-  busy: null,           // 'split' | 'prompt' | 'batch'
+  busy: null,           // 'split'(머리글 없는 글을 모델이 나누는 중) | 'prompt' | 'batch'
+  stop: false,          // 「남은 씬 멈추기」를 눌렀나. 갈래들이 이걸 보고 다음 씬을 집지 않는다
   gpu: { state: 'unknown', text: '확인 중', models: [], resident: null, loading: null, wait: 0 },
   jobs: {},             // sceneId → { status, ms, url, err, code, tries }
   pick: null,
@@ -85,6 +92,22 @@ const canGen = () => !!cfg.genUrl
 const canPlan = () => !!S.net?.plan
 const myRole = () => S.me?.role || 'reviewer'
 const mayGen = () => ART_ROLES.includes(myRole())
+/*
+ * plan() 을 부를 수 있는 역할인가. 「연결이 있나」(canPlan)와 다른 물음입니다.
+ *
+ * 아티스트는 그림은 그릴 수 있지만 plan 은 못 부릅니다(infra/resolvers/plan.js). 그래서
+ * 이 화면에서 씬 나누기와 프롬프트 쓰기는 막히고 생성은 되는, 반쯤 열린 자리가 나옵니다.
+ * 로컬 모드는 리졸버를 지나지 않으므로 역할을 보지 않습니다.
+ */
+const mayPlan = () => !configured || allowed('plan', myRole())
+/*
+ * 에셋을 담을 수 있는 역할인가(infra/resolvers/putAsset.js). 리뷰어만 막힙니다.
+ *
+ * 로컬 모드는 막지 않습니다. 브라우저 저장소라 리졸버를 지나지 않고, 무엇보다 로컬은
+ * 자리를 돌려 가며 앉히므로 다섯 명 중 한 명이 리뷰어입니다(pages/board.js 의 resolveMe).
+ * 그 자리에 앉은 사람만 저장이 안 되면 까닭을 알 수 없습니다.
+ */
+const mayKeep = () => !configured || allowed('putAsset', myRole())
 
 /* ══ 로그 · 기록 ══════════════════════════════════ */
 
@@ -122,73 +145,15 @@ function mark(what, { ref = null, example = false } = {}) {
 
 const say = (m) => { const r = $('#live'); if (r) r.textContent = m }
 
-/* ══ 대본 → 씬 ════════════════════════════════════ */
-
-/*
- * 우리가 쓰는 글에는 줄표를 넣지 않지만, 이 둘은 남이 쓴 대본을 받아 읽는 자리라
- * 붙임표 · 짧은 줄표 · 긴 줄표를 다 받습니다. 슬러그의 시간이 긴 줄표 뒤에 붙어
- * 있으면 그것을 못 읽어 그 씬의 시간이 통째로 빠집니다.
- */
-const SLUG = /^(INT|EXT|I\/E)\.?\s+(.+?)(?:\s+[-–—]\s+(.+))?$/i
-const KO_SLUG = /^(실내|실외)[.\s]+(.+?)(?:\s+[-–—]\s+(.+))?$/
-
-/**
- * 슬러그 라인에서 장소·시간을 뽑는다. 없으면 null.
- * 이어지는 씬 표시는 장소든 시간이든 어디에 붙어 있어도 먼저 떼어낸다.
- * 그러지 않으면 "분장실 - 밤" 과 "분장실 - 밤 (이어서)" 가 다른 씬으로 갈라진다.
- */
-const CONT = /\s*\((?:이어서|계속|CONT'?D\.?|CONTINUOUS)\)\s*/gi
-
-function readSlug(text) {
-  const first = String(text).split('\n')[0].trim().replace(CONT, ' ')
-  const m = first.match(SLUG) || first.match(KO_SLUG)
-  if (!m) return null
-  return { place: (m[2] || '').trim(), time: (m[3] || '').trim() }
-}
-
-/**
- * splitScenario() 로 블록을 자르고, 슬러그의 장소·시간이 같은 인접 블록을 한 씬으로 합친다.
- * 씬을 고르지 않는다. 목록 전체가 그대로 넘어간다.
- */
-function toScenes(text) {
-  const blocks = String(text).split(/\n[ \t]*\n/).map((s) => s.trim()).filter(Boolean)
-  const out = []
-  blocks.forEach((b, i) => {
-    const slug = readSlug(b)
-    const last = out.at(-1)
-    const sameHead = last && slug && last.place === slug.place && last.time === slug.time
-    const noSlug = !slug && last
-    if (sameHead || noSlug) {
-      last.blkIdx.push(i)
-      last.text += '\n\n' + b
-    } else {
-      out.push({
-        place: slug?.place || '장소 미정',
-        time: slug?.time || '',
-        weather: '',
-        blkIdx: [i],
-        text: b,
-      })
-    }
-  })
-  return out.map((s, i) => ({
-    ...s,
-    id: `S${String(i + 1).padStart(2, '0')}`,
-    blocks: s.blkIdx.length === 1 ? `블록 ${s.blkIdx[0] + 1}` : `블록 ${s.blkIdx[0] + 1}–${s.blkIdx.at(-1) + 1} 병합`,
-    prompt: '',
-    cast: [],
-    beat: '',
-    framing: '',
-  }))
-}
-
 /* ══ 프롬프트 · Bedrock ═══════════════════════════ */
 
 const JSON_ONLY = '오직 아래 모양의 JSON 하나만 출력한다. 설명·머리말·코드펜스를 붙이지 않는다.'
 
 export function keyVisualPrompt(scenes) {
   const lines = scenes.map((s) =>
-    `${s.id} | ${s.place}${s.time ? ' · ' + s.time : ''}\n${s.text.replace(/\n+/g, ' ').slice(0, 400)}`)
+    `${s.id} | ${s.place}${s.time ? ' · ' + s.time : ''}`
+    + `${s.cast?.length ? ` | 등장: ${s.cast.join(', ')}` : ''}`
+    + `\n${s.text.replace(/\n+/g, ' ').slice(0, 400)}`)
   return [
     '아래는 한 대본을 씬으로 나눈 것이다. 씬마다 키 비주얼 한 장의 이미지 프롬프트를 쓴다.',
     '키 비주얼은 그 씬 전체의 화풍과 공간을 정하는 대표 그림이다. 컷보다 넓게 잡는다.',
@@ -244,8 +209,169 @@ function parseJson(text) {
   }
 }
 
+/*
+ * 이 프로젝트에 담긴 대본과 씬을 되살린다. boot 에서 한 번만 부른다.
+ *
+ * 못 읽어도 그냥 지나간다(loadAsset 이 null 을 준다). 대본 칸이 비어 있는 것은 이 화면의
+ * 원래 첫 모습이라 사람이 붙여넣으면 그대로 굴러간다. 여기서 막으면 읽기 한 번 실패한
+ * 것 때문에 화면 전체를 못 쓰게 된다.
+ *
+ * 예시를 재생하러 온 것이면 넣지 않는다. 예시는 자기 대본을 얹고 단계를 짚어 가는데,
+ * 그 앞에 프로젝트의 대본이 들어가 있으면 예시가 남의 글을 나누는 것으로 보인다.
+ */
+async function restoreAssets() {
+  if (demoActive()) return
+  const board = boardFromSearch()
+  const [script, scenes] = await Promise.all([
+    loadAsset(board, 'script'),
+    loadAsset(board, 'scenes'),
+  ])
+  if (script && !S.script) S.script = script
+  const list = Array.isArray(scenes?.scenes) ? scenes.scenes : []
+  if (list.length && !S.scenes.length) {
+    S.scenes = list
+    S.pick = list[0]?.id || null
+    // 씬이 있으면 2단계부터다. 나누기를 다시 누르게 하면 되살린 값을 덮어쓴다
+    S.step = 2
+  }
+}
+
+/**
+ * 씬을 프로젝트에 담는다. 실패는 삼키고 적어만 둔다.
+ *
+ * 프롬프트까지 같이 담는다. 씬 객체가 prompt 를 들고 있어서 따로 뺄 것이 없고, 서랍의
+ * 요약이 「씬 2개 · 프롬프트 1/2」로 그것을 센다(domain/assets.js).
+ */
+async function keepScenes() {
+  /*
+   * 담을 권한이 없으면 보내지 않고, 못 담았다는 것을 말합니다.
+   *
+   * 전에는 여기서 조용히 돌아섰습니다. 「씬 14개로 나눴습니다」만 보이고 새로고침하면
+   * 다 없어지는데, 그 사이에 아무 말도 없었습니다. 사라진 뒤에 알게 되는 것이 가장
+   * 나쁩니다. 로컬 모드는 막지 않습니다 — 브라우저 저장소라 리졸버를 지나지 않습니다.
+   */
+  if (!mayKeep()) { noteKeepDenied(); return }
+  try {
+    await saveAsset({
+      boardId: boardFromSearch(), kind: 'scenes',
+      body: { scenes: S.scenes }, actor: S.me?.id,
+    })
+  } catch (err) {
+    console.warn('[key-visual] 씬을 담지 못했습니다', err)
+    S.warn = `씬을 프로젝트에 담지 못했습니다. ${err.message}`
+    paint()
+  }
+}
+
+/*
+ * STEP 1 의 「씬으로 나누기」.
+ *
+ * 머리글(`S#1.` · `INT.` · `씬 1`)이 있으면 규칙으로 나눕니다. 왕복이 없어 즉시 끝납니다.
+ * 머리글이 하나도 없는 글(시놉시스 · 트리트먼트)은 읽을 표시가 없어서 규칙으로는 씬
+ * 하나입니다. 그 자리만 문장 모델에게 넘깁니다. 모델이 없거나 실패하면 규칙 결과로
+ * 돌아갑니다. 나누지 못한 것이 이 화면을 멈출 이유는 아닙니다.
+ */
+async function splitScript() {
+  if (!S.script.trim()) { S.warn = '대본을 먼저 붙여넣어 주세요.'; paint(); return }
+
+  // 지난번 경고를 지웁니다. 이번에 다시 걸리면 아래에서 다시 답니다
+  S.warn = null
+  const ai = needsAiSplit(S.script)
+  const useAi = ai && canPlan() && mayPlan()
+
+  if (ai && !canPlan()) {
+    // 로컬 모드입니다. 무엇이 없어서 못 하는지 그대로 말합니다. 흉내내지 않습니다
+    S.warn = '머리글이 없는 글은 문장 모델이 나눕니다. 로컬 모드에서는 씬 하나로 들어갑니다. '
+      + 'S#1. 장소 / 밤 처럼 머리글을 붙이면 모델 없이도 나뉩니다.'
+  } else if (ai && !mayPlan()) {
+    /*
+     * 연결은 있는데 역할이 막힙니다. 보내 봐야 서버가 튕기므로 보내지 않고, 왜 안 되는지와
+     * 이 사람이 지금 할 수 있는 것을 같이 적습니다. 머리글을 붙이는 길은 모델도 권한도
+     * 필요 없어서 아티스트·리뷰어도 스스로 나눌 수 있습니다.
+     */
+    S.warn = `${denyReason('plan', myRole())} 규칙으로 씬 하나로 넣었습니다. `
+      + 'S#1. 장소 / 밤 처럼 머리글을 붙이면 권한 없이도 나뉩니다.'
+  }
+
+  if (useAi) {
+    S.busy = 'split'; paint()
+    wire('u', `plan()  머리글이 없는 글 ${S.script.length}자 → 씬 나누기`)
+  }
+
+  const { scenes, byAi, err } = useAi
+    ? await aiSplitScenes(S.net, S.script, { model: S.model })
+    : { scenes: toScenes(S.script), byAi: false, err: null }
+
+  S.busy = null
+  S.scenes = scenes
+  S.jobs = {}
+  S.pick = scenes[0]?.id || null
+  if (!scenes.length) { S.warn = '나눌 것을 찾지 못했습니다. 대본을 확인해 주세요.'; paint(); return }
+
+  if (err) { wire('r', `실패  ${err}`); S.warn = `${err} 규칙으로 나눈 결과를 보여드립니다.` }
+  else if (byAi) wire('g', `200  씬 ${scenes.length}개`)
+
+  const how = byAi ? '문장 모델이 ' : ''
+  note(`${how}대본을 씬 ${scenes.length}개로 나눴습니다`)
+  mark(`${how}대본을 씬 ${scenes.length}개로 나눴습니다`)
+  S.step = 2
+  paint()
+  /*
+   * 대본과 씬을 함께 담는다. 대본은 사람이 이 칸에 직접 붙여넣었을 수 있어서, 나눈
+   * 이 순간이 「쓸 만한 대본이 여기 있다」가 확인되는 자리다. 담아 두면 다음에 이
+   * 화면에 올 때 칸이 채워져 있고, 서랍에서도 이 프로젝트에 대본이 있다고 보인다.
+   *
+   * 기다리지 않는다. 프롬프트 쓰기는 씬만 있으면 되고, 저장은 그것과 상관없다.
+   */
+  keepScript()
+  keepScenes()
+  if (canPlan()) writePrompts()
+}
+
+/**
+ * 프롬프트를 못 쓸 때 그 까닭을 S.warn 에 적습니다. 쓸 수 있으면 아무것도 하지 않습니다.
+ *
+ * 씬 나누기에서 이미 적어 둔 경고를 덮지 않습니다. 「권한이 없어 규칙으로 나눴습니다」와
+ * 「권한이 없어 프롬프트를 못 씁니다」는 같은 한 가지 이야기이고, 두 번째 문장이 첫 번째를
+ * 지우면 사람이 방금 읽던 안내가 눈앞에서 바뀝니다.
+ */
+function notePlanDenied() {
+  if (mayPlan() || S.warn) return
+  S.warn = `${denyReason('plan', myRole())} 씬은 나뉘었습니다. `
+    + '프롬프트 칸은 비어 있으니 직접 써주시거나 기획·감독에게 부탁해 주세요.'
+}
+
+/**
+ * 에셋을 못 담을 때 그 까닭을 적습니다. 담을 수 있으면 아무것도 하지 않습니다.
+ *
+ * 「저장되지 않는다」는 사실은 늘 말해야 하므로 S.warn 이 차 있어도 덮습니다.
+ * notePlanDenied 와 반대인 이유는, 저쪽은 「이번 것을 못 했다」이고 이쪽은 「지금 보이는
+ * 것이 새로고침하면 사라진다」라서 더 급한 이야기입니다. paint 는 부르는 쪽이 합니다.
+ */
+function noteKeepDenied() {
+  if (mayKeep()) return
+  S.warn = `${denyReason('putAsset', myRole())} `
+    + '지금 화면의 것은 새로고침하면 사라집니다. 필요하시면 대본을 복사해 두세요.'
+}
+
+/** 대본을 프로젝트에 담는다. 실패는 적어만 둔다. 대본은 칸에 그대로 남아 있다 */
+async function keepScript() {
+  if (!S.script.trim()) return
+  // 권한 안내는 keepScenes 가 합니다. 둘이 나란히 불려서 같은 말을 두 번 적을 이유가 없습니다
+  if (!mayKeep()) return
+  try {
+    await saveAsset({
+      boardId: boardFromSearch(), kind: 'script', body: S.script, actor: S.me?.id,
+    })
+  } catch (err) {
+    console.warn('[key-visual] 대본을 담지 못했습니다', err)
+  }
+}
+
 async function writePrompts() {
   if (!canPlan()) { paint(); return }
+  // 역할이 막히면 보내지 않고 까닭을 적습니다. 보내 봐야 리졸버가 튕깁니다
+  if (!mayPlan()) { notePlanDenied(); paint(); return }
   S.busy = 'prompt'; paint()
   wire('u', `plan()  씬 ${S.scenes.length}개 → 이미지 프롬프트`)
   try {
@@ -262,7 +388,8 @@ async function writePrompts() {
         weather: v.weather,
         beat: v.beat,
         framing: v.framing,
-        cast: v.cast,
+        // 대본의 「등장인물:」 줄이 모델의 추측보다 정확합니다. 모델이 빈 값을 주면 그것을 지킵니다
+        cast: v.cast.length ? v.cast : s.cast,
       })
       got++
     }
@@ -273,9 +400,16 @@ async function writePrompts() {
     if (got < S.scenes.length) {
       S.warn = `${S.scenes.length - got}개는 형식이 어긋나 버렸습니다. 그 씬은 직접 써주세요.`
     }
+    // 프롬프트가 씬에 붙었으니 담아 둔 씬도 고칩니다. 이것이 Bedrock 왕복 한 번의 결과라
+    // 새로고침으로 잃으면 다시 부르게 됩니다
+    keepScenes()
   } catch (e) {
     wire('r', `실패  ${e.message}`)
-    S.warn = e.message
+    // 서버가 권한으로 튕겼습니다. 「Not Authorized to access plan on type Mutation」 을
+    // 그대로 띄우면 사람은 자기가 뭘 잘못했는지 모릅니다. 우리 말로 바꿔 적습니다
+    S.warn = isDenied(e)
+      ? (denyReason('plan', myRole()) || '이미지 프롬프트를 쓸 권한이 없습니다.')
+      : e.message
   } finally {
     S.busy = null; paint()
   }
@@ -311,7 +445,8 @@ async function pollGpu() {
     }
     if (!S.model) S.model = j.loading || j.modelId
   } catch {
-    S.gpu = { state: 'down', text: '생성 서버에 닿지 않음', models: [], hint: '인스턴스가 꺼져 있을 수 있습니다' }
+    // 업무 시간 밖이면 꺼져 있는 것이 정상입니다. 시간표와 다음에 켜지는 때를 적습니다
+    S.gpu = { state: 'down', text: '생성 서버에 닿지 않음', models: [], hint: gpuDownHint() }
   }
   paintRig()
 }
@@ -390,6 +525,44 @@ async function runBatch(ids) {
   const targets = (ids || S.scenes.map((s) => s.id)).map(scene).filter((s) => s?.prompt)
   if (!targets.length) { S.warn = '프롬프트가 있는 씬이 없습니다. STEP 2 에서 먼저 받아주세요.'; paint(); return }
 
+  /*
+   * 여러 장이면 한 번 더 묻습니다. 이 화면에서 가장 오래 걸리고 가장 비싼 자리입니다 —
+   * 장당 10초 남짓이 순서대로 쌓이고(LANES 위의 머리글), 그리는 것은 우리 EC2 의 GPU 라
+   * 그 시간만큼 장비가 붙어 있습니다. 이미 그린 장이 있으면 그것도 다시 그립니다.
+   *
+   * 한 장은 묻지 않습니다. 「이 씬만 다시 생성」은 프롬프트를 고쳐 가며 여러 번 누르는
+   * 자리이고, 10초짜리 한 장 앞에 창을 세우면 그 손질이 창 닫기만 반복하는 일이 됩니다.
+   * 창을 여는 기준은 「비싼 일인가」이지 「생성인가」가 아닙니다.
+   */
+  if (targets.length > 1) {
+    const had = targets.filter((s) => job(s.id).status === 'done').length
+    const ok = await confirmAsk({
+      title: '키 비주얼을 생성하시겠습니까?',
+      body: canGen()
+        ? '씬 순서대로 한 장씩 그립니다. 그리는 동안 다른 씬은 대기하고, 「남은 씬 멈추기」로 멈출 수 있습니다.'
+        : 'aws-config.js 에 생성 서버가 없어 실제로 그리지 못합니다. 눌러도 씬마다 오류로 돌아옵니다.',
+      list: [
+        `씬 ${targets.length}개 · ${SIZES[S.size].label}`,
+        `모델 ${S.model || '기본'}${S.seedOn && S.seed ? ` · seed ${S.seed} 고정` : ''}`,
+        // 장당 10초를 targets 수로 곱합니다. 갈래가 셋이어도 서버가 한 장씩 그립니다
+        `장당 10초 남짓 · 모두 ${Math.max(1, Math.round(targets.length * 10 / 60))}분쯤 걸립니다`,
+        ...(had ? [`이미 그린 ${had}장을 다시 그립니다`] : []),
+      ],
+      yes: '생성합니다',
+    })
+    if (!ok) return
+  }
+
+  /*
+   * 대기열 단계로 넘깁니다. 전에는 부르는 쪽이 S.step = 3 을 먼저 박았는데, 물어보는
+   * 창이 생기면서 그만둔 사람도 빈 대기열 앞에 서게 됐습니다. 진행이 보일 자리로
+   * 옮기는 것은 실제로 시작하는 여기의 일입니다.
+   *
+   * 이미 3보다 뒤라면 두고 갑니다. 「대본과 맞춰 보기」(4단계)에서 한 씬을 다시 그리는
+   * 사람을 3단계로 끌어내리면 보고 있던 것이 사라집니다.
+   */
+  if (S.step < 3) S.step = 3
+
   S.busy = 'batch'; S.warn = null; S.t0 = now()
   for (const s of targets) { const j = job(s.id); j.status = 'queued'; delete j.err }
   paint()
@@ -409,14 +582,90 @@ async function runBatch(ids) {
     }
   }
   await Promise.all(Array.from({ length: Math.min(LANES, targets.length) }, lane))
+  // 멈춰서 끝났는지를 깃발을 내리기 전에 챙긴다. 아래 안내가 이것을 봐야 한다
+  const stopped = S.stop
   S.stop = false
 
   S.busy = null
   paint()
   const d = doneJobs().length, f = failedJobs().length
-  say(`${d}장 완료${f ? `, ${f}장 실패` : ''}`)
+  // 멈춰서 끝난 것과 다 그려서 끝난 것은 다른 일이다. 「3장 완료」만 적으면 멈춘 사람이
+  // 자기가 멈춘 것인지 나머지가 실패한 것인지 알 수 없다
+  const how = stopped ? ' · 남은 씬은 멈췄습니다' : ''
+  say(`${d}장 완료${f ? `, ${f}장 실패` : ''}${how}`)
   // 장마다 남기지 않는다. 한 배치가 한 줄이다. 8장을 8줄로 남기면 목록이 그것만으로 찬다
-  mark(`키 비주얼 ${d}장을 생성했습니다${f ? ` (${f}장 실패)` : ''}`)
+  mark(`키 비주얼 ${d}장을 생성했습니다${f ? ` (${f}장 실패)` : ''}${how}`)
+  keepKeyVisual()
+}
+
+/**
+ * 만든 그림을 프로젝트에 담는다. 주소만 담고 그림 자체는 담지 않는다.
+ *
+ * /gen 이 돌려주는 url 은 S3 의 키다(infra/gpu/server.py). 서명이 붙은 주소가 아니라
+ * 시간이 지나도 살아 있고, 그래서 담아 두면 다음에 그대로 뜬다.
+ *
+ * 예시 그림은 담지 않는다. 그것은 data: URL 이거나 그리는 법(art)이고, 예시로 만든
+ * 것이 프로젝트의 에셋으로 남으면 서랍이 「키 비주얼 3장」이라 말하는데 정작 만든
+ * 사람은 예시를 본 것뿐인 자리가 생긴다.
+ */
+async function keepKeyVisual() {
+  const shots = S.scenes
+    .map((s) => ({ s, j: job(s.id) }))
+    .filter(({ j }) => j.status === 'done' && j.url && !j.example)
+    .map(({ s, j }) => ({
+      sceneId: s.id, place: s.place, url: j.url, seed: j.seed ?? null,
+      model: j.modelLabel || null, size: S.size,
+    }))
+  // 담을 것이 있는지를 먼저 봅니다. 없으면 권한 이야기를 꺼낼 자리가 아닙니다 —
+  // 아무것도 안 만든 사람에게 「담을 권한이 없습니다」는 뜬금없는 말입니다
+  if (!shots.length) return
+  if (!mayKeep()) { noteKeepDenied(); paint(); return }
+  try {
+    await saveAsset({
+      boardId: boardFromSearch(), kind: 'keyvisual',
+      body: { shots }, actor: S.me?.id,
+    })
+  } catch (err) {
+    console.warn('[key-visual] 키 비주얼을 담지 못했습니다', err)
+  }
+}
+
+/*
+ * 보드에 붙인 만큼 서랍의 콘티 줄을 올려 둡니다.
+ *
+ * 서랍(project.html)은 op 로그를 읽지 않고 ASSET#conti 한 칸만 봅니다. 그 칸을 쓰는
+ * 곳이 지금까지 보드 화면 하나뿐이었습니다(pages/board.js 의 keepConti). 그래서 여기서
+ * 키 비주얼을 다 만들어 붙여 놓고도, 보드 화면을 한 번도 열지 않으면 서랍의 콘티는
+ * 계속 「아직 없습니다」였습니다. 붙인 사람 입장에서는 보드에 컷이 서 있는데 서랍이
+ * 없다고 말하는 셈입니다.
+ *
+ * 세는 방식이 보드 쪽과 다릅니다. 보드는 판에 있는 컷을 통째로 세지만 이 화면은
+ * 자기가 방금 보낸 것만 압니다(state.panels 이 여기에는 없습니다). 그래서 담겨 있던
+ * 수에 이번에 붙인 수를 더합니다. 새로 쓰지 않는 이유는 컷이 서른 개인 판에 키 비주얼
+ * 세 장을 붙였을 때 서랍이 「컷 3개」로 줄어들기 때문입니다.
+ *
+ * 승인 수와 회차 수는 담겨 있던 값을 그대로 넘깁니다. 여기서 붙는 패널은 draft 이고
+ * 회차에 속하지 않으므로 둘 다 늘지 않습니다. 보드 화면을 열면 그쪽이 판을 통째로
+ * 다시 세어 정확한 값으로 갈아 둡니다. 이것은 그 전까지의 어림값입니다.
+ */
+async function keepConti(added) {
+  if (!added) return
+  if (!mayKeep()) { noteKeepDenied(); paint(); return }
+  const board = boardFromSearch()
+  try {
+    // 못 읽으면 loadAsset 이 null 을 줍니다. 그때는 이번에 붙인 것만이라도 담습니다
+    const prev = (await loadAsset(board, 'conti')) || {}
+    await saveAsset({
+      boardId: board, kind: 'conti', actor: S.me?.id,
+      body: {
+        cuts: (Number(prev.cuts) || 0) + added,
+        approved: Number(prev.approved) || 0,
+        eps: Number(prev.eps) || 0,
+      },
+    })
+  } catch (err) {
+    console.warn('[key-visual] 콘티 요약을 담지 못했습니다', err)
+  }
 }
 
 /* ══ 보드에 붙이기 · publishOp ════════════════════ */
@@ -518,6 +767,15 @@ async function postToBoard() {
   aimBoardLink(ops[0].panel.id)
   paint()
   say(`${ops.length}장을 보드에 붙였습니다`)
+  /*
+   * 붙인 다음에 담습니다. 붙이는 것이 이 화면의 일이고 서랍의 한 줄은 그 사본입니다.
+   * 앞에 두면 담기를 기다리는 동안 「붙였습니다」가 늦게 뜹니다.
+   *
+   * 예시로 만든 그림도 셉니다. 키 비주얼 목록(keepKeyVisual)에서는 예시를 빼지만, 이쪽은
+   * 보드에 실제로 선 컷의 수입니다. 예시 패널도 op 로 보드에 남아 보이므로 그것을 빼면
+   * 서랍의 수가 보드의 컷 수와 어긋납니다.
+   */
+  await keepConti(ops.length)
 }
 
 /* ══ 그리기 ════════════════════════════════════════ */
@@ -702,7 +960,9 @@ const ROLE_KO = { planner: '기획', artist: '아티스트', director: '감독',
 /* ── STEP 1 ───────────────────────────────────── */
 function step1() {
   const w = el('div', 'wrap wrap--2')
-  const a = card('대본', '붙여넣은 대본을 블록으로 자르고, 슬러그가 같은 인접 블록을 한 씬으로 합칩니다.', 'script')
+  const a = card('대본',
+    '씬 머리글에서 끊습니다. S#1 · INT. · 씬 1 을 다 읽습니다. 머리글이 없는 글은 문장 모델이 나눕니다.',
+    'script')
   const ta = el('textarea', 'script')
   ta.value = S.script
   ta.placeholder = 'INT. 극장 분장실 - 밤\n거울 앞. 분장을 지우다 멈춘다.\n\n    수린\n  그 이름을 어디서 들었어.'
@@ -713,20 +973,18 @@ function step1() {
   const go = el('button', 'btn btn--go', '씬으로 나누기')
   go.type = 'button'
   go.dataset.coach = 'split'    // 예시 안내가 짚는 자리입니다
-  go.onclick = () => {
-    S.scenes = toScenes(S.script)
-    S.jobs = {}
-    S.pick = S.scenes[0]?.id || null
-    if (!S.scenes.length) { S.warn = '대본을 먼저 붙여넣어 주세요.'; paint(); return }
-    S.warn = null
-    note(`대본을 씬 ${S.scenes.length}개로 나눴습니다`)
-    mark(`대본을 씬 ${S.scenes.length}개로 나눴습니다`)
-    S.step = 2
-    paint()
-    if (canPlan()) writePrompts()
-  }
+  go.onclick = () => splitScript()
+  go.disabled = S.busy === 'split'
   row.append(go)
-  const n = el('span', 'hint', `${S.script.split(/\n[ \t]*\n/).filter((x) => x.trim()).length} 블록`)
+  /*
+   * 나누기 전에도 무엇을 보고 나눌지 말해 줍니다. 머리글이 있으면 그 수를, 머리글이
+   * 없는 글이면 모델이 나눌 것임을 미리 알립니다. 눌러 보고 알게 되지 않도록 합니다.
+   */
+  const heads = S.script.split('\n').filter((l) => readSlug(l)).length
+  const n = el('span', 'hint', S.busy === 'split' ? '나누는 중입니다'
+    : heads ? `씬 머리글 ${heads}개`
+      : needsAiSplit(S.script) ? '머리글이 없는 글입니다. 문장 모델이 나눕니다'
+        : `${S.script.split(/\n[ \t]*\n/).filter((x) => x.trim()).length} 블록`)
   row.append(n)
   a.append(row)
   w.append(a)
@@ -828,10 +1086,15 @@ function step2() {
   go.type = 'button'
   go.dataset.coach = 'gen'      // 예시 안내가 짚는 자리입니다
   go.disabled = !S.scenes.some((s) => s.prompt)
-  go.onclick = () => { S.step = 3; paint(); runBatch() }
+  // 단계를 여기서 넘기지 않습니다. 물어보는 창을 그만둔 사람이 빈 대기열 앞에 서지
+  // 않도록 runBatch 가 실제로 시작할 때 넘깁니다
+  go.onclick = () => runBatch()
   b.append(go)
+  // 권한이 없으면 버튼을 눌리게 두지 않습니다. 눌러 봐야 403 이 오고, 그 왕복이
+  // 알려 주는 것은 이 줄이 미리 말해 주는 것과 같습니다
   if (!mayGen()) {
-    b.append(el('p', 'note', `지금 역할은 ${ROLE_KO[myRole()]} 입니다. 버튼은 눌립니다. 서버가 역할을 보고 거절합니다.`))
+    go.disabled = true
+    b.append(el('p', 'note note--no', denyReason('gen', myRole())))
   }
   w.append(b)
   return w
@@ -868,8 +1131,31 @@ function step3() {
 
   const row = el('div', 'row')
   if (S.busy === 'batch') {
-    const st = el('button', 'btn btn--line', '남은 씬 멈추기')
-    st.type = 'button'; st.onclick = () => { S.stop = true; say('멈추는 중입니다') }
+    /*
+     * 이미 눌렀으면 누른 것이 보이게 합니다.
+     *
+     * 전에는 이 버튼이 S.stop 만 세우고 say() 로 끝났습니다. say 는 화면에 안 보이는
+     * 칸에 적으므로(key-visual.html 의 .sr #live) 눈에는 아무 일도 일어나지 않고,
+     * 버튼은 그대로 눌리는 채였습니다. 게다가 이미 GPU 로 떠난 요청 세 개는 끝까지
+     * 그려집니다(LANES). 그래서 사람은 30초 넘게 그림이 계속 나오는 것을 보며
+     * 「안 먹는다」고 판단하고 다시 누릅니다. 눌린 것과 남은 것을 여기서 말합니다.
+     */
+    const left = S.scenes.filter((s) => job(s.id).status === 'running').length
+    const st = el('button', 'btn btn--line', S.stop
+      ? `멈추는 중 · 보낸 ${left}장은 끝까지 그립니다` : '남은 씬 멈추기')
+    st.type = 'button'
+    st.disabled = S.stop
+    st.onclick = () => {
+      S.stop = true
+      wire('u', '남은 씬 멈추기 · 대기 중인 씬을 취소합니다')
+      say('멈추는 중입니다. 이미 보낸 장은 끝까지 그립니다')
+      // 대기였던 씬을 그 자리에서 대기열에서 뺍니다. 이것이 눈에 보이는 유일한 변화입니다
+      for (const s of S.scenes) {
+        const j = job(s.id)
+        if (j.status === 'queued') j.status = 'idle'
+      }
+      paint()
+    }
     row.append(st)
     row.append(el('span', 'hint', `${doneJobs().length}/${S.scenes.length} 완료`))
   } else {
@@ -905,10 +1191,19 @@ function step3() {
     r2.append(el('b', null, k), el('span', null, v))
     tbl.append(r2)
   }
-  line('아티스트 · 기획', '생성 요청이 통과합니다', true)
-  line('감독 · 리뷰어 · 관리자', '서버가 403 으로 거절합니다', false)
+  /*
+   * 두 줄을 표에서 만듭니다(domain/permissions.js). 손으로 적어 두면 서버의 허용 목록이
+   * 바뀔 때 이 카드만 옛말을 하는데, 하필 「누가 할 수 있나」를 알려 주는 카드입니다.
+   */
+  const kos = (list) => list.map((r) => ROLE_KO[r] || r).join(' · ')
+  const may = JOB_ROLES.gen
+  const mayNot = Object.keys(ROLE_KO).filter((r) => !may.includes(r))
+  line(kos(may), '생성 요청이 통과합니다', true)
+  line(kos(mayNot), '서버가 403 으로 거절합니다', false)
   p.append(tbl)
-  p.append(el('p', 'note', `지금 역할은 ${ROLE_KO[myRole()]} 입니다. ${mayGen() ? '생성이 통과합니다.' : '버튼은 눌리고, 요청은 서버에서 거절됩니다.'}`))
+  p.append(el('p', mayGen() ? 'note' : 'note note--no', mayGen()
+    ? `지금 역할은 ${ROLE_KO[myRole()]} 입니다. 생성이 통과합니다.`
+    : denyReason('gen', myRole())))
   b.append(p)
 
   b.append(scaleCard())
@@ -1114,8 +1409,18 @@ function runExample() {
   return keyVisualExample({
     S, paint, wire, note, mark, job, makeArt, toScenes, normalizeVisuals,
     paintQueue, paintBoard, doneJobs,
-    // 예시를 마친 뒤. 코치마크는 예시가 남긴 것을 짚으므로 순서가 이래야 합니다
-    afterDone: () => openCoach(),
+    /*
+     * 예시를 마치면 끝입니다. 예전에는 여기서 코치마크 넉 장을 이어 열었습니다.
+     * 예시가 이미 네 단계를 짚어 가며 그 화면을 다 보여준 뒤라, 「여기까지가
+     * 예시입니다」 를 읽고 끝났다고 생각한 사람에게 막이 한 번 더 덮이는 셈이었습니다.
+     * 다 본 사람에게 같은 화면을 다시 설명하는 것이 피로해서 그 자리를 없앴습니다.
+     *
+     * 코치마크 자체는 남아 있습니다. 예시를 보지 않고 온 사람에게는 여전히 열리고,
+     * 다시 보고 싶으면 헤더의 「안내 다시 보기」입니다. 예시를 본 사람에게만 열지
+     * 않습니다. 그래서 봤다고 적어 둡니다. 안 적으면 다음에 이 화면을 열 때(그때는
+     * 대본이 차 있으므로) 스스로 열려서, 없앤 것이 한 걸음 미뤄지기만 합니다.
+     */
+    afterDone: () => { coach.skip(COACH_KEY); paint() },
   })
 }
 
@@ -1188,8 +1493,8 @@ function paint() {
   m.append([step1, step2, step3, step4][S.step - 1]())
   if (S.step === 3) { paintRig(); paintQueue(); paintLog() }
   if (S.step === 3 || S.step === 4) paintBoard()   // 두 단계 다 #kvgrid 를 가진다
-  $('#modeTag').textContent = canGen() ? '배포됨' : '로컬'
-  $('#modeTag').className = 'tag ' + (canGen() ? 'tag--live' : 'tag--local')
+  // 「배포됨」 배지는 없앴습니다. 보는 사람이 할 일과 상관없는 값이라 머리만 길어졌습니다.
+  // 배포인지 로컬인지가 실제로 갈리는 자리(생성 서버 · 문장 모델)는 그 자리에서 말합니다.
   const w = $('#whoami')
   w.textContent = `${ROLE_KO[myRole()] || myRole()}로 로그인`
   w.title = mayGen() ? '생성 요청이 서버를 통과합니다' : '서버가 생성 요청을 403 으로 거절합니다'
@@ -1210,6 +1515,9 @@ async function boot() {
    * 단계"다.
    */
   mountNav({ mount: $('#navMount'), active: 'keyvisual', handled: ['keyvisual'] })
+
+  // 머리의 왼쪽. 네 화면이 같은 것을 씁니다. 누르면 홈입니다
+  mountBrand('#brandMount')
 
   /*
    * 배포 모드에서는 먼저 로그인을 받는다.
@@ -1242,9 +1550,21 @@ async function boot() {
   })
 
   /*
-   * 대본 칸은 비어 있는 채로 시작한다. 예전에는 여기서 S.script = SAMPLE 이었다. * 그러면 처음 온 사람이 자기가 넣지도 않은 대본 앞에서, 그것이 예시인지 남이 넣은
-   * 것인지 모른 채 「씬으로 나누기」를 누르게 된다. 예시는 「예시 보기」로 들어온다.
+   * 대본 칸을 이 프로젝트에 담긴 대본으로 채운다.
+   *
+   * 예전에는 비어 있는 채로 시작했다. 예시 대본을 미리 넣어 두면 처음 온 사람이 자기가
+   * 넣지도 않은 대본 앞에서 그것이 예시인지 남이 넣은 것인지 모른 채 「씬으로 나누기」를
+   * 누르게 되므로, 그것을 없앤 자리다. 예시는 여전히 「예시 보기」로만 들어온다.
+   *
+   * 지금 넣는 것은 예시가 아니라 이 프로젝트의 대본이다. 스토리 디벨롭에서 만들었으면
+   * 거기서 담겼다(pages/story-graph.js 의 keepScript). 그전에는 사람이 그 화면에서
+   * 「복사」를 눌러 이 칸에 붙여야 했다. step 1-2-3 이 이어진 것처럼 보였던 것은 화면
+   * 순서일 뿐이고 데이터로는 끊겨 있었다. 이 한 줄이 그것을 잇는다.
+   *
+   * 씬도 같이 되살린다. 새로고침으로 씬이 사라지면 「그림 만들기」를 다시 하려고 나누기를
+   * 또 눌러야 했고, 머리글 없는 글이면 그것이 Bedrock 왕복 한 번이었다.
    */
+  await restoreAssets()
 
   // 보드에 붙기 전에 한 번 그린다. 연결이 오래 걸리거나 실패해도 화면은 이미 있고,
   // 실시간 기능만 나중에 붙는다. 아래 connect() 가 유일한 렌더 관문이면 안 된다.
@@ -1325,4 +1645,6 @@ document.addEventListener('keydown', (e) => {
 
 boot()
 
-export { S, toScenes, readSlug, runBatch, genOne, postToBoard }
+export { S, runBatch, genOne, postToBoard }
+// 씬 나누기는 domain/scene-split.js 로 옮겼습니다. 이 이름을 쓰던 자리를 위해 다시 내보냅니다
+export { toScenes, readSlug }

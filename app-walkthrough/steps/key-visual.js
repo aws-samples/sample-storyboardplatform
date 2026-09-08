@@ -168,7 +168,7 @@ function runExample() {
     },
     {
       say: '대본을 씬으로 나눕니다', see: 'script',
-      sub: '빈 줄로 블록을 자르고, 슬러그가 같은 인접 블록은 한 씬으로 합칩니다',
+      sub: '씬 머리글에서 끊고, 슬러그가 같은 채로 이어지는 자리는 한 씬으로 합칩니다',
       spot: 'split',
       run: () => {
         S.scenes = toScenes(S.script)

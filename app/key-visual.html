@@ -48,8 +48,7 @@ header{
   backdrop-filter:blur(8px);border-bottom:1px solid var(--line);
 }
 .bar{display:flex;align-items:center;gap:14px;padding:11px 20px}
-.brand{display:flex;align-items:baseline;gap:8px;font-weight:650;letter-spacing:-.02em}
-.brand span{color:var(--ink-3);font-weight:450;font-size:13px}
+/* 브랜드의 모양은 app/components/brand.js 가 들고 있습니다 */
 .tag{
   font:500 11px/1 var(--m);padding:4px 7px;border-radius:4px;
   border:1px solid var(--line);color:var(--ink-2);background:var(--fill);
@@ -107,6 +106,8 @@ main{padding:20px;min-width:0}
 .card__s{font-size:12.5px;color:var(--ink-2);margin-top:3px}
 .card>*+*{margin-top:11px}
 .note{font-size:12px;color:var(--ink-3);line-height:1.5}
+/* 권한이 없어 막힌 자리. 옅은 회색 안내와 달리 읽고 지나가면 안 되는 줄이다 */
+.note--no{color:var(--no);font-weight:600}
 .hint{font-size:12px;color:var(--ink-3)}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 
@@ -349,8 +350,11 @@ aside{
 
 <header>
   <div class="bar">
-    <div class="brand">스토리보드 <span>키 비주얼</span></div>
-    <span class="tag" id="modeTag">…</span>
+    <!--
+      머리의 왼쪽은 네 화면이 같습니다. 「S 여름 스튜디오」이고 누르면 홈입니다
+      (app/components/brand.js). 지금 어느 화면인지는 아래 탭 바가 켠 탭으로 말합니다.
+    -->
+    <div id="brandMount"></div>
     <span class="spacer"></span>
     <span class="tag" id="whoami" data-coach="whoami">…</span>
     <button class="ghost" id="coachBtn" type="button">안내 다시 보기</button>

@@ -62,15 +62,7 @@
     border-bottom: 1px solid var(--line); display: flex; align-items: center;
     padding: 0 22px; gap: 10px; box-shadow: 0 1px 12px rgba(26,34,60,.05); z-index: 20;
   }
-  .topbar h1 {
-    font-size: 19px; font-weight: 800; letter-spacing: -.02em; margin-right: 8px;
-    color: var(--acc);
-  }
-  .badge {
-    font-size: 13px; font-weight: 600; background: var(--bg-soft); border: 1px solid var(--line);
-    border-radius: 999px; padding: 5px 12px; color: var(--ink3); white-space: nowrap;
-  }
-  .badge--live { background: var(--ok-soft); border-color: var(--sb-ok-line); color: var(--ok-ink); }
+  /* 브랜드의 모양은 app/components/brand.js 가 들고 있습니다. h1 과 배지 둘은 없앴습니다 */
   .who { font-size: 14px; font-weight: 700; color: var(--ink2); white-space: nowrap; }
   .grow { flex: 1; }
   .graph-area { position: relative; overflow: hidden; background: var(--bg); }
@@ -407,9 +399,15 @@
 <body>
 <div class="app">
   <div class="topbar">
-    <h1>Story Graph</h1>
-    <span class="badge" id="modeBadge">모드 확인 중</span>
-    <span class="badge" id="srcBadge">graph: app-walkthrough/data/graph.json</span>
+    <!--
+      머리의 왼쪽은 네 화면이 같습니다. 「S 여름 스튜디오」이고 누르면 홈입니다
+      (app/components/brand.js).
+
+      예전에는 여기에 「Story Graph」 와 배지 둘(모드 확인 중 · graph: …)이 있었습니다.
+      같은 서비스인데 화면마다 다른 제품 이름이 걸려 있었고, 배지 둘은 보는 사람이 할 일과
+      상관없는 값이라 머리만 길었습니다. 지금 어느 화면인지는 아래 탭 바가 말합니다.
+    -->
+    <div id="brandMount"></div>
     <div class="grow"></div>
     <span class="who" id="whoAmI" hidden></span>
     <button class="btn btn--line btn--mini" id="logoutBtn" hidden>로그아웃</button>

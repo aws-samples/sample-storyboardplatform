@@ -40,14 +40,25 @@
   } = await import(`./services/planner.js?t=${Date.now()}`)
   const { localBranches, branchToSpec, branchOutlinePrompt, localBranchOutline } = await import(`./domain/local-fallback.js?t=${Date.now()}`)
   const { parseJson } = await import(`./domain/json-repair.js?t=${Date.now()}`)
+  const {
+    toScenes, readHeading, readCast, readSlug, placeTime, stripCont,
+    needsAiSplit, proseSplitPrompt, normalizeProseScenes, aiSplitScenes, PROSE_CAP,
+  } = await import(`./domain/scene-split.js?t=${Date.now()}`)
+  const {
+    GPU_ON_HOUR, GPU_OFF_HOUR, GPU_HOURS_TEXT, gpuHoursOpen, nextGpuOn, gpuDownHint,
+  } = await import(`./lib/gpu-hours.js?t=${Date.now()}`)
   const { applyWriteback, validateWritebackBeforeApply } = await import(`./domain/graph-writeback.js?t=${Date.now()}`)
   const { edgeLabel, graphDelta, EDGE_LABELS_KR } = await import(`./components/graph-canvas.js?t=${Date.now()}`)
   const { parseField, runPlanJob, PLAN_TIMEOUT_MS } = await import(`./services/api.js?t=${Date.now()}`)
-  const { NAV_TABS, navTab, navHref, newHref, wantsNew, navTabFromSearch } = await import(`./domain/routes.js?t=${Date.now()}`)
+  const { NAV_TABS, navTab, navHref, newHref, wantsNew, navTabFromSearch, drawerHref,
+    openHref, openFromSearch } = await import(`./domain/routes.js?t=${Date.now()}`)
   const { mountNav } = await import(`./components/nav-tabs.js?t=${Date.now()}`)
   const { MARK, markOp, toEntry, entries, group } = await import(`./services/activity-log.js?t=${Date.now()}`)
   const { when, paintList, paintTable } = await import(`./components/history-list.js?t=${Date.now()}`)
   const { newBoardId, store, touch, list } = await import(`./services/projects.js?t=${Date.now()}`)
+  const {
+    ASSET_KINDS, KIND_KEYS, ASSET_MAX_CHARS, assetKind, isAssetKind, fitsAsset, summarize,
+  } = await import(`./domain/assets.js?t=${Date.now()}`)
   const { paintCards, pickProject } = await import(`./components/project-picker.js?t=${Date.now()}`)
   const { wire: wireTour, DEMO_BOARD, DEMO_NAME, DEMO_STEPS, DEMO_TOTAL, demoActive, demoAt, demoSay, demoTitle,
   } = await import(`../app-walkthrough/tour.js?t=${Date.now()}`)
@@ -1431,6 +1442,46 @@
     && navTabFromSearch(undefined, 'board') === 'board')
   ok('? 없이 넘겨도 읽는다', navTabFromSearch('tab=keyvisual', 'board') === 'keyvisual')
 
+  /*
+   * 프로젝트 서랍. 홈의 카드가 여기로 온다. 일하는 화면 넷과 달리 NAV_TABS 에 없다.
+   * 넣으면 모든 화면의 탭 바에 다섯째 탭이 생기는데 서랍은 작업하는 곳이 아니다.
+   */
+  ok('서랍 주소는 프로젝트를 들고 간다', drawerHref('p-a') === '/project.html?board=p-a')
+  ok('보드가 없으면 붙이지 않는다. 서랍은 기본 보드로 떨어지지 않는다',
+    drawerHref() === '/project.html' && drawerHref('') === '/project.html')
+  ok('이름에 든 특수문자가 주소를 깨지 않는다',
+    drawerHref('p a&b') === '/project.html?board=p%20a%26b')
+  ok('서랍은 탭이 아니다', !NAV_TABS.some((t) => t.href.includes('project.html')))
+
+  /*
+   * 서랍의 「열기」는 무엇을 열라는 말까지 들고 갑니다 (?open=<kind>).
+   *
+   * 이것이 없어서 「관계 그래프 열기」와 「시놉시스 열기」가 똑같이 스토리 디벨롭의 첫
+   * 화면으로 갔습니다. 그 화면은 판이 비어 있으면 「처음 오셨나요? 판이 비어 있습니다」를
+   * 세우므로, 서랍에서 그래프가 있는 것을 보고 누른 사람이 없다는 말을 만났습니다.
+   */
+  ok('열기는 어느 에셋을 열지도 들고 간다',
+    openHref('develop', 'p-a', 'graph') === '/story-graph.html?board=p-a&open=graph')
+  ok('이미 ?tab= 이 붙은 주소에도 & 로 이어진다',
+    openHref('script', 'p-a', 'script') === '/story-graph.html?tab=script&board=p-a&open=script')
+  ok('종류를 안 주면 navHref 와 같다. 「만들기」가 그 길이다',
+    openHref('develop', 'p-a') === navHref('develop', 'p-a'))
+  ok('보드가 없어도 종류는 붙는다', openHref('develop', null, 'graph') === '/story-graph.html?open=graph')
+
+  ok('받는 화면이 그 값을 읽는다', openFromSearch('?open=graph', KIND_KEYS) === 'graph'
+    && openFromSearch('?board=p-a&open=synopsis', KIND_KEYS) === 'synopsis')
+  /*
+   * 모르는 값은 무시합니다. 종류를 지운 뒤에 남은 링크나 사람이 손으로 고친 주소로
+   * 화면이 멈추지 않아야 합니다. 그때는 그 화면의 평소 첫 모습입니다.
+   */
+  ok('모르는 종류는 무시한다', openFromSearch('?open=없는것', KIND_KEYS) === null
+    && openFromSearch('?open=legacy', KIND_KEYS) === null)
+  ok('없으면 null 이다', openFromSearch('?board=p-a', KIND_KEYS) === null
+    && openFromSearch('', KIND_KEYS) === null && openFromSearch(undefined, KIND_KEYS) === null)
+  // 목록을 안 주면 모양만 봅니다. 이 파일이 에셋 표를 import 하지 않는 이유가 그것입니다
+  ok('목록을 주지 않으면 모양만 본다',
+    openFromSearch('?open=graph') === 'graph' && openFromSearch('?open=한글') === null)
+
   ok('탭 바는 내가 처리할 탭만 버튼으로, 나머지는 링크로 그린다', (() => {
     const mount = document.createElement('div')
     document.body.appendChild(mount)
@@ -1673,6 +1724,22 @@
     const same = when(new Date(2026, 0, 15, 9, 5).getTime(), now)
     const other = when(new Date(2026, 0, 3, 9, 5).getTime(), now)
     return same === '09:05' && other === '1/3'
+  })())
+  /*
+   * 카드는 「Sep 7」로 적는다. 카드는 한 장씩 따로 서서 옆에 견줄 줄이 없어, 「9/7」만
+   * 놓고는 9월 7일인지 7월 9일인지 짚어 줄 것이 화면에 없다. 표와 목록은 여러 줄이
+   * 세로로 늘어서 숫자끼리 자리가 맞는 편이 훑기 좋으므로 그대로 둔다.
+   *
+   * toLocaleDateString 을 쓰지 않는 것이 이 검사가 성립하는 까닭이다. 그 값은 브라우저의
+   * 로케일이 정해서 검사에서 무엇이 나올지 미리 말할 수 없다.
+   */
+  ok('style 이 name 이면 달 이름으로 적는다', (() => {
+    const now = new Date(2026, 0, 15, 14, 30).getTime()
+    const sep = when(new Date(2026, 8, 7, 9, 5).getTime(), now, 'name')
+    const jan = when(new Date(2026, 0, 3, 9, 5).getTime(), now, 'name')
+    // 오늘 것은 style 과 무관하게 시:분이다. 달 이름을 적을 자리가 아니다
+    const same = when(new Date(2026, 0, 15, 9, 5).getTime(), now, 'name')
+    return sep === 'Sep 7' && jan === 'Jan 3' && same === '09:05'
   })())
 
   /*
@@ -2001,6 +2068,141 @@
     mount.remove()
     return r
   })())
+  ok('카드의 날짜는 Sep 7 꼴이다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    const now = new Date(2026, 0, 15, 14, 30).getTime()
+    paintCards(mount, [{ boardId: 'p-a', name: '여름', updatedAt: String(new Date(2026, 8, 7).getTime()) }],
+      { nowMs: now })
+    const r = mount.querySelector('.pj__t').textContent === 'Sep 7'
+    mount.remove()
+    return r
+  })())
+
+  /* ── 카드의 「⋮」 메뉴 ─────────────────────────── */
+  /*
+   * 카드 자체가 button 이다. 그 안에 버튼을 또 두면 화면 낭독기가 무엇을 누른 것인지
+   * 말하지 못하고, 안쪽 버튼의 클릭이 바깥으로 새면 메뉴를 열려다 판이 열린다. 그래서
+   * 「⋮」는 카드의 형제다.
+   */
+  ok('「⋮」는 카드 버튼 안이 아니라 형제로 선다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    paintCards(mount, pjRows, { onPick: () => {}, menu: () => [{ label: '열기', on: () => {} }] })
+    const card = mount.querySelector('[data-board="p-a"]')
+    const more = mount.querySelector('.pj__slot .pj__more')
+    const r = !card.querySelector('button') && more?.parentElement === card.parentElement
+      && more.getAttribute('aria-expanded') === 'false'
+    mount.remove()
+    return r
+  })())
+  ok('메뉴를 주지 않으면 카드에 「⋮」가 붙지 않는다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    paintCards(mount, pjRows, { onPick: () => {} })
+    const r = !mount.querySelector('.pj__more') && !mount.querySelector('.pj__slot')
+    mount.remove()
+    return r
+  })())
+  ok('빈 메뉴도 「⋮」를 달지 않는다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    paintCards(mount, pjRows, { onPick: () => {}, menu: () => [] })
+    const r = !mount.querySelector('.pj__more')
+    mount.remove()
+    return r
+  })())
+  /* 메뉴를 열려던 클릭이 카드까지 닿으면 판이 열린다. 그 자리를 막았는지 본다 */
+  ok('「⋮」를 눌러도 카드의 onPick 은 불리지 않는다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    const got = []
+    paintCards(mount, pjRows, {
+      onPick: (p) => got.push(p.boardId),
+      menu: () => [{ label: '열기', on: () => {} }],
+    })
+    mount.querySelector('[data-board="p-a"]').parentElement.querySelector('.pj__more').click()
+    const r = got.length === 0 && !!mount.querySelector('.pj__menu')
+    mount.remove()
+    return r
+  })())
+  ok('메뉴의 줄을 누르면 그 일이 불리고 메뉴가 닫힌다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    const got = []
+    paintCards(mount, pjRows, {
+      menu: (p) => [{ label: '작업 기록 보기', on: () => got.push(p.boardId) }],
+    })
+    const slot = mount.querySelector('[data-board="p-b"]').parentElement
+    slot.querySelector('.pj__more').click()
+    slot.querySelector('.pj__mi').click()
+    const r = got.join() === 'p-b' && !mount.querySelector('.pj__menu')
+      && slot.querySelector('.pj__more').getAttribute('aria-expanded') === 'false'
+    mount.remove()
+    return r
+  })())
+  /*
+   * 막힌 줄을 숨기지 않는다. 숨기면 사람은 기능이 없는 줄로 알고 찾아다니고, 감독에게
+   * 부탁할 일이라는 것도 모른다. project.js 의 paintDanger 와 같은 판단이다.
+   */
+  ok('막힌 줄은 숨기지 않고 흐리게 두고 이유를 단다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    let ran = 0
+    paintCards(mount, pjRows, {
+      menu: () => [{
+        label: '프로젝트 삭제', danger: true, disabled: true, why: '감독만 할 수 있습니다.', on: () => { ran += 1 },
+      }],
+    })
+    const slot = mount.querySelector('[data-board="p-a"]').parentElement
+    slot.querySelector('.pj__more').click()
+    const mi = slot.querySelector('.pj__mi')
+    mi.click()
+    const r = mi.textContent === '프로젝트 삭제' && mi.disabled
+      && mi.title === '감독만 할 수 있습니다.'
+      && mi.classList.contains('pj__mi--no') && ran === 0
+    mount.remove()
+    return r
+  })())
+  /* 카드가 열두 장 깔린 화면에서 메뉴 셋이 겹쳐 뜨면 어느 판의 것인지 알 수 없다 */
+  ok('메뉴는 한 번에 하나만 열린다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    paintCards(mount, pjRows, { menu: () => [{ label: '열기', on: () => {} }] })
+    const a = mount.querySelector('[data-board="p-a"]').parentElement
+    const b = mount.querySelector('[data-board="p-b"]').parentElement
+    a.querySelector('.pj__more').click()
+    b.querySelector('.pj__more').click()
+    const r = mount.querySelectorAll('.pj__menu').length === 1
+      && !!b.querySelector('.pj__menu')
+      && a.querySelector('.pj__more').getAttribute('aria-expanded') === 'false'
+    mount.remove()
+    return r
+  })())
+  ok('같은 「⋮」를 다시 누르면 메뉴가 닫힌다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    paintCards(mount, pjRows, { menu: () => [{ label: '열기', on: () => {} }] })
+    const slot = mount.querySelector('[data-board="p-a"]').parentElement
+    const more = slot.querySelector('.pj__more')
+    more.click()
+    more.click()
+    const r = !mount.querySelector('.pj__menu') && more.getAttribute('aria-expanded') === 'false'
+    mount.remove()
+    return r
+  })())
+  /* 다시 그리면 앞의 카드가 사라진다. 그 카드에 걸려 있던 메뉴가 남으면 떠 있는 조각이 된다 */
+  ok('카드를 다시 그리면 열려 있던 메뉴도 접힌다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    paintCards(mount, pjRows, { menu: () => [{ label: '열기', on: () => {} }] })
+    mount.querySelector('.pj__more').click()
+    paintCards(mount, pjRows, { menu: () => [{ label: '열기', on: () => {} }] })
+    const r = !document.querySelector('.pj__menu')
+    mount.remove()
+    return r
+  })())
+
   ok('카드 CSS 도 한 번만 넣는다', document.querySelectorAll('#projectsCss').length === 1)
   ok('카드 mount 가 없어도 던지지 않는다', (() => { paintCards(null, pjRows); return true })())
 
@@ -2993,6 +3195,166 @@
     ok(`${name} 코치마크가 경어체다`, said.length > 0 && !plain.length, plain.join(' / '))
   }
 
+  /*
+   * 예시가 끝나면 끝이어야 합니다. 예전에는 세 화면이 예시를 마친 뒤 코치마크 넉 장을
+   * 이어 열어서, 「여기까지가 예시입니다」 를 읽고 끝났다고 생각한 사람에게 막이 한 번 더
+   * 덮였습니다. 예시가 이미 그 화면을 짚어 가며 다 보여준 뒤라 같은 설명이 두 번입니다.
+   *
+   * 코치마크 자체를 없앤 것이 아닙니다. 예시를 보지 않고 온 사람에게는 여전히 열립니다.
+   * 그래서 「afterDone 이 coach.skip 을 부르고 coach.start 는 부르지 않는다」 를 봅니다.
+   * skip 이 빠지면 다음에 그 화면을 열 때 스스로 열려서, 없앤 것이 미뤄지기만 합니다.
+   */
+  for (const [name, url, key] of [
+    ['키 비주얼', 'pages/key-visual.js', 'sb.kv.coach.v1'],
+    ['스토리 디벨롭', 'pages/story-graph.js', 'sb.dev.coach.v1'],
+    ['스토리보드', 'pages/board.js', 'sb.board.coach.v1'],
+  ]) {
+    const src = await (await fetch(`${url}?t=${Date.now()}`)).text()
+    const m = src.match(/afterDone:[^\n]*\n?[^\n]*/)
+    ok(`${name} 은 예시를 마친 뒤 코치마크를 열지 않는다`,
+      !!m && !/openCoach/.test(m[0]), m ? m[0].trim() : 'afterDone 을 못 찾음')
+    ok(`${name} 은 예시를 본 것을 봤다고 적는다`,
+      !!m && m[0].includes('coach.skip'), m ? m[0].trim() : '')
+    // 예시를 보지 않고 온 사람의 길은 남아 있어야 합니다
+    ok(`${name} 에 코치마크를 여는 길이 남아 있다`,
+      src.includes('coach.start') && src.includes(`coach.seen(COACH_KEY)`)
+      && src.includes(key))
+  }
+
+  /* ── permissions.js ↔ 서버의 허용 목록 ───────────────────────────────────────
+   *
+   * domain/permissions.js 의 표는 화면이 버튼을 미리 막는 근거이고, 실제로 튕기는 것은
+   * 리졸버의 ROLES 와 server.py 의 ART_ROLES 입니다. 두 곳은 같은 사실을 두 번 적은
+   * 것이라 한쪽만 고쳐지고, 그 어긋남은 두 방향 다 나쁩니다. 화면이 열어 두고 서버가
+   * 튕기면 사람은 왜 안 되는지 모르고, 서버는 되는데 화면이 막으면 되는 일을 못 합니다.
+   *
+   * 그래서 소스를 읽어 맞대어 봅니다. import 하지 않는 이유는 리졸버가 APPSYNC_JS
+   * 런타임의 @aws-appsync/utils 를 부르고 server.py 는 파이썬이라는 것입니다. 어차피
+   * 여기서 실행할 수 없으니 「무엇을 적어 두었나」를 봅니다. permissions.js 의 머리글과
+   * infra/resolvers/deleteProject.js 의 머리글이 이 검사가 있다고 약속하고 있습니다.
+   */
+  const { JOB_ROLES, JOB_NAMES, allowed, denyReason, isDenied, roleName,
+  } = await import(`./domain/permissions.js?t=${Date.now()}`)
+
+  const text = async (p) => {
+    const r = await fetch(`${p}?t=${Date.now()}`)
+    if (!r.ok) throw new Error(`${p} ${r.status}`)
+    return r.text()
+  }
+  // `const ROLES = ['planner', 'director']` 한 줄에서 역할 이름만 뽑는다
+  const rolesIn = (src, name = 'ROLES') => {
+    const m = src.match(new RegExp(`${name}\\s*=\\s*[\\[{]([^\\]}]*)[\\]}]`))
+    return m ? [...m[1].matchAll(/["']([a-z]+)["']/g)].map((x) => x[1]).sort() : null
+  }
+
+  try {
+    /*
+     * 일감 → 그 일을 실제로 막는 서버 쪽 파일. 한 일감이 리졸버 여럿에 걸려 있으면
+     * (plan 은 plan.js 와 planResult.js) 대표 하나만 봅니다. 나머지는 같은 상수를
+     * 베껴 둔 자리라서, 대표가 맞으면 어긋난 쪽은 리졸버끼리 어긋난 것입니다.
+     */
+    const SERVER = {
+      plan: ['../infra/resolvers/plan.js', 'ROLES'],
+      navigate: ['../infra/resolvers/navigate.js', 'ROLES'],
+      saveGraph: ['../infra/resolvers/saveGraph.js', 'ROLES'],
+      putAsset: ['../infra/resolvers/putAsset.js', 'ROLES'],
+      deleteProject: ['../infra/resolvers/deleteProject.js', 'ROLES'],
+      gen: ['../infra/gpu/server.py', 'ART_ROLES'],
+    }
+    for (const [job, [file, name]] of Object.entries(SERVER)) {
+      const server = rolesIn(await text(file), name)
+      const mine = [...(JOB_ROLES[job] || [])].sort()
+      ok(`${job} 의 허용 역할이 ${file.split('/').pop()} 와 같다`,
+        !!server && server.join() === mine.join(), `화면 ${mine.join('·')} / 서버 ${server?.join('·')}`)
+    }
+    // 표에 적힌 일감은 모두 사람이 읽을 이름을 가집니다. 없으면 오류 문장에 키가 그대로 섭니다
+    ok('모든 일감에 사람이 읽을 이름이 있다', Object.keys(JOB_ROLES).every((j) => JOB_NAMES[j]))
+    // 표의 역할도 모두 이름을 가집니다. panels.js 의 ROLES 와 짝입니다
+    ok('표의 역할은 모두 이름을 가진다',
+      [...new Set(Object.values(JOB_ROLES).flat())].every((r) => ROLES[r]))
+  } catch (err) {
+    ok(`서버 쪽 허용 목록을 읽지 못했다 (${err.message})`, false)
+  }
+
+  ok('지우기는 감독만이다',
+    allowed('deleteProject', 'director')
+    && !['planner', 'artist', 'reviewer', 'admin', undefined].some((r) => allowed('deleteProject', r)))
+  // 표에 없는 일감은 막지 않습니다. 모르는 이름 하나로 되는 일을 막는 편이 더 나쁩니다
+  ok('표에 없는 일감은 막지 않는다', allowed('없는일감', 'reviewer'))
+  // 프로토타입의 키로 표를 넘겨다볼 수 없어야 합니다(hasOwnProperty 로 봅니다)
+  ok('프로토타입 키로는 표가 열리지 않는다',
+    allowed('toString', 'reviewer') && allowed('constructor', 'reviewer'))
+
+  ok('막힌 사유가 무엇을·지금·누구면 되는지를 담는다', (() => {
+    const why = denyReason('deleteProject', 'artist')
+    return why.includes(JOB_NAMES.deleteProject) && why.includes(roleName('director'))
+      && why.includes(roleName('artist')) && !why.includes('다시 시도')
+  })())
+  ok('되는 역할에는 사유가 없다', denyReason('deleteProject', 'director') === null)
+  // 조사가 앞말의 받침을 따릅니다. 「프로젝트 삭제는」·「그래프 추출과 이야기 기획은」
+  ok('사유의 조사가 받침을 따른다',
+    denyReason('deleteProject', 'artist').includes('프로젝트 삭제는')
+    && denyReason('plan', 'artist').includes('기획은')
+    && denyReason('plan', 'artist').includes('아티스트로 로그인'))
+  ok('서버의 거부를 권한 문제로 알아본다',
+    isDenied(new Error('Not Authorized to access deleteProject on type Mutation'))
+    && isDenied('Unauthorized') && !isDenied(new Error('네트워크 오류')))
+
+  /* ── components/confirm.js: 한 번 더 묻는 창 ─────────────────────────────────
+   *
+   * 애매한 자리를 「하려는 쪽」으로 해석하지 않는 것이 이 창의 요점입니다. 그만두기 ·
+   * Esc · 바깥 누르기가 모두 false 이고 「예」만 true 입니다. 한 곳이라도 true 로
+   * 새면 되돌릴 수 없는 일이 사람이 고르지 않은 채로 진행됩니다.
+   */
+  const { confirmAsk } = await import(`./components/confirm.js?t=${Date.now()}`)
+  const lastDlg = () => [...document.querySelectorAll('dialog.cfm')].at(-1)
+
+  ok('「예」를 누르면 true 다', await (async () => {
+    const p = confirmAsk({ title: '물음', list: ['컷 3개'] })
+    lastDlg().querySelector('.cfm__yes').click()
+    return await p === true
+  })())
+  ok('「그만두기」를 누르면 false 다', await (async () => {
+    const p = confirmAsk({ title: '물음' })
+    lastDlg().querySelector('.cfm__no').click()
+    return await p === false
+  })())
+  ok('Esc 로 닫아도 false 다', await (async () => {
+    const p = confirmAsk({ title: '물음' })
+    lastDlg().close()      // Esc 가 dialog 를 닫는 것과 같은 길입니다
+    return await p === false
+  })())
+  ok('바깥을 눌러도 false 다', await (async () => {
+    const p = confirmAsk({ title: '물음' })
+    const d = lastDlg()
+    d.dispatchEvent(new MouseEvent('click', { bubbles: true }))   // target 이 dialog 자신
+    return await p === false
+  })())
+  ok('답한 뒤에는 창을 남기지 않는다', await (async () => {
+    const before = document.querySelectorAll('dialog.cfm').length
+    const p = confirmAsk({ title: '물음' })
+    lastDlg().querySelector('.cfm__yes').click()
+    await p
+    return document.querySelectorAll('dialog.cfm').length === before
+  })())
+  ok('엔터를 눌러 온 사람이 그대로 진행하지 않는다', await (async () => {
+    const p = confirmAsk({ title: '물음' })
+    const d = lastDlg()
+    const onNo = document.activeElement === d.querySelector('.cfm__no')
+    d.querySelector('.cfm__no').click()
+    await p
+    return onNo
+  })())
+  ok('넘긴 글을 HTML 로 세우지 않는다', await (async () => {
+    const p = confirmAsk({ title: '<img src=x onerror="window.__cfm=1">', list: ['<b>표시</b>'] })
+    const d = lastDlg()
+    const clean = !d.querySelector('img') && !d.querySelector('.cfm__list b')
+      && d.querySelector('.cfm__list').textContent.includes('<b>표시</b>')
+    d.querySelector('.cfm__no').click()
+    await p
+    return clean && !window.__cfm
+  })())
+
   // ── net.js: AWSJSON 필드 풀기 ─────────────────────────────────────────────
   // 배포된 리졸버들은 JSON.stringify 한 문자열을 AWSJSON 으로 내보내고 AppSync 가 한 번 더
   // 감싼다. plan 응답이 '"{\"text\":...}"' 로 오던 자리다. 한 번만 풀면 문자열이 남는다.
@@ -3024,6 +3386,121 @@
       && parseField(JSON.stringify('true')) === 'true'
   })())
   ok('두 번째 파싱이 깨지면 문자열을 그대로 준다', parseField(JSON.stringify('{깨진 JSON')) === '{깨진 JSON')
+
+  // ── assets.js: 프로젝트 에셋 ───────────────────────────────────────────────
+  /*
+   * 대본·시놉시스·그래프·씬·키비주얼·콘티를 프로젝트마다 저장한다. 이것이 없던 동안
+   * 대본과 씬은 아무 곳에도 남지 않아서(key-visual.js 의 S.script · S.scenes) 새로고침
+   * 한 번에 사라졌고, 화면 사이를 사람이 손으로 복사해 옮겼다.
+   *
+   * 저장 자리는 op 와 같은 pk=BOARD#<id> 이고 sk 만 'ASSET#<kind>' 다. 그래서 여기서
+   * 가장 먼저 못 박아야 하는 것은 「기존 로그 읽기가 에셋을 집지 않는다」는 것이다.
+   * 이것이 깨지면 보드가 에셋을 op 로 읽어 applyOp 에 넣는다.
+   */
+  ok('ASSET# 은 OP# 보다 사전순 앞이다. listOps 가 에셋을 집지 않는 근거다', (() => {
+    // listOps.js 의 두 갈래: begins_with(sk,'OP#') 와 sk > 'OP#<since>#'
+    // ts 는 pad(13) 이라 since 의 최솟값이 'OP#0000000000000#' 이다
+    const floor = 'OP#0000000000000#'
+    return KIND_KEYS.every((k) => `ASSET#${k}` < floor && !`ASSET#${k}`.startsWith('OP#'))
+  })())
+
+  ok('에셋 종류는 여섯이고 key 가 겹치지 않는다', ASSET_KINDS.length === 6
+    && new Set(KIND_KEYS).size === 6
+    && ASSET_KINDS.every((k) => k.label && k.step && k.make))
+  ok('모르는 종류는 받지 않는다', isAssetKind('script') && !isAssetKind('legacy') && !isAssetKind(''))
+
+  /*
+   * 크기 제한. DynamoDB 항목 상한이 400KB 라 대본이 그 안에 들어가야 한다. 넘으면
+   * 자르지 않고 거부한다. 조용히 자르면 대본이 반토막인 것을 아무도 모른다.
+   */
+  ok('상한을 넘으면 자르지 않고 거부하며 이유를 말한다', (() => {
+    const r = fitsAsset('가'.repeat(ASSET_MAX_CHARS + 1))
+    return !r.ok && r.chars === ASSET_MAX_CHARS + 1 && /자까지/.test(r.why || '')
+  })())
+  ok('딱 상한까지는 담는다', fitsAsset('가'.repeat(ASSET_MAX_CHARS)).ok)
+  ok('빈 본문에서 터지지 않는다', fitsAsset('').ok && fitsAsset(null).ok && fitsAsset(undefined).ok)
+
+  ok('서랍에 적을 한 줄을 본문에서 만든다', (() => {
+    return summarize('script', '한 줄\n두 줄') === '7자 · 2줄'
+      && summarize('graph', { nodes: [1, 2], edges: [1] }) === '노드 2 · 관계 1'
+      && summarize('scenes', { scenes: [{ prompt: 'a' }, {}] }) === '2개 · 프롬프트 1/2'
+      && summarize('keyvisual', { shots: [1, 1, 1] }) === '3장'
+      && summarize('conti', { cuts: 8, approved: 3, eps: 2 }) === '컷 8개 · 승인 3/8 · 회차 2'
+  })())
+  ok('아직 없는 것은 null 이다. 서랍이 「만들기」를 내민다', (() => {
+    return summarize('script', null) === null && summarize('script', '   ') === null
+      && summarize('graph', { nodes: [], edges: [] }) === null
+      && summarize('conti', { cuts: 0 }) === null
+      && summarize('synopsis', {}) === null
+  })())
+  ok('본문 모양이 어긋나도 서랍이 멈추지 않는다', (() => {
+    return summarize('scenes', '문자열인데?') === null
+      && summarize('graph', {}) === null && summarize('nope', { a: 1 }) === null
+  })())
+
+  /*
+   * 여섯 종류 모두 「담는 자리」가 있어야 합니다.
+   *
+   * 서랍(project.html)은 ASSET#<kind> 여섯 칸만 읽습니다. 종류를 표에 적어 두고 그 칸에
+   * 쓰는 화면이 없으면, 서랍은 사람이 그 일을 다 해 놓은 뒤에도 「아직 없습니다」라고
+   * 말합니다. 실제로 세 칸이 그랬습니다 — 그래프는 Neptune 에만 갔고(story-graph.js),
+   * 붙여넣은 시놉시스는 textarea 값으로만 있었고, 콘티는 보드 화면을 한 번 열어야
+   * 채워졌습니다. 화면을 열지 않은 사람에게는 없는 일이 됩니다.
+   *
+   * 소스를 읽어 봅니다. 담기는 boot·확인창·네트워크를 지나야 실제로 불리는 길이라 여기서
+   * 실행할 수 없습니다. 그래서 「어느 화면이 이 칸에 쓰기로 적어 두었나」를 봅니다.
+   */
+  try {
+    const WRITERS = ['pages/board.js', 'pages/key-visual.js', 'pages/story-graph.js']
+    const srcs = await Promise.all(WRITERS.map(text))
+    // `kind: 'conti'` · `kind: script ? 'script' : 'synopsis'` 를 모두 집습니다
+    const written = new Set(srcs.flatMap((s) =>
+      [...s.matchAll(/kind:\s*(?:[^,\n]*\?\s*)?'([a-z]+)'(?:\s*:\s*'([a-z]+)')?/g)]
+        .flatMap((m) => [m[1], m[2]]).filter((k) => KIND_KEYS.includes(k))))
+    const orphan = KIND_KEYS.filter((k) => !written.has(k))
+    ok('여섯 종류 모두 담는 화면이 있다. 없으면 서랍이 늘 「아직 없습니다」다',
+      !orphan.length, `담는 곳이 없는 종류: ${orphan.join('·')}`)
+
+    const [, kv, sg] = srcs
+    /*
+     * 어느 화면이 어느 칸을 맡는지까지 못 박습니다. 위의 검사는 셋 중 아무 화면이 쓰면
+     * 통과하는데, 그러면 보드 화면만 콘티를 쓰던 예전 상태도 통과합니다.
+     */
+    ok('그래프를 뽑으면 그래프 칸에 사본을 담는다', /kind:\s*'graph'/.test(sg))
+    ok('붙여넣은 글이 시놉시스면 시놉시스 칸에 담는다', /'script'\s*:\s*'synopsis'/.test(sg))
+    ok('보드에 붙이면 키비주얼 화면도 콘티 칸을 올린다', /kind:\s*'conti'/.test(kv))
+  } catch (err) {
+    ok(`에셋을 담는 화면을 읽지 못했다 (${err.message})`, false)
+  }
+
+  /*
+   * AWSJSON 봉투.
+   *
+   * 대본은 통째로 긴 「문자열」이다. 본문을 그대로 stringify 해서 보내면 돌아올 때
+   * parseField 가 풀지 못한다. 그 함수는 한 겹 더 싸여 온 것을 여는 괄호로 가려내는데
+   * (위의 '값이 진짜 문자열이면 다시 풀지 않는다' 검사가 그 규칙이다) 문자열은 따옴표로
+   * 시작하므로 걸러지지 않고 따옴표가 붙은 채로 나온다. 그래서 { v: <본문> } 한 겹을
+   * 씌워 인코딩된 값이 늘 '{' 로 시작하게 한다. 그러면 AppSync 가 한 겹을 싸든 두 겹을
+   * 싸든 같은 값이 나온다.
+   */
+  const envel = (body) => JSON.stringify({ v: body ?? null })
+  ok('봉투를 씌우면 대본 같은 문자열도 그대로 왕복한다', (() => {
+    const wire = JSON.stringify(envel('S#1. 빵집 - 낮\n가온이 문을 연다'))  // AppSync 가 한 겹 더
+    return parseField(wire).v === 'S#1. 빵집 - 낮\n가온이 문을 연다'
+  })())
+  ok("숫자만 적힌 대본('42')도 문자열로 남는다", (() => {
+    const got = parseField(JSON.stringify(envel('42'))).v
+    return got === '42' && typeof got === 'string'
+  })())
+  ok('봉투를 안 씌우면 따옴표가 붙어 온다. 봉투가 있는 이유다', (() => {
+    // 이 줄이 깨지는 날은 parseField 가 문자열도 풀게 바뀐 날이다. 그때 봉투를 걷어도 된다
+    return parseField(JSON.stringify(JSON.stringify('대본'))) === '"대본"'
+  })())
+  ok('객체 본문도 같은 봉투로 왕복한다', (() => {
+    const got = parseField(JSON.stringify(envel({ scenes: [{ id: 's1', prompt: 'x' }] }))).v
+    return got.scenes[0].id === 's1'
+  })())
+  ok('봉투는 늘 { 로 시작한다', envel('대본').startsWith('{') && envel(null).startsWith('{'))
 
   // ── net.js: 비동기 plan (30초 상한 우회) ──────────────────────────────────
   // AppSync 요청 실행 시간 상한은 30초이고 상향이 불가다. 그래서 plan 은 mutation 으로
@@ -3687,6 +4164,286 @@
   ok('대본 파일 이름에 제목이 들어간다', scriptFileName('마지막 레시피') === '마지막 레시피_대본.txt')
   ok('제목이 없으면 무제로 둔다', scriptFileName('') === '무제_대본.txt' && scriptFileName(null) === '무제_대본.txt')
   ok('파일 이름에서 경로 문자를 뺀다', scriptFileName('A/B:C*D') === 'A B C D_대본.txt')
+
+  // ── scene-split.js: 대본을 씬으로 나누기 ───────────────────────────────────
+  /*
+   * 키 비주얼 STEP 1 이 쓰는 자리입니다. 예전에는 `INT./EXT.` 와 `실내/실외` 두 형식만
+   * 읽어서, 한국 드라마 대본의 표준인 `S#1. 장소 / 밤` 을 머리글로 보지 못했습니다.
+   * 머리글이 하나도 안 잡히면 모든 블록이 앞 씬에 붙어 대본 전체가 씬 한 개로 들어옵니다.
+   */
+  ok('S#1. 형식의 머리글을 읽는다', (() => {
+    const h = readHeading('S#1. 예린의 방 / 밤')
+    return h?.no === 1 && h.place === '예린의 방' && h.time === '밤'
+  })())
+  ok('씬 번호 표기를 여러 가지로 받는다', (() => {
+    const forms = ['S# 12. 카페 (낮)', 'SCENE 12. 카페 - 낮', '씬 12 카페 / 낮',
+      '장면 12. 카페 · 낮', '#12 카페 / 낮', '[씬 12 - 카페]']
+    return forms.every((f) => readHeading(f)?.no === 12)
+  })())
+  ok('INT./EXT. 슬러그는 번호가 없다', (() => {
+    const h = readHeading('INT. 극장 분장실 - 밤')
+    return h?.no === null && h.place === '극장 분장실' && h.time === '밤'
+  })())
+  ok('실내/실외 슬러그도 읽는다', readHeading('실내. 부엌 - 아침')?.place === '부엌')
+  ok('시간이 괄호 · 슬래시 뒤에 있어도 갈라 읽는다',
+    placeTime('흥신소 사무실 (낮)').time === '낮'
+    && placeTime('예린의 방 / 밤').time === '밤'
+    && placeTime('옥상 — 새벽').time === '새벽')
+  ok('이어지는 씬 표시를 떼고 빈 괄호도 치운다',
+    stripCont('분장실 - 밤 (이어서)') === '분장실 - 밤'
+    && stripCont('흥신소 사무실 (낮, 이어서)') === '흥신소 사무실 (낮)'
+    && stripCont('INT. BAR - NIGHT (CONT\'D)') === 'INT. BAR - NIGHT')
+  ok('장소만 있으면 시간은 빈 문자열이다', (() => {
+    const h = readHeading('씬 3 - 옥상')
+    return h?.place === '옥상' && h.time === ''
+  })())
+  /*
+   * 지문을 머리글로 잘못 보면 씬이 문장 수만큼 갈라집니다. 번호만 앞에 붙은 줄이
+   * 위험한 자리라 시간처럼 보이는 말이 있거나 짧고 문장으로 끝나지 않을 때만 받습니다.
+   */
+  ok('번호만 붙은 짧은 머리글은 받는다', readHeading('1. 카페 / 낮')?.no === 1)
+  ok('번호가 붙은 지문은 머리글로 보지 않는다',
+    readHeading('1. 커피를 사서 나온다.') === null)
+  ok('평범한 지문 · 대사 · 인물 이름은 머리글이 아니다',
+    readHeading('그는 문을 열었다.') === null
+    && readHeading('지영: 그게 무슨 말이야') === null
+    && readHeading('수린') === null
+    && readHeading('등장인물: 한지영, 예린') === null)
+
+  ok('등장인물 줄에서 이름을 꺼낸다', (() => {
+    const c = readCast('등장인물: 한지영, 예린')
+    return c?.length === 2 && c[0] === '한지영' && c[1] === '예린'
+  })())
+  ok('등장인물이 아닌 줄에서는 null 이다',
+    readCast('지영이 문을 연다.') === null && readCast('등장인물: 없음') === null)
+
+  ok('S#1~S#8 대본은 씬 8개로 갈라진다', (() => {
+    // app-walkthrough/data/test-synopsis.txt 와 같은 형식입니다. 예전에는 1개로 들어왔습니다
+    const t = ['S#1. 예린의 방 / 밤', '등장인물: 한지영, 예린', '방 안이 어둡다.', '',
+      'S#2. 예린의 방 / 밤 (이어서)', '등장인물: 한지영', '화면을 켠다.', '',
+      'S#3. 카페 구석 테이블 / 낮', '두 사람이 앉아 있다.', '',
+      'S#4. 카페 구석 테이블 / 낮 (이어서)', '지영이 눈을 깜빡인다.'].join('\n')
+    const sc = toScenes(t)
+    return sc.length === 4 && sc[0].id === 'S01' && sc[3].id === 'S04'
+      && sc[0].place === '예린의 방' && sc[2].place === '카페 구석 테이블'
+  })())
+  /*
+   * 여기가 두 규칙이 갈라지는 자리입니다. 작가가 번호를 매겼으면 장소·시간이 같아도
+   * 그 자리가 경계입니다. 번호가 없는 슬러그는 `(이어서)` 를 떼면 같은 슬러그가 되므로
+   * 한 씬으로 합칩니다. 두 규칙을 하나로 합치면 8씬 대본이 4씬으로 줄어듭니다.
+   */
+  ok('번호가 있으면 장소·시간이 같아도 새 씬으로 끊는다', (() => {
+    const t = 'S#5. 흥신소 사무실 (낮)\n봉투를 꺼낸다.\n\nS#6. 흥신소 사무실 (낮, 이어서)\n봉투를 쥔다.'
+    const sc = toScenes(t)
+    return sc.length === 2 && sc[0].no === 5 && sc[1].no === 6 && sc[1].place === '흥신소 사무실'
+  })())
+  ok('번호가 없는 슬러그는 이어지면 한 씬으로 합친다', (() => {
+    const t = 'INT. 분장실 - 밤\n거울 앞.\n\nINT. 분장실 - 밤 (이어서)\n문틈의 빛.\n\nINT. 본무대 - 밤\n조명이 한 점으로.'
+    const sc = toScenes(t)
+    return sc.length === 2 && sc[0].place === '분장실' && sc[1].place === '본무대'
+      && sc[0].text.includes('거울 앞') && sc[0].text.includes('문틈의 빛')
+  })())
+  ok('예시 대본은 씬 7개를 지킨다', (() => {
+    // key-visuals.json 의 미리 받아 둔 프롬프트가 S01~S07 이라 이 수가 바뀌면 예시가 빕니다
+    const t = ['INT. 극장 분장실 - 밤', '거울 앞.', '', '    수린', '  그 이름을 어디서 들었어.', '',
+      'INT. 극장 분장실 - 밤 (이어서)', '문틈으로 빛이 새어든다.', '',
+      'INT. 본무대 - 밤', '조명이 한 점으로.', '', 'INT. 객석 - 밤', '빈 좌석.', '',
+      'INT. 분장실 앞 복도 - 새벽', '반쯤 열린 문.', '', 'EXT. 극장 옥상 - 새벽', '난간.', '',
+      'INT. 지하 연습실 - 낮', '거울 벽.', '', 'EXT. 극장 앞 거리 - 낮', '찢긴 포스터.'].join('\n')
+    return toScenes(t).length === 7
+  })())
+  ok('씬마다 등장인물이 담긴다', (() => {
+    const sc = toScenes('S#1. 방 / 밤\n등장인물: 한지영, 예린\n어둡다.')
+    return sc[0].cast.length === 2 && sc[0].cast.includes('예린')
+  })())
+  ok('빈 줄이 없어도 머리글에서 끊는다', (() => {
+    const sc = toScenes('S#1. 방 / 밤\n어둡다.\nS#2. 카페 / 낮\n밝다.')
+    return sc.length === 2 && sc[1].place === '카페'
+  })())
+  ok('머리글이 없는 산문은 씬 하나로 둔다', (() => {
+    const sc = toScenes('헌트릭스는 사냥꾼 계보다.\n\n루미는 스물둘이다.')
+    return sc.length === 1 && sc[0].place === '장소 미정'
+  })())
+  ok('머리글보다 먼저 나온 줄을 버리지 않는다', (() => {
+    const sc = toScenes('제목: 무언가\n\nS#1. 방 / 밤\n어둡다.')
+    return sc.length === 2 && sc[0].place === '장소 미정' && sc[0].text.includes('제목')
+  })())
+  ok('빈 대본은 빈 목록이다', toScenes('').length === 0 && toScenes(null).length === 0)
+  ok('씬 id 는 두 자리로 이어 붙는다', (() => {
+    const t = Array.from({ length: 11 }, (_, i) => `S#${i + 1}. 방${i} / 밤\n지문.`).join('\n\n')
+    const sc = toScenes(t)
+    return sc.length === 11 && sc[0].id === 'S01' && sc[10].id === 'S11'
+  })())
+  ok('readSlug 는 옛 이름으로 남아 있다',
+    readSlug('INT. 카페 - 낮')?.place === '카페' && readSlug('그는 문을 열었다.') === null)
+
+  /*
+   * Fountain 명세(fountain.io/syntax)의 규칙입니다. 이 명세를 읽는 도구가 많아서
+   * 다른 도구에서 옮겨 온 대본이 이 모양으로 들어옵니다.
+   */
+  ok('EST. 와 INT./EXT. 슬러그도 읽는다', (() => {
+    // 갈마드는 자리에서 INT 를 먼저 두면 장소가 `/EXT. 차 안` 이 됩니다
+    const a = readHeading('EST. 극장 - 밤')
+    const b = readHeading('INT./EXT. 차 안 - 낮')
+    return a?.place === '극장' && b?.place === '차 안' && b.time === '낮'
+  })())
+  ok('앞의 점 하나는 머리글을 강제한다', (() => {
+    // INT. 를 쓰지 않는 대본이 쓰는 도피처입니다. 명세가 이 자리를 그렇게 둡니다
+    const h = readHeading('.분장실 - 밤')
+    return h?.forced === true && h.place === '분장실' && h.time === '밤'
+  })())
+  ok('점이 여러 개면 강제 머리글이 아니다', readHeading('...말을 잇지 못한다') === null)
+  ok('앞의 ! 하나는 머리글을 취소한다', readHeading('!INT. 이건 지문이다') === null)
+  ok('취소 표시는 본문에 남지 않는다', (() => {
+    const sc = toScenes('INT. 방 - 밤\n!INT. 대문자 지문')
+    return sc.length === 1 && sc[0].text === 'INT. 방 - 밤\nINT. 대문자 지문'
+  })())
+  ok('끝에 붙은 #12# 을 씬 번호로 읽는다', (() => {
+    const h = readHeading('INT. 카페 - 낮 #12#')
+    return h?.no === 12 && h.place === '카페' && h.time === '낮'
+  })())
+  ok('#1A# 처럼 글자가 섞인 번호는 장소만 읽는다', (() => {
+    // 사이에 끼워 넣은 씬이라 순서를 숫자로 셀 수 없습니다. 장소는 그대로 읽습니다
+    const h = readHeading('INT. 카페 - 낮 #1A#')
+    return h?.no === null && h.place === '카페'
+  })())
+
+  /*
+   * 씬은 「한 장소 · 이어지는 시간 · 이어지는 행동」의 덩어리입니다. 그래서 같은 장소라도
+   * 시간이 끊기면 씬이 둘입니다. `(이어서)` 는 합치고 `잠시 후` 는 끊는 것이 이 차이입니다.
+   */
+  ok('같은 장소라도 시간이 끊기면 새 씬이다', (() => {
+    const sc = toScenes('INT. 분장실 - 밤\n거울 앞.\n\nINT. 분장실 - 잠시 후\n문이 열린다.')
+    return sc.length === 2 && sc[1].time === '잠시 후'
+  })())
+  ok('LATER 도 시간이 끊긴 것으로 본다',
+    toScenes('INT. BAR - NIGHT\n술잔.\n\nINT. BAR - LATER\n빈 잔.').length === 2)
+
+  // ── scene-split.js: 머리글이 없는 글을 모델이 나누기 ───────────────────────
+  /*
+   * 시놉시스 · 트리트먼트에는 읽을 머리글이 없어서 규칙으로는 씬 하나입니다. 그 자리만
+   * 문장 모델에게 넘깁니다. 머리글이 있으면 작가가 쓴 표시를 믿고 왕복하지 않습니다.
+   */
+  ok('머리글이 없는 긴 글은 모델에게 넘긴다',
+    needsAiSplit('그는 문을 열었다. '.repeat(40)) === true)
+  ok('머리글이 하나라도 있으면 규칙으로 나눈다',
+    needsAiSplit(`S#1. 방 / 밤\n${'어둡다. '.repeat(80)}`) === false)
+  ok('짧은 글은 나눌 것이 없어 넘기지 않는다',
+    needsAiSplit('방 안이 어둡다.') === false && needsAiSplit('') === false)
+  ok('나누는 프롬프트가 씬의 경계를 못 박는다', (() => {
+    const p = proseSplitPrompt('아무 글')
+    // 장소·시간·인물 세 가지를 다 적어야 모델이 문단 수로 나누지 않습니다
+    return p.includes('장소가 바뀐다') && p.includes('시간이 끊긴다')
+      && p.includes('인물이 바뀐다') && p.includes('컷이다')
+      && p.includes('아무 글') && p.includes('JSON')
+  })())
+  ok('모델이 준 씬을 화면이 쓰는 모양으로 맞춘다', (() => {
+    const sc = normalizeProseScenes({ scenes: [
+      { place: '무대', time: '밤', cast: ['루미'], text: '혼문이 갈라지는 소리를 듣는다.' },
+      { place: '대기실', time: '', cast: [], text: '미라가 손목을 잡아 세운다.' },
+    ] })
+    // toScenes 와 같은 키를 내야 뒤쪽 단계가 무엇이 나눴는지 몰라도 됩니다
+    return sc.length === 2 && sc[0].id === 'S01' && sc[1].id === 'S02'
+      && sc[0].byAi === true && sc[0].cast[0] === '루미' && sc[0].prompt === ''
+  })())
+  ok('내용이 없는 씬은 버린다', (() => {
+    const sc = normalizeProseScenes({ scenes: [
+      { place: '무대', text: '' }, { place: '대기실' }, { place: '창고', text: '   ' },
+      { place: '복도', text: '지영이 벽에 등을 붙인다.' },
+    ] })
+    return sc.length === 1 && sc[0].place === '복도'
+  })())
+  ok('짧아도 그릴 수 있으면 버리지 않는다', (() => {
+    // 「혼문이 갈라진다.」 한 줄도 씬입니다. 길이로 자르면 진짜 씬이 사라집니다
+    const sc = normalizeProseScenes({ scenes: [{ place: '무대', text: '혼문이 갈라진다.' }] })
+    return sc.length === 1
+  })())
+  ok('모델이 형식을 어기면 빈 목록이다',
+    normalizeProseScenes(null).length === 0
+    && normalizeProseScenes({ scenes: '아니다' }).length === 0
+    && normalizeProseScenes({ note: '설명만' }).length === 0)
+  ok('씬 수에 상한이 있다', (() => {
+    const many = Array.from({ length: 40 }, (_, i) => ({ place: `방${i}`, text: '지영이 문을 연다.' }))
+    return normalizeProseScenes({ scenes: many }).length === PROSE_CAP
+  })())
+
+  ok('모델이 없으면 규칙으로 나눈 결과를 낸다', await (async () => {
+    const r = await aiSplitScenes(null, '그는 문을 열었다. '.repeat(40))
+    return r.byAi === false && r.scenes.length === 1 && r.err === null
+  })())
+  ok('모델이 나누면 그 결과를 쓴다', await (async () => {
+    const fake = { plan: async () => ({ text: JSON.stringify({ scenes: [
+      { place: '무대', time: '밤', text: '혼문이 갈라진다.' },
+      { place: '대기실', time: '밤', text: '미라가 조이를 세운다.' },
+    ] }) }) }
+    const r = await aiSplitScenes(fake, '그는 문을 열었다. '.repeat(40))
+    return r.byAi === true && r.scenes.length === 2 && r.scenes[1].place === '대기실'
+  })())
+  /*
+   * 나누지 못한 것이 이 화면을 멈출 이유는 아닙니다. 규칙 결과로 돌아가고 무엇이
+   * 잘못됐는지만 말합니다. 빈 화면을 내밀지 않습니다.
+   */
+  ok('모델이 깨진 것을 주면 규칙 결과로 돌아간다', await (async () => {
+    const fake = { plan: async () => ({ text: '설명만 하고 JSON 이 없습니다' }) }
+    const r = await aiSplitScenes(fake, '그는 문을 열었다. '.repeat(40))
+    return r.byAi === false && r.scenes.length === 1 && !!r.err
+  })())
+  ok('모델이 끊기면 규칙 결과로 돌아간다', await (async () => {
+    const fake = { plan: async () => { throw new Error('끊김') } }
+    const r = await aiSplitScenes(fake, '그는 문을 열었다. '.repeat(40))
+    return r.byAi === false && r.scenes.length === 1 && r.err === '끊김'
+  })())
+  ok('머리글이 있는 대본은 모델을 부르지 않는다', await (async () => {
+    let called = 0
+    const fake = { plan: async () => { called++; return { text: '{}' } } }
+    const r = await aiSplitScenes(fake, 'S#1. 방 / 밤\n어둡다.\n\nS#2. 카페 / 낮\n밝다.')
+    return called === 0 && r.byAi === false && r.scenes.length === 2
+  })())
+
+  // ── gpu-hours.js: 생성 서버를 켜 두는 시간 ─────────────────────────────────
+  /*
+   * GPU 는 평일 09:00–20:00 (한국 시간) 에만 켜집니다. 그 밖에서 /health 가 닿지 않는 것은
+   * 고장이 아니라 스케줄입니다. 화면이 「인스턴스가 꺼져 있을 수 있습니다」 라고만 적으면
+   * 읽는 사람이 기다릴지 고칠지 정하지 못해서, 시간표와 다음에 켜지는 때를 적습니다.
+   *
+   * 시각은 UTC 로 만들어 넣습니다. 검사를 도는 기계의 표준시가 서울이 아닐 수 있어서,
+   * 현지 시간으로 쓰면 기계에 따라 결과가 달라집니다.
+   */
+  const utc = (s) => new Date(`${s}Z`)
+  // 2026-09-07 은 월요일입니다. UTC 00:00 = KST 09:00
+  ok('평일 낮은 켜 두는 시간이다', gpuHoursOpen(utc('2026-09-07T02:00')) === true
+    && gpuHoursOpen(utc('2026-09-07T10:59')) === true)
+  ok('켜지는 시각 직전은 아직 아니다', gpuHoursOpen(utc('2026-09-06T23:59')) === false)
+  ok('켜지는 시각이 되면 켜 두는 시간이다', gpuHoursOpen(utc('2026-09-07T00:00')) === true)
+  ok('끄는 시각이 되면 더는 아니다', gpuHoursOpen(utc('2026-09-07T11:00')) === false)
+  ok('주말은 종일 아니다', gpuHoursOpen(utc('2026-09-12T02:00')) === false
+    && gpuHoursOpen(utc('2026-09-13T02:00')) === false)
+
+  // 월요일 KST 08:00 = 일요일 UTC 23:00. 요일이 넘어가는 자리라 여기서 자주 틀립니다
+  ok('평일 아침에는 오늘 켜진다고 알린다',
+    nextGpuOn(utc('2026-09-06T23:00')) === '오늘 오전 9시'
+    && nextGpuOn(utc('2026-09-07T23:00')) === '오늘 오전 9시')
+  ok('월~목 저녁에는 내일 켜진다고 알린다',
+    nextGpuOn(utc('2026-09-07T14:00')) === '내일 오전 9시')
+  // 금요일 밤에 「내일」 이라고 하면 토요일이 되어 거짓입니다. 주말을 건너뛰어야 합니다
+  ok('금요일 밤과 주말에는 월요일이라고 알린다',
+    nextGpuOn(utc('2026-09-11T14:00')) === '월요일 오전 9시'
+    && nextGpuOn(utc('2026-09-12T05:00')) === '월요일 오전 9시'
+    && nextGpuOn(utc('2026-09-13T05:00')) === '월요일 오전 9시')
+
+  ok('시간표 밖이면 스케줄이라고 적고 다음 때를 알린다', (() => {
+    const h = gpuDownHint(utc('2026-09-07T14:00'))
+    return h.includes('평일 09:00–20:00 (한국 시간)') && h.includes('내일 오전 9시')
+      && h.includes('그 시간이 아니어서')
+  })())
+  ok('시간표 안이면 볼 것이 있다고 적는다', (() => {
+    const h = gpuDownHint(utc('2026-09-07T02:00'))
+    // 이때는 「기다리면 켜집니다」 가 거짓이라 다음 때를 적지 않습니다
+    return h.includes('그 시간인데도 닿지 않습니다') && !h.includes('다시 켜집니다')
+  })())
+  ok('시간표 문구는 한 곳에서 나온다',
+    GPU_HOURS_TEXT === '평일 09:00–20:00 (한국 시간)'
+    && GPU_ON_HOUR === 9 && GPU_OFF_HOUR === 20)
 
   // ── graph-view.js: 엣지 라벨과 역기입 전후 비교 ────────────────────────────
   // 캔버스 그리기는 여기서 못 돌린다. 순수 함수인 라벨 표와 판 비교만 본다
