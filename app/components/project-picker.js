@@ -51,6 +51,16 @@ const CSS = `
  */
 .pj__list { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 @media (max-width: 620px) { .pj__list { grid-template-columns: minmax(0, 1fr); } }
+/*
+ * 카드 한 장의 자리입니다. 카드와 「⋮」 버튼이 여기 나란히 섭니다.
+ *
+ * 겹을 하나 더 두는 까닭은 「⋮」를 카드 버튼 안에 넣을 수 없기 때문입니다. 카드 자체가
+ * button 이라서 그 안에 버튼을 또 두면 화면 낭독기가 무엇을 누른 것인지 말하지 못하고,
+ * 브라우저마다 안쪽 버튼의 클릭이 바깥으로 새기도 합니다(그러면 메뉴를 열려다 판이
+ * 열립니다). 그래서 형제로 둡니다. 아래 .pj__card 의 여백이 「⋮」 자리만큼 비어 있는
+ * 것도 이 때문입니다 — 이름이 길면 글자가 「⋮」 밑으로 들어갑니다.
+ */
+.pj__slot { position: relative; display: grid; }
 .pj__card {
   display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 10px;
   align-content: start; width: 100%; padding: 13px; text-align: left;
@@ -92,6 +102,54 @@ button.pj__card:hover .pj__open { color: var(--sb-accent, #1a56db); }
 .pj__chip b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
 .pj__chip::before { content: attr(data-ico); flex: none; color: var(--sb-ink-3, #767f8c); }
 .pj__t { font-family: var(--sb-mono, monospace); font-size: 10.5px; }
+/*
+ * 「⋮」. 카드 오른쪽 위에 앉습니다.
+ *
+ * 평소에는 흐리게 두고 카드에 마우스를 올리거나 초점이 잡히면 진해집니다. 늘 진하면
+ * 카드마다 점 셋이 두 열로 늘어서서, 정작 봐야 할 프로젝트 이름보다 먼저 눈에 걸립니다.
+ * 다만 아예 숨기지는 않습니다 — 마우스가 없는 화면에서는 올릴 수가 없습니다.
+ */
+.pj__more {
+  position: absolute; top: 7px; right: 7px; z-index: 1;
+  width: 24px; height: 24px; display: grid; place-items: center; padding: 0;
+  font: inherit; font-size: 15px; line-height: 1; cursor: pointer;
+  background: none; border: 1px solid transparent; border-radius: var(--sb-r, 6px);
+  color: var(--sb-ink-3, #767f8c);
+}
+.pj__slot:hover .pj__more, .pj__more:focus-visible, .pj__more[aria-expanded="true"] {
+  color: var(--sb-ink, #111318); border-color: var(--sb-line, #e4e7ec);
+  background: var(--sb-panel, #fff);
+}
+.pj__more:focus-visible { outline: 2px solid var(--sb-accent, #1a56db); outline-offset: 1px; }
+/*
+ * 「⋮」 자리를 비워 둡니다. 이름이 길면 글자가 그 밑으로 들어갑니다.
+ * 메뉴가 없는 카드(각 화면 앞의 문)는 그대로 두어야 하므로 .pj__slot 안에서만 좁힙니다.
+ */
+.pj__slot .pj__card { padding-right: 36px; }
+.pj__menu {
+  position: absolute; top: 33px; right: 7px; z-index: 2; min-width: 150px;
+  display: grid; padding: 4px; background: var(--sb-panel, #fff);
+  border: 1px solid var(--sb-line, #e4e7ec); border-radius: var(--sb-r, 6px);
+  box-shadow: var(--sb-sh-lg, 0 12px 34px -10px rgba(17,19,24,.22));
+}
+.pj__mi {
+  padding: 8px 10px; text-align: left; font: inherit; font-size: 12.5px; cursor: pointer;
+  background: none; border: 0; border-radius: 4px; color: var(--sb-ink, #111318);
+  white-space: nowrap;
+}
+.pj__mi:hover { background: var(--sb-fill, #f8f9fb); }
+.pj__mi:focus-visible { outline: 2px solid var(--sb-accent, #1a56db); outline-offset: -2px; }
+/* 되돌릴 수 없는 줄. 지우기가 이것을 씁니다 */
+.pj__mi--no { color: var(--sb-no, #b42318); }
+.pj__mi--no:hover { background: var(--sb-no-soft, #fef3f2); }
+/*
+ * 막힌 줄. 흐리게 두고 커서를 바꿉니다.
+ *
+ * 숨기지 않습니다. 숨기면 사람은 이 기능이 없는 줄로 알고 찾아다니고, 감독에게 부탁할
+ * 일이라는 것도 모릅니다. project.js 의 paintDanger 가 같은 판단을 합니다. 왜 막혔는지는
+ * title 로 답니다.
+ */
+.pj__mi:disabled { color: var(--sb-ink-3, #767f8c); cursor: default; background: none; }
 .pj__none { grid-column: 1 / -1; padding: 15px 13px; background: var(--sb-panel, #fff);
   border: 1px dashed var(--sb-line, #e4e7ec); border-radius: 9px;
   font-size: 12.5px; line-height: 1.6; color: var(--sb-ink-3, #767f8c); }
@@ -126,6 +184,100 @@ function injectCss(doc) {
 /** actor id → 이름. 명부를 못 받으면 데모 계정, 그것도 없으면 id 를 그대로 씁니다 */
 const nameOf = (id, who) => who?.(id)?.name || DEMO_USERS.find((u) => u.id === id)?.name || id || '알 수 없음'
 
+/* ══ 카드의 「⋮」 메뉴 ═════════════════════════════ */
+
+/*
+ * 지금 열려 있는 메뉴. 한 번에 하나만 엽니다.
+ *
+ * 카드가 열두 장 깔린 화면에서 메뉴 셋이 겹쳐 떠 있으면 어느 것이 어느 판의 것인지
+ * 알 수 없습니다. 모듈 바깥에 두는 이유는 다른 카드의 「⋮」를 눌러 여는 길이 이 값을
+ * 봐야 앞의 것을 닫을 수 있기 때문입니다.
+ */
+let openMenu = null
+
+/** 열려 있는 메뉴를 닫습니다. 여러 번 불러도 됩니다 */
+function shutMenu() {
+  if (!openMenu) return
+  const { box, trigger, off } = openMenu
+  // 먼저 비웁니다. off 안의 리스너가 이 함수를 다시 부를 수 있습니다
+  openMenu = null
+  off?.()
+  box.remove()
+  trigger.setAttribute('aria-expanded', 'false')
+}
+
+/**
+ * 카드 하나의 메뉴를 엽니다.
+ *
+ * 메뉴 자체는 열 때 만들고 닫을 때 버립니다. 카드마다 미리 붙여 두면 프로젝트 스무
+ * 개에 안 보이는 버튼이 예순 개 서고, 화면 낭독기는 그것을 다 읽습니다.
+ *
+ * @param {HTMLElement} slot - 카드가 든 자리(.pj__slot)
+ * @param {HTMLElement} trigger - 「⋮」 버튼
+ * @param {Array} items - {label, on, danger, disabled, why}
+ */
+function popMenu(slot, trigger, items) {
+  // 같은 「⋮」를 다시 누르면 닫습니다. 열고 닫는 것이 한 버튼이어야 합니다
+  const again = openMenu?.trigger === trigger
+  shutMenu()
+  if (again) return
+
+  const doc = slot.ownerDocument
+  const box = doc.createElement('div')
+  box.className = 'pj__menu'
+  box.setAttribute('role', 'menu')
+  for (const it of items) {
+    const b = doc.createElement('button')
+    b.type = 'button'
+    b.className = `pj__mi${it.danger ? ' pj__mi--no' : ''}`
+    b.setAttribute('role', 'menuitem')
+    b.textContent = it.label
+    if (it.disabled) {
+      b.disabled = true
+      // 왜 막혔는지. 이것이 없으면 흐린 줄만 보고 고장 난 것으로 읽힙니다
+      if (it.why) b.title = it.why
+    } else {
+      b.onclick = () => { shutMenu(); it.on?.() }
+    }
+    box.append(b)
+  }
+  slot.append(box)
+  trigger.setAttribute('aria-expanded', 'true')
+  openMenu = { box, trigger }
+
+  /*
+   * 첫 줄에 초점을 둡니다. 키보드로 「⋮」에 와서 엔터를 누른 사람은 다음 탭이 메뉴
+   * 안쪽으로 들어가기를 기대합니다. 막힌 줄은 초점을 받지 않으므로 건너뜁니다.
+   */
+  box.querySelector('.pj__mi:not(:disabled)')?.focus()
+
+  /*
+   * 바깥을 누르거나 Esc 를 누르면 닫습니다. 창을 세우지 않는 메뉴라서 배경을 덮는
+   * 것이 없고, 문서 쪽에서 받아야 합니다.
+   *
+   * 리스너를 걷는 길(off)을 openMenu 에 같이 담습니다. once 로 걸면 메뉴 안쪽을 누른
+   * 클릭에도 소진되어 두 번째 바깥 클릭이 듣지 않고, 그때부터 이 메뉴는 닫히지 않습니다.
+   *
+   * 여는 자리에서 곧바로 걸어 둡니다. 미루지 않는 이유는 메뉴를 여는 클릭에서 이미
+   * stopPropagation 을 했기 때문입니다 — 그 클릭은 여기까지 올라오지 않습니다.
+   */
+  const onDocClick = (e) => {
+    if (!box.contains(e.target) && e.target !== trigger) shutMenu()
+  }
+  const onKey = (e) => {
+    if (e.key !== 'Escape') return
+    shutMenu()
+    // 초점을 「⋮」로 되돌립니다. 메뉴가 사라진 자리에 초점이 남으면 탭이 처음으로 갑니다
+    trigger.focus()
+  }
+  doc.addEventListener('click', onDocClick, true)
+  doc.addEventListener('keydown', onKey)
+  openMenu.off = () => {
+    doc.removeEventListener('click', onDocClick, true)
+    doc.removeEventListener('keydown', onKey)
+  }
+}
+
 /**
  * 카드 목록을 그립니다. 프로젝트 보드와 홈이 같은 모양을 씁니다.
  *
@@ -137,10 +289,17 @@ const nameOf = (id, who) => who?.(id)?.name || DEMO_USERS.find((u) => u.id === i
  * @param {Function} [o.who] - actor id → {name}
  * @param {string} [o.none] - 비었을 때의 한 줄
  * @param {number} [o.nowMs]
+ * @param {(row: object) => Array} [o.menu] - 카드마다 「⋮」 메뉴에 세울 줄들.
+ *        {label, on, danger, disabled, why} 의 배열입니다. 빈 배열을 주면 「⋮」를 달지
+ *        않습니다. 아예 주지 않으면 카드는 예전 그대로입니다
  */
-export function paintCards(mount, rows, { onPick, current, who, none = '아직 프로젝트가 없습니다.', nowMs } = {}) {
+export function paintCards(mount, rows, {
+  onPick, current, who, none = '아직 프로젝트가 없습니다.', nowMs, menu,
+} = {}) {
   if (!mount) return
   injectCss(mount.ownerDocument || document)
+  // 다시 그리면 앞의 카드가 사라집니다. 그 카드에 걸려 있던 메뉴도 같이 접습니다
+  shutMenu()
   mount.textContent = ''
   mount.className = 'pj__list'
   if (!rows?.length) {
@@ -161,7 +320,14 @@ export function paintCards(mount, rows, { onPick, current, who, none = '아직 �
     }
     if (current && r.boardId === current) el.setAttribute('aria-current', 'true')
     const name = r.name || r.boardId
-    const at = when(r.updatedAt, nowMs)
+    /*
+     * 카드의 날짜는 「Sep 7」입니다. 목록·표의 「9/7」과 다릅니다.
+     *
+     * 카드는 한 장씩 따로 서서 옆에 견줄 줄이 없습니다. 「9/7」만 놓고는 9월 7일인지
+     * 7월 9일인지 짚어 줄 것이 화면에 없습니다. 표는 여러 줄이 세로로 늘어서 숫자끼리
+     * 자리가 맞는 편이 훑기 좋아서 그대로 둡니다(components/history-list.js 의 when).
+     */
+    const at = when(r.updatedAt, nowMs, 'name')
     /*
      * 한 일은 카드 본문에, 「누가」와 「언제」는 아래 테 두른 조각에 담습니다. 아직 아무
      * 일도 없는 판에는 사람 조각을 달지 않습니다. 없는 사실을 「알 수 없음」으로 적으면
@@ -176,7 +342,36 @@ export function paintCards(mount, rows, { onPick, current, who, none = '아직 �
       <span class="pj__open" aria-hidden="true">${onPick ? '→' : ''}</span>
       <span class="pj__last">${r.lastWhat ? esc(r.lastWhat) : '<i>아직 아무 일도 없습니다</i>'}</span>
       <span class="pj__meta">${chips}</span>`
-    mount.append(el)
+
+    /*
+     * 메뉴를 달지 않으면 카드를 그대로 붙입니다. 겹을 하나 더 두지 않는 이유는 이
+     * 함수를 쓰는 자리가 셋이고(홈 · 각 화면 앞의 문 · 검사) 그중 둘은 메뉴가 필요
+     * 없기 때문입니다. 필요 없는 곳에 빈 겹을 남기면 격자가 한 칸씩 밀립니다.
+     */
+    const items = menu?.(r) || []
+    if (!items.length) { mount.append(el); continue }
+
+    const slot = doc.createElement('div')
+    slot.className = 'pj__slot'
+    slot.append(el)
+
+    const more = doc.createElement('button')
+    more.type = 'button'
+    more.className = 'pj__more'
+    more.setAttribute('aria-haspopup', 'menu')
+    more.setAttribute('aria-expanded', 'false')
+    // 「⋮」는 글자로만 있으면 낭독기가 「세로 생략 부호」로 읽습니다. 어느 판의 것인지도 답니다
+    more.setAttribute('aria-label', `${name} 메뉴 열기`)
+    more.title = `${name} 메뉴`
+    more.textContent = '⋮'
+    more.onclick = (ev) => {
+      // 카드가 버튼입니다. 여기서 막지 않으면 메뉴를 열려던 클릭이 판을 엽니다
+      ev.stopPropagation()
+      ev.preventDefault()
+      popMenu(slot, more, items)
+    }
+    slot.append(more)
+    mount.append(slot)
   }
 }
 

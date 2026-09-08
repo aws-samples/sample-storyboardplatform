@@ -35,6 +35,19 @@ const CSS = `
   background: var(--sb-panel, #fff); color: var(--sb-ink, #111318);
   width: min(430px, 100%); box-shadow: var(--sb-sh-lg, 0 12px 34px -10px rgba(17,19,24,.22));
   font-family: var(--sb-sans, sans-serif);
+  /*
+   * 상하좌우 가운데. 이 한 줄을 여기 적어 두는 것이 중요합니다.
+   *
+   * 모달 dialog 를 가운데 세우는 것은 브라우저 기본 스타일의 margin:auto 입니다
+   * (position:fixed · inset:0 과 짝입니다). 그런데 story-graph.html 과 key-visual.html 은
+   * 맨 위에 * { margin: 0 } 을 두고 있어서 그 auto 가 0 으로 덮이고, 창이 왼쪽 위
+   * 구석에 붙었습니다. 실제로 그랬습니다.
+   *
+   * 고치는 자리를 화면 쪽이 아니라 이 파일로 잡았습니다. 화면마다 리셋을 손보면 창을
+   * 쓰는 화면이 하나 늘 때마다 같은 것을 또 겪습니다. 창의 모양은 이 파일이 들고 있으니
+   * 「가운데 선다」도 여기 있어야 합니다.
+   */
+  margin: auto;
 }
 .cfm::backdrop { background: rgba(15, 20, 30, .55); }
 .cfm:not([open]) { display: none; }

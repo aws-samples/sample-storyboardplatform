@@ -185,6 +185,26 @@
   .sect__mine[aria-pressed="true"] {
     color: var(--sb-accent); border-color: var(--sb-accent-line); background: var(--sb-accent-soft);
   }
+  /*
+   * 「한 판만 보고 있습니다」 줄. 카드의 「⋮ → 작업 기록 보기」로 들어오면 뜹니다.
+   *
+   * 이 표는 원래 여러 판을 모아 보는 자리라서, 걸러진 것을 말해 주지 않으면 나머지
+   * 판의 일이 사라진 것으로 읽힙니다. 그래서 무엇으로 걸렀는지와 그것을 푸는 길을
+   * 표 바로 위에 같이 둡니다.
+   */
+  .only {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 10px;
+    padding: 8px 11px; background: var(--sb-accent-soft); border: 1px solid var(--sb-accent-line);
+    border-radius: var(--sb-r); font-size: 12px; color: var(--sb-ink-2);
+  }
+  .only[hidden] { display: none }
+  .only b { font-weight: 600; color: var(--sb-ink) }
+  .only__x {
+    margin-left: auto; flex: none; background: var(--sb-panel); border: 1px solid var(--sb-line);
+    border-radius: var(--sb-r); padding: 3px 9px; font: inherit; font-size: 11.5px;
+    color: var(--sb-ink-2); cursor: pointer;
+  }
+  .only__x:hover { border-color: var(--sb-accent); color: var(--sb-accent) }
   /* 표는 흰 판 위에 앉힙니다. 모양(.htab*)은 app/history.js 가 넣습니다 */
   .tabbox {
     background: var(--sb-panel); border: 1px solid var(--sb-line);
@@ -369,6 +389,10 @@
           <button class="sect__mine" id="actMine" type="button" aria-pressed="false"
                   title="내가 한 것만 봅니다">내 것만</button>
         </h2>
+        <div class="only" id="actOnly" hidden>
+          <span><b id="actOnlyName"></b> 한 판의 기록만 보고 있습니다.</span>
+          <button class="only__x" id="actOnlyX" type="button">전체 보기</button>
+        </div>
         <div class="tabbox" id="act" data-coach="actbox"></div>
         <p class="view__note" id="actNote"></p>
       </section>
