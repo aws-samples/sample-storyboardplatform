@@ -25,10 +25,48 @@
  * 예시가 남기는 것은 「예시 프로젝트」 한 판에만 들어갑니다(DEMO_BOARD). 예시 내용은
  * 서버에 남고 같은 보드를 보는 사람에게도 보이므로(board.js 의 push → net.sendOp),
  * 남의 프로젝트에 예시 컷이 섞이면 그것을 지우는 일이 남의 일이 됩니다.
+ *
+ * ══ 이 폴더는 app/ 을 import 하지 않습니다
+ *
+ * 그러고 싶어도 못 합니다. 배포에서 app/* 는 버킷 루트로 올라가고 이 폴더는
+ * /app-walkthrough/ 로 올라갑니다. 그래서 상대 경로로 app 폴더를 거슬러 올라가면
+ * 디스크에서는 맞고 배포에서는 없는 자리를 찾아 404 입니다. 저장소에서 돌던 것이
+ * 배포에서만 깨지는, 가장 늦게 발견되는 종류의 고장입니다.
+ *
+ * 그래서 필요한 것을 화면이 넣어 줍니다(wire). 화면은 이 폴더를 import 할 수 있습니다
+ * (app/pages/x.js 에서 '../../app-walkthrough/' 는 두 배치에서 같은 자리입니다).
+ * 방향이 한쪽뿐이라 이 폴더를 지우면 예시만 사라지고 제품은 그대로 돕니다.
  */
 
-import { navHref, NAV_TABS } from './nav-tabs.js'
-import { touch as touchProject } from './projects.js'
+/*
+ * 화면이 넣어 주는 것. 제품 쪽 함수 둘입니다.
+ *   navHref(id, boardId) → 그 화면의 주소      (app/components/nav-tabs.js)
+ *   label(id)            → 그 화면의 이름      (app/components/nav-tabs.js 의 NAV_TABS)
+ *   touch({...})         → 프로젝트 목록에 한 줄  (app/services/projects.js)
+ *
+ * 넣지 않고 부르면 그 자리에서 던집니다. 조용히 아무 일도 안 하는 것보다 낫습니다.
+ * 예시가 안 도는 것을 예시를 만드는 사람이 바로 알아야 합니다.
+ */
+let host = null
+
+/**
+ * 예시가 쓸 제품 쪽 함수를 넣습니다. 각 화면이 예시를 시작하기 전에 한 번 부릅니다.
+ * @param {object} o
+ * @param {(id: string, boardId: string) => string} o.navHref
+ * @param {(id: string) => string} o.label
+ * @param {(o: object) => Promise<any>} o.touch
+ */
+export function wire(o) {
+  host = o
+}
+
+const need = (k) => {
+  if (!host?.[k]) throw new Error(`app-walkthrough/tour.js: wire({${k}}) 를 먼저 불러야 합니다`)
+  return host[k]
+}
+
+const navHref = (id, boardId) => need('navHref')(id, boardId)
+const touchProject = (o) => need('touch')(o)
 
 /**
  * 예시가 사는 보드. 프로젝트 보드의 「둘러보기」가 여는 것과 같은 판입니다
@@ -144,7 +182,7 @@ export function demoSay(step) {
   const n = demoAt(step)
   if (!n) return ''
   const next = DEMO_STEPS[n]
-  const label = (id) => NAV_TABS.find((t) => t.id === id)?.label || id
+  const label = need('label')
   return next
     ? `예시 프로젝트 ${n}/${DEMO_TOTAL}. 이 단계를 마치면 「${label(next)}」로 넘어갑니다.`
     : `예시 프로젝트 ${n}/${DEMO_TOTAL}. 마지막 단계입니다. 마치면 홈으로 돌아갑니다.`

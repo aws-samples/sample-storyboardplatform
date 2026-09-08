@@ -63,8 +63,8 @@ function candidates(p) {
   const rel = p.replace(/^\/+/, '')
   if (rel === '') return ['app/index.html']
   return [
-    rel,                                // /aws-config.js, /app-walkthrough/data/* 같은 그대로인 것
-    path.posix.join('app', rel),        // 루트에 올라간 app/* · /index.html, /core.js …
+    rel,                                // /aws-config.js, /app-walkthrough/tour.js 같은 그대로인 것
+    path.posix.join('app', rel),        // 루트에 올라간 app/* · /index.html, /story/core.js …
   ]
 }
 

@@ -8,7 +8,7 @@
 //
 // 씨앗이 0개인 것도 정상이다. 관계가 얇은 대본에서는 아무것도 안 나온다.
 
-import { josa } from './core.js'
+import { josa } from '../lib/josa.js'
 
 const asList = (v) => (Array.isArray(v) ? v : [])
 

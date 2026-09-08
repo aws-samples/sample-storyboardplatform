@@ -1,10 +1,10 @@
 /**
  * 권한 한 벌. 네 화면이 같은 표를 나눠 씁니다.
  *
- * core.js 가 「무엇을 누가 하는가」의 기본값을 코드로 못 박아 두었습니다(ACTIONS.roles,
+ * domain/panels.js 가 「무엇을 누가 하는가」의 기본값을 코드로 못 박아 두었습니다(ACTIONS.roles,
  * ART_ROLES, PLAN_ROLES, ADMIN_VIEW_ROLES). 여기 있는 것은 그 위에 얹는 손질입니다.
  * 감독이 역할별로 켜고 끄고, 사람 하나에게만 예외를 줄 수 있습니다. 기본값을 고치지
- * 않으므로 손질을 지우면 언제든 core.js 의 값으로 돌아갑니다.
+ * 않으므로 손질을 지우면 언제든 panels.js 의 값으로 돌아갑니다.
  *
  * 보관은 칸 하나가 한 줄입니다. `role:director:approve` 처럼 열쇠를 만들고 { on, ts } 를
  * 둡니다. 통째로 한 덩어리에 넣으면 두 사람이 서로 다른 칸을 만져도 나중 것이 앞 것을
@@ -13,7 +13,7 @@
  * 이 파일이 보드 밖에 사는 이유는, 권한을 봐야 하는 자리가 보드에만 있지 않기 때문입니다.
  * 감독은 스토리 디벨롭·대본화·키비주얼 화면에서도 이 표를 열어야 합니다. 그래서 모양(CSS)
  * 까지 이 파일이 들고 있습니다. 보드의 스타일이 없는 화면에서도 표가 표로 보여야 합니다.
- * 색은 공통 토큰(app/theme.css 의 --sb-*)에서 받고, 그 파일이 없으면 뒤의 기본값으로
+ * 색은 공통 토큰(app/components/theme.css 의 --sb-*)에서 받고, 그 파일이 없으면 뒤의 기본값으로
  * 떨어집니다. nav-tabs.js 와 같은 방식입니다.
  *
  * 「권한 관리」 자체는 손질 대상이 아닙니다. 그것까지 끌 수 있으면 아무도 다시 켤 수 없습니다.
@@ -22,10 +22,10 @@
 import {
   ACTIONS, TRANSITIONS, STATUS, ROLES,
   canEditContent, ART_ROLES, PLAN_ROLES, ADMIN_VIEW_ROLES,
-} from './core.js'
-import { esc, setHtml } from './dom.js'
-import { opsClient } from './net.js'
-import { session } from './auth.js'
+} from '../domain/panels.js'
+import { esc, setHtml } from '../lib/dom.js'
+import { opsClient } from '../services/api.js'
+import { session } from '../services/auth.js'
 
 export const CAPS = {
   ...Object.fromEntries(Object.entries(ACTIONS).map(([k, v]) => [k, {
@@ -35,7 +35,7 @@ export const CAPS = {
   edit: {
     label: '내용 편집',
     group: '컷 내용',
-    // 기본값을 core.js 에서 되읽습니다. 여기에 역할 이름을 다시 적으면 두 곳이 갈라집니다
+    // 기본값을 domain/panels.js 에서 되읽습니다. 여기에 역할 이름을 다시 적으면 두 곳이 갈라집니다
     roles: Object.keys(ROLES).filter((r) => canEditContent(r, { status: 'draft' })),
     note: '작업 내용·대사·카메라. 승인된 컷은 역할과 무관하게 잠깁니다',
   },
@@ -119,7 +119,7 @@ export function permModel({ perms, roleOf, nameOf = (id) => id, meId = null }) {
     return r ? r.on : !!CAPS[cap]?.roles.includes(role)
   }
 
-  /** 이 사람이 이것을 할 수 있는가. 사람 예외 → 역할 손질 → core.js 기본값 순서입니다 */
+  /** 이 사람이 이것을 할 수 있는가. 사람 예외 → 역할 손질 → panels.js 기본값 순서입니다 */
   const may = (cap, who = self()) => {
     if (!CAPS[cap]) return false
     const u = cell('user', who, cap)

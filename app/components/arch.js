@@ -18,7 +18,7 @@
  * 떨어집니다. nav-tabs.js · perm.js 와 같은 방식입니다.
  */
 
-import { esc, setHtml } from './dom.js'
+import { esc, setHtml } from '../lib/dom.js'
 
 /*
  * 층. 위에서 아래로 「사람이 보는 것 → 그것을 지탱하는 것」 순서입니다.
@@ -34,7 +34,7 @@ const LAYERS = [
       {
         name: '네 화면',
         svc: 'ES 모듈 · 빌드 단계 없음',
-        note: '스토리 디벨롭 · 대본화 · 키비주얼 · 스토리보드. 한 폴더(app/)에 나란히 있고 core.js·net.js 를 나눠 씁니다',
+        note: '스토리 디벨롭 · 대본화 · 키비주얼 · 스토리보드. pages/ 가 화면, domain/ 이 규칙, services/ 가 밖과의 통신, components/ 가 공통 부품입니다',
       },
       {
         name: '배달',

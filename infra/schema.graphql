@@ -30,6 +30,17 @@ type PlanJob {
   status: String!
 }
 
+# 세계관 네비게이터 챗봇의 질문 한 건. plan 과 같은 비동기 패턴을 쓴다.
+input NavigateInput {
+  projectId: String!
+  question: String!
+  # 지금 화면에 있는 그래프 {nodes, edges}. 없으면 Lambda 가 빈 그래프로 답한다
+  graphData: AWSJSON
+  # 이전 대화 [{role, content}, ...]. 최근 몇 턴만 모델에 다시 들어간다
+  conversationHistory: AWSJSON
+  model: String
+}
+
 # 작업판 앞에 세우는 프로젝트 카드 한 장.
 #
 # op 로그와 다른 항목에 따로 담는다. op 는 pk=BOARD#<id> 로 흩어져 있어서 목록을 뽑으려면
@@ -64,6 +75,10 @@ type Query {
   # 잡을 띄운 사람만 읽을 수 있다.
   planResult(jobId: ID!): AWSJSON!
 
+  # navigate 결과 한 건. planResult 와 같은 항목을 읽는다 — 모양도 같다.
+  # owner 는 받기만 하고 쓰지 않는다. 대조는 토큰의 클레임으로 한다.
+  navigateResult(jobId: ID!, owner: String): AWSJSON!
+
   # 관계 그래프. Neptune 을 도는 Lambda 가 받는다.
   # loadGraph 는 {nodes, edges}, queryGraph 는 spec.type 에 따라 모양이 달라진다.
   loadGraph(projectId: String): AWSJSON!
@@ -90,6 +105,9 @@ type Mutation {
   # plan 은 Query 가 아니라 Mutation 이다. AppSync 요청 실행 시간 상한이 30초(변경 불가)라서
   # 느린 모델을 동기로 기다릴 수 없다. Lambda 를 Event 로 띄우고 jobId 만 즉시 돌려준다.
   plan(spec: AWSJSON!): PlanJob!
+
+  # navigate 도 같은 이유로 Mutation 이다. 접수증(PlanJob)을 plan 과 함께 쓴다.
+  navigate(input: NavigateInput!): PlanJob!
 
   # saveGraph 는 프로젝트를 통째로 덮어쓰고, updateGraph 는 역기입 한 묶음을 얹는다
   saveGraph(spec: AWSJSON!): AWSJSON!
