@@ -8,7 +8,8 @@
 //
 // 씨앗이 0개인 것도 정상이다. 관계가 얇은 대본에서는 아무것도 안 나온다.
 
-import { josa } from '../lib/josa.js'
+// 카드에 찍히는 문장은 seed-text.js 가 들고 있다. 여기서는 무엇을 찾았는지만 넘긴다
+import { SEED_TEXT } from './seed-text.js'
 
 const asList = (v) => (Array.isArray(v) ? v : [])
 
@@ -164,16 +165,15 @@ export function probeSecretLeverage(store) {
     if (!knowers.length || (!hidden.length && !holders.length)) continue
 
     const raw = 0.6 + 0.15 * Math.min(4, knowers.length) + 0.1 * Math.min(4, hidden.length)
-    const title = hidden.length
-      ? `${namesOf(store, hidden)}만 모르는 것: ${s.name}`
-      : `${namesOf(store, knowers)}가 쥐고 있는 것: ${s.name}`
-    const claim = String(s.props?.claim || '').trim()
-    const desc = [
-      knowers.length ? `${namesOf(store, knowers)}${josa(namesOf(store, knowers), '은', '는')} 알고` : null,
-      hidden.length ? `${namesOf(store, hidden)}${josa(namesOf(store, hidden), '은', '는')} 모른다` : null,
-      claim ? `"${claim}"` : null,
-    ].filter(Boolean).join(', ')
-    out.push(mk(store, 'secret_leverage', raw, title, desc, [...holders, ...knowers, s.id]))
+    const T = SEED_TEXT.secret_leverage
+    const said = {
+      secret: s.name,
+      know: namesOf(store, knowers),
+      dark: namesOf(store, hidden),
+      hold: namesOf(store, holders),
+      claim: String(s.props?.claim || '').trim(),
+    }
+    out.push(mk(store, 'secret_leverage', raw, T.title(said), T.desc(said), [...holders, ...knowers, s.id]))
   }
   return trim(out, 6)
 }
@@ -185,6 +185,7 @@ export function probeSecretLeverage(store) {
  */
 export function probeLoveTriangle(store) {
   const out = []
+  const T = SEED_TEXT.love_triangle
   const affection = [...store.getEdgesByPredicate('loves'), ...store.getEdgesByPredicate('drawn_to')]
 
   // 공유형: 같은 사람을 둘 이상이 마음에 둔다
@@ -202,10 +203,8 @@ export function probeLoveTriangle(store) {
         const [a, ea] = list[i]
         const [b, eb] = list[j]
         const raw = 0.85 + 0.5 * Math.max(ten(ea), ten(eb))
-        out.push(mk(store, 'love_triangle', raw,
-          `${nameOf(store, target)}${josa(nameOf(store, target), '을', '를')} 축으로 한 삼각: ${nameOf(store, a)} · ${nameOf(store, b)}`,
-          `${nameOf(store, a)}→${nameOf(store, target)}←${nameOf(store, b)}. 같은 자리를 둘이 겹쳐 잡는다`,
-          [target, a, b]))
+        const said = { axis: nameOf(store, target), a: nameOf(store, a), b: nameOf(store, b) }
+        out.push(mk(store, 'love_triangle', raw, T.title(said), T.shared(said), [target, a, b]))
       }
     }
   }
@@ -215,10 +214,8 @@ export function probeLoveTriangle(store) {
     for (const second of affection) {
       if (second.s !== first.o || second.o === first.s) continue
       const raw = 0.8 + 0.5 * Math.max(ten(first), ten(second))
-      out.push(mk(store, 'love_triangle', raw,
-        `${nameOf(store, first.o)}${josa(nameOf(store, first.o), '을', '를')} 축으로 한 삼각: ${nameOf(store, first.s)} · ${nameOf(store, second.o)}`,
-        `${nameOf(store, first.s)}→${nameOf(store, first.o)}→${nameOf(store, second.o)}. 마음이 한 방향으로만 흐른다`,
-        [first.o, first.s, second.o]))
+      const said = { a: nameOf(store, first.s), axis: nameOf(store, first.o), b: nameOf(store, second.o) }
+      out.push(mk(store, 'love_triangle', raw, T.title(said), T.chain(said), [first.o, first.s, second.o]))
     }
   }
 
@@ -226,10 +223,9 @@ export function probeLoveTriangle(store) {
   for (const e of store.getEdgesByPredicate('rival_of')) {
     const via = e.props?.via
     if (e.props?.derived_by !== 'love_chain' || !via || !store.getNode(via)) continue
+    const said = { axis: nameOf(store, via), a: nameOf(store, e.s), b: nameOf(store, e.o) }
     out.push(mk(store, 'love_triangle', 0.85 + 0.5 * ten(e),
-      `${nameOf(store, via)}${josa(nameOf(store, via), '을', '를')} 축으로 한 삼각: ${nameOf(store, e.s)} · ${nameOf(store, e.o)}`,
-      `${nameOf(store, e.s)}↔${nameOf(store, e.o)}가 ${nameOf(store, via)}${josa(nameOf(store, via), '을', '를')} 두고 겹친다. 연정과 소유가 같은 자리를 잡는다`,
-      [via, e.s, e.o]))
+      T.title(said), T.rivalry(said), [via, e.s, e.o]))
   }
 
   return trim(out, 6)
@@ -248,10 +244,14 @@ export function probeUnresolvedTension(store) {
     if (t < 0.6) continue
     if (!isChar(store, e.s) || !isChar(store, e.o)) continue
     if (sharedEvent(store, e.s, e.o)) continue
-    out.push(mk(store, 'unresolved_tension', 0.35 + 0.65 * t,
-      `해소되지 않은 긴장: ${nameOf(store, e.s)} ↔ ${nameOf(store, e.o)}`,
-      `${nameOf(store, e.s)} ${e.p} ${nameOf(store, e.o)} (긴장 ${t}). 두 사람이 함께 있었던 사건이 없다`,
-      [e.s, e.o]))
+    const T = SEED_TEXT.unresolved_tension
+    const said = {
+      a: nameOf(store, e.s),
+      b: nameOf(store, e.o),
+      edge: { s: nameOf(store, e.s), p: e.p, o: nameOf(store, e.o), props: e.props },
+      tension: t,
+    }
+    out.push(mk(store, 'unresolved_tension', 0.35 + 0.65 * t, T.title(said), T.desc(said), [e.s, e.o]))
   }
   return trim(out, 6)
 }
@@ -270,12 +270,9 @@ export function probeChekovObject(store) {
     if (to.some((e) => e.p === 'uses')) continue
     const holders = uniq(to.map((e) => e.s))
     const raw = 0.5 + 0.1 * Math.min(3, holders.length)
-    out.push(mk(store, 'chekhov_object', raw,
-      `회수되지 않은 사물: ${o.name}`,
-      holders.length
-        ? `${namesOf(store, holders)}${josa(namesOf(store, holders), '과', '와')} 얽혀 있는데 이 물건이 일으킨 사건이 없다`
-        : '아직 아무 관계도 붙지 않았다. 놓여만 있는 물건이다',
-      [o.id, ...holders]))
+    const T = SEED_TEXT.chekhov_object
+    const said = { object: o.name, holders: namesOf(store, holders) }
+    out.push(mk(store, 'chekhov_object', raw, T.title(said), T.desc(said), [o.id, ...holders]))
   }
   return trim(out, 6)
 }
@@ -297,10 +294,10 @@ export function probeStrangersSharedPast(store) {
         const [a, b] = [cast[i], cast[j]]
         if (linked(store, a, b)) continue
         const past = tOf(store, ev.id) < 0
+        const T = SEED_TEXT.strangers_shared_past
+        const said = { a: nameOf(store, a), b: nameOf(store, b), event: ev.name }
         out.push(mk(store, 'strangers_shared_past', 0.5 + (past ? 0.15 : 0.05) + 0.1 * Math.min(3, cast.length - 2),
-          `같은 자리에 있었지만 남인 둘: ${nameOf(store, a)} · ${nameOf(store, b)}`,
-          `${ev.name}에 함께 있었는데 두 사람 사이에 관계 엣지가 없다`,
-          [a, b, ev.id]))
+          T.title(said), T.desc(said), [a, b, ev.id]))
       }
     }
   }
@@ -322,13 +319,18 @@ export function probeSeveredBond(store) {
     const broken = t >= 0.7 || status === 'broken' || backlash.length > 0
     if (!broken) continue
     if (sharedEvent(store, e.s, e.o)) continue
-    const why = status === 'broken' ? 'props.status 가 broken 이다'
-      : backlash.length ? `${backlash[0].p} 엣지가 함께 서 있다`
-        : `긴장 ${t}`
+    const T = SEED_TEXT.severed_bond
+    const ko = (x) => ({ s: nameOf(store, x.s), p: x.p, o: nameOf(store, x.o), props: x.props })
+    const said = {
+      a: nameOf(store, e.s),
+      b: nameOf(store, e.o),
+      edge: ko(e),
+      backlash: backlash.length ? ko(backlash[0]) : null,
+      broken: status === 'broken',
+      tension: t,
+    }
     out.push(mk(store, 'severed_bond', 0.55 + 0.45 * Math.max(t, backlash.length ? 0.7 : 0),
-      `끊어진 사제: ${nameOf(store, e.s)} → ${nameOf(store, e.o)}`,
-      `${why}. 화해도 결별도 사건으로 기록되지 않았다`,
-      [e.s, e.o]))
+      T.title(said), T.desc(said), [e.s, e.o]))
   }
   return trim(out, 6)
 }
@@ -350,11 +352,9 @@ export function probeDanglingConsequence(store) {
     const raw = 0.7 + (t >= 0 ? 0.35 : 0.2) + 0.1 * Math.min(3, cast.length)
     const skip = new Set([ev.id, ...cast])
     const around = cast.map((id) => hotNeighbor(store, id, skip)).filter(Boolean)
-    out.push(mk(store, 'dangling_consequence', raw,
-      t < 0
-        ? `${-t}년째 값이 치러지지 않은 사건: ${ev.name}`
-        : `결과가 기록되지 않은 사건: ${ev.name} (t=${t})`,
-      `t=${t}. 이 사건에서 나가는 결과 엣지가 하나도 없다`,
+    const T = SEED_TEXT.dangling_consequence
+    const said = { event: ev.name, t, cast: namesOf(store, cast) }
+    out.push(mk(store, 'dangling_consequence', raw, T.title(said), T.desc(said),
       [ev.id, ...cast, ...around]))
   }
   return trim(out, 8)
@@ -370,12 +370,11 @@ const WANT_KEYS = ['want', 'goal', 'desire', 'wants']
  */
 export function probeContestedGoal(store) {
   const out = []
+  const T = SEED_TEXT.contested_goal
   const add = (who, label, focus, raw) => {
     if (who.length < 2) return
-    out.push(mk(store, 'contested_goal', raw,
-      `같은 것을 원하는 ${who.length}명: ${label}`,
-      `${namesOf(store, who)}${josa(namesOf(store, who), '이', '가')} 같은 것을 놓고 겹친다. 하나뿐이면 나머지는 잃는다`,
-      [...who, ...focus]))
+    const said = { n: who.length, want: label, who: namesOf(store, who) }
+    out.push(mk(store, 'contested_goal', raw, T.title(said), T.desc(said), [...who, ...focus]))
   }
 
   // props 에 적힌 목표가 글자까지 같은 경우
@@ -422,10 +421,14 @@ export function probeBetrayalPotential(store) {
       if (!bonds.length) continue
       const bond = bonds.sort((a, b) => ten(b) - ten(a))[0]
       const raw = 0.65 + 0.35 * Math.max(ten(sv), ten(bond), ten(rival, 0))
-      out.push(mk(store, 'betrayal_potential', raw,
-        `안에서 갈라지는 충성: ${nameOf(store, sv.s)}`,
-        `${nameOf(store, sv.s)}${josa(nameOf(store, sv.s), '은', '는')} ${nameOf(store, sv.o)}${josa(nameOf(store, sv.o), '을', '를')} 섬기는데, 그 적인 ${nameOf(store, foe)}${josa(nameOf(store, foe), '과', '와')} 이미 얽혀 있다. ${BOND[bond.p]}`,
-        [sv.s, sv.o, foe]))
+      const T = SEED_TEXT.betrayal_potential
+      const said = {
+        member: nameOf(store, sv.s),
+        lord: nameOf(store, sv.o),
+        foe: nameOf(store, foe),
+        bond: BOND[bond.p],
+      }
+      out.push(mk(store, 'betrayal_potential', raw, T.title(said), T.desc(said), [sv.s, sv.o, foe]))
     }
   }
   return trim(out, 6)
@@ -438,6 +441,7 @@ export function probeBetrayalPotential(store) {
  */
 export function probeIdentityCrisis(store) {
   const out = []
+  const T = SEED_TEXT.identity_crisis
   for (const c of store.getNodes({ kind: 'Character' })) {
     // 상충하는 소속
     const groups = uniq(store.getEdgesFrom(c.id).filter((e) => e.p === 'member_of').map((e) => e.o))
@@ -445,10 +449,9 @@ export function probeIdentityCrisis(store) {
       for (let j = i + 1; j < groups.length; j++) {
         const rival = store.getEdgesBetween(groups[i], groups[j]).find((e) => e.p === 'rival_of')
         if (!rival) continue
+        const said = { who: c.name, a: nameOf(store, groups[i]), b: nameOf(store, groups[j]) }
         out.push(mk(store, 'identity_crisis', 0.7 + 0.3 * ten(rival),
-          `두 곳에 동시에 속한 인물: ${c.name}`,
-          `${nameOf(store, groups[i])}${josa(nameOf(store, groups[i]), '과', '와')} ${nameOf(store, groups[j])}${josa(nameOf(store, groups[j]), '은', '는')} 서로 적인데 ${c.name}${josa(c.name, '은', '는')} 양쪽 다 이름이 올라 있다`,
-          [c.id, groups[i], groups[j]]))
+          T.bothTitle(said), T.both(said), [c.id, groups[i], groups[j]]))
       }
     }
 
@@ -462,10 +465,9 @@ export function probeIdentityCrisis(store) {
         || store.getEdgesFrom(secret.id).some((x) => x.p === 'concerns' && x.o === c.id)
       if (!aboutMe) continue
       const hidden = store.getEdgesFrom(secret.id).filter((x) => x.p === 'hidden_from').length
+      const said = { who: c.name, claim }
       out.push(mk(store, 'identity_crisis', 0.65 + 0.1 * Math.min(2, hidden),
-        `자기를 숨기는 인물: ${c.name}`,
-        `${claim ? `"${claim}" · ` : ''}자기에 관한 것을 자기가 감추고 있다`,
-        [c.id, secret.id]))
+        T.selfTitle(said), T.self(said), [c.id, secret.id]))
     }
   }
   return trim(out, 6)
@@ -478,6 +480,7 @@ export function probeIdentityCrisis(store) {
  */
 export function probeForbiddenBond(store) {
   const out = []
+  const T = SEED_TEXT.forbidden_bond
   for (const lv of store.getEdgesByPredicate('loves')) {
     const mine = uniq(store.getEdgesFrom(lv.s).filter((e) => e.p === 'member_of').map((e) => e.o))
     const yours = uniq(store.getEdgesFrom(lv.o).filter((e) => e.p === 'member_of').map((e) => e.o))
@@ -486,9 +489,13 @@ export function probeForbiddenBond(store) {
         if (f1 === f2) continue
         const rival = store.getEdgesBetween(f1, f2).find((e) => e.p === 'rival_of')
         if (!rival) continue
+        const said = {
+          a: nameOf(store, f1),
+          b: nameOf(store, f2),
+          edge: { s: nameOf(store, lv.s), p: lv.p, o: nameOf(store, lv.o), props: lv.props },
+        }
         out.push(mk(store, 'forbidden_bond', 0.7 + 0.35 * ten(rival),
-          `사랑해선 안 될 상대: ${nameOf(store, lv.s)} → ${nameOf(store, lv.o)}`,
-          `${nameOf(store, f1)}${josa(nameOf(store, f1), '과', '와')} ${nameOf(store, f2)}${josa(nameOf(store, f2), '이', '가')} 서로 적이다. 관계를 지키려면 소속을 버려야 한다`,
+          T.title({ a: nameOf(store, lv.s), b: nameOf(store, lv.o) }), T.factions(said),
           [lv.s, lv.o, f1, f2]))
       }
     }
@@ -496,10 +503,13 @@ export function probeForbiddenBond(store) {
       if (keeper === lv.o) continue
       const rival = store.getEdgesBetween(keeper, lv.o).find((e) => e.p === 'rival_of')
       if (!rival) continue
+      const said = {
+        lover: nameOf(store, lv.s),
+        keeper: nameOf(store, keeper),
+        mate: nameOf(store, lv.o),
+      }
       out.push(mk(store, 'forbidden_bond', 0.7 + 0.35 * ten(rival),
-        `사랑해선 안 될 상대: ${nameOf(store, lv.s)} → ${nameOf(store, lv.o)}`,
-        `${nameOf(store, lv.s)}${josa(nameOf(store, lv.s), '이', '가')} 매여 있는 ${nameOf(store, keeper)}${josa(nameOf(store, keeper), '과', '와')} ${nameOf(store, lv.o)}${josa(nameOf(store, lv.o), '은', '는')} 적이다. 계약과 마음이 같이 설 수 없다`,
-        [lv.s, lv.o, keeper]))
+        T.title({ a: said.lover, b: said.mate }), T.keeper(said), [lv.s, lv.o, keeper]))
     }
   }
   return trim(out, 6)
@@ -512,6 +522,7 @@ export function probeForbiddenBond(store) {
  */
 export function probePowerVacuum(store) {
   const out = []
+  const T = SEED_TEXT.power_vacuum
   const leaders = uniq([
     ...store.getEdgesByPredicate('manages').map((e) => e.s),
     ...store.getEdgesByPredicate('mentor_of').map((e) => e.s),
@@ -522,10 +533,14 @@ export function probePowerVacuum(store) {
       const led = uniq([
         ...store.getEdgesFrom(id).filter((x) => x.p === 'manages' || x.p === 'mentor_of').map((x) => x.o),
       ])
+      const said = {
+        leader: nameOf(store, id),
+        event: nameOf(store, e.o),
+        tension: ten(e, 0),
+        led: namesOf(store, led) || '아래',
+      }
       out.push(mk(store, 'power_vacuum', 0.6 + 0.35 * ten(e, 0),
-        `이끄는 자가 흔들린다: ${nameOf(store, id)}`,
-        `${nameOf(store, e.o)}에 긴장 ${ten(e, 0)} 으로 걸려 있다. ${namesOf(store, led) || '아래'}${josa(namesOf(store, led) || '아래', '을', '를')} 이끌 사람이 비게 된다`,
-        [id, e.o, ...led]))
+        T.shakenTitle(said), T.shaken(said), [id, e.o, ...led]))
     }
   }
 
@@ -539,10 +554,9 @@ export function probePowerVacuum(store) {
     if (inbound.some((e) => e.p === 'manages')) continue
     const members = uniq(inbound.filter((e) => e.p === 'member_of').map((e) => e.s))
     if (!members.length) continue
+    const said = { faction: nameOf(store, gid), members: namesOf(store, members) }
     out.push(mk(store, 'power_vacuum', 0.55 + 0.1 * Math.min(3, members.length),
-      `이끄는 사람이 없는 집단: ${nameOf(store, gid)}`,
-      `${namesOf(store, members)}${josa(namesOf(store, members), '이', '가')} 속해 있는데 manages 엣지가 없다. 자리가 비어 있다`,
-      [gid, ...members]))
+      T.headlessTitle(said), T.headless(said), [gid, ...members]))
   }
   return trim(out, 6)
 }

@@ -4,7 +4,8 @@
 //   loadGraph    projectId 의 노드·명시 엣지를 mock/graph.json 모양으로 돌려준다
 //   saveGraph    그래프 하나를 통째로 덮어쓴다 (추출 직후 한 번)
 //   queryGraph   이웃·서브그래프처럼 그래프를 걸어야 답이 나오는 조회
-//   updateGraph  역기입. 엣지 끊기 → 노드 얹기 → 엣지 얹기 순서로 돈다
+//   updateGraph  역기입. 엣지 끊기 → 노드 얹기 → 엣지 얹기 순서로 돈다.
+//                payload.writeback 이 함께 오면 그 한 회차를 StoryHistory 에 남긴다
 //
 // Bedrock 호출. 대본·분기 생성이 쓴다. 이것만 Event(비동기)로 들어온다.
 //   plan         Converse 로 모델을 부르고 결과를 Ops 테이블에 적는다.
@@ -20,7 +21,7 @@
 const gremlin = require('gremlin')
 const { BedrockRuntimeClient, ConverseCommand } = require('@aws-sdk/client-bedrock-runtime')
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb')
-const { DynamoDBDocumentClient, PutCommand } = require('@aws-sdk/lib-dynamodb')
+const { DynamoDBDocumentClient, PutCommand, QueryCommand } = require('@aws-sdk/lib-dynamodb')
 
 const __ = gremlin.process.statics
 const P = gremlin.process.P
@@ -242,7 +243,8 @@ async function queryGraph(g, payload) {
 
 /**
  * 역기입. 끊기 → 노드 → 엣지 순으로 돈다 (새 엣지가 새 노드를 가리킬 수 있다).
- * @param {Object} payload - {projectId, addNodes, addEdges, removeEdges}
+ * @param {Object} payload - {projectId, addNodes, addEdges, removeEdges, writeback?}
+ *        writeback 은 이 역기입 한 회차의 변경 요약이다. 오면 StoryHistory 에 남긴다
  * @returns {Promise<{nodesAdded: number, edgesAdded: number, edgesRemoved: number}>}
  */
 async function updateGraph(g, payload) {
@@ -281,6 +283,17 @@ async function updateGraph(g, payload) {
   }
 
   out.edgesAdded = await putEdges(g, projectId, asList(payload?.addEdges).filter((e) => !isDerived(e)))
+
+  // 회차 한 줄을 이력에 남긴다. 못 남겨도 역기입은 이미 끝났으므로 던지지 않는다 —
+  // 여기서 던지면 화면에 「세계관 저장이 실패했습니다」가 뜨는데 그래프는 멀쩡하다
+  if (payload?.writeback) {
+    try {
+      out.historyKept = await putHistory(projectId, payload.writeback)
+    } catch (err) {
+      console.error('[graph] 세계관 이력을 남기지 못했다', projectId, err)
+      out.historyKept = false
+    }
+  }
   return out
 }
 
@@ -309,6 +322,31 @@ const MODEL_NAMES = ['haiku-4.5', 'sonnet-5', 'opus-4.8', 'opus-5']
 const DEFAULT_MODEL = 'sonnet-5'
 
 const SYSTEM = '당신은 광고·단편 영상의 콘티 기획자다. 요청받은 JSON 하나만 출력한다. 설명·머리말·코드펜스를 붙이지 않는다.'
+
+/*
+ * Bedrock 오류를 사람이 읽는 한 줄로 바꾼다. 이 문장이 그대로 화면에 뜬다 —
+ * 잡 결과는 Ops 테이블을 지나 말풍선·안내 줄로 올라가고, 중간에 옮기는 곳이 없다.
+ * 그래서 한때 작가·PD 가 보는 자리에 "Bedrock ServiceUnavailableException:
+ * Bedrock is unable to process your request." 가 찍혔다. 원문은 console.error 로만 남긴다.
+ * 브라우저 쪽에도 같은 표가 한 벌 있다 (app/services/api.js 의 SAY_BEDROCK) —
+ * 이 Lambda 를 아직 못 올린 배포에서도 한국어가 뜨게 하려고 둔 것이다.
+ */
+const SAY_BEDROCK = {
+  ServiceUnavailableException: '일시적으로 AI 서버가 바쁩니다. 잠시 후 다시 시도해주세요',
+  ThrottlingException: '요청이 너무 빠릅니다. 잠시 후 다시 시도해주세요',
+  TooManyRequestsException: '요청이 너무 빠릅니다. 잠시 후 다시 시도해주세요',
+  ModelTimeoutException: '일시적으로 AI 서버가 바쁩니다. 잠시 후 다시 시도해주세요',
+}
+const BEDROCK_FALLBACK = 'AI 응답 생성 중 오류가 발생했습니다. 다시 시도해주세요'
+
+/**
+ * Bedrock 오류 하나를 화면에 올릴 한국어 한 줄로. 표에 없는 것은 한 문장으로 뭉갠다 —
+ * 종류를 알아도 작가·PD 가 할 수 있는 일은 다시 눌러 보는 것뿐이다.
+ *
+ * @param {Error} err - SDK 가 던진 오류
+ * @returns {string} 사용자에게 보여 줄 한국어 한 줄
+ */
+const bedrockSay = (err) => SAY_BEDROCK[str(err?.name)] || BEDROCK_FALLBACK
 
 // 재시도까지 합쳐 Lambda 타임아웃(120초) 안에 끝나도록 잡는다.
 // 55초 × 2회 = 110초. 스로틀링에는 한 번 더 해 보고, 그 이상은 Lambda 가 끊는다.
@@ -347,7 +385,7 @@ async function converse(payload) {
     out = await openBedrock().send(new ConverseCommand(input))
   } catch (err) {
     console.error('[graph] Bedrock Converse 실패', modelId, err)
-    throw new Error(`Bedrock ${err.name || 'Error'}: ${err.message}`)
+    throw new Error(bedrockSay(err))
   }
 
   // 여러 칸으로 쪼개져 올 수 있다. text 인 칸만 이어 붙인다 (thinking 칸은 버린다)
@@ -388,6 +426,97 @@ async function putPlanResult(jobId, owner, body) {
   }))
 }
 
+// ── 세계관 확장 이력 (StoryHistory) ──────────────────────────────────────────
+// 역기입 한 번이 한 「회차」다. 브라우저는 그 회차의 변경 요약(writebackSummary)을
+// updateGraph 에 writeback 으로 얹어 보내고, 여기서 프로젝트별로 한 줄씩 쌓는다.
+//
+// 쌓아 두는 이유는 챗봇이다. 한때 네비게이터는 브라우저가 들고 있는 마지막 역기입
+// 한 건(recentWriteback)만 받았다. 그래서 "세계관이 몇 번 확장됐어?" 에 늘 1회라고
+// 답했고, 새로고침하면 그 한 건도 사라졌다. 이력은 Neptune 처럼 서버에 남는다.
+//
+// 다만 이 표가 회차를 세는 유일한 자리는 아니다. 여기에 못 적어도(putHistory 는 던지지
+// 않는다) 브라우저가 이 판에서 센 회차를 같이 들고 오고, allRounds 가 둘을 합쳐 센다.
+//
+// Ops 테이블과 달리 TTL 이 없다 (infra/lib/storyboard-stack.js 의 StoryHistory).
+// 정렬 키는 ISO 타임스탬프로 시작하므로 Query 의 기본 오름차순이 곧 1회차 → N회차 순이다.
+
+const HISTORY_TABLE = process.env.HISTORY_TABLE
+/** 한 프로젝트에서 읽어 오는 회차 상한. 프롬프트에 다 넣지는 않고 총 회차 수를 세는 데 쓴다 */
+const HISTORY_READ_MAX = 200
+/** 정렬 키 뒤에 붙이는 분기 이름의 길이 상한. 키를 무한정 길게 만들지 않는다 */
+const HISTORY_KEY_TAIL = 80
+
+/**
+ * 회차 하나의 정렬 키. 시각만으로는 키가 겹칠 수 있다 — 겹치면 뒤에 온 Put 이 앞의
+ * 회차를 소리 없이 덮어써서 이력에서 한 회차가 사라진다. 실제로 그렇게 첫 회차를
+ * 잃었다 (브라우저가 같은 요약을 두 번 보냈고 시각이 같았다).
+ *
+ * 그래서 분기 이름을 뒤에 붙인다. 같은 회차를 다시 보내면(핸들러의 재시도) 키가 같아
+ * 그대로 덮어쓰고, 다른 회차는 키가 갈라져 둘 다 남는다. ISO 시각이 앞에 있으므로
+ * 사전순 정렬은 여전히 시간순이다.
+ *
+ * @param {string} at - ISO 타임스탬프
+ * @param {string} branch - 붙인 분기 이름
+ * @returns {string} 정렬 키
+ */
+function historyKey(at, branch) {
+  // '#' 은 자리를 가르는 글자다. 분기 이름에 들어 있으면 키가 헷갈리므로 바꿔 둔다
+  const tail = str(branch).replace(/#/g, '＃').slice(0, HISTORY_KEY_TAIL)
+  return tail ? `${at}#${tail}` : at
+}
+
+/**
+ * 역기입 한 회차를 이력에 남긴다. 테이블이 없으면 조용히 지나간다 —
+ * 이력은 역기입의 본 일이 아니고, 없어도 그래프는 그대로 자란다.
+ *
+ * @param {string} projectId
+ * @param {Object} wb - 브라우저가 만든 변경 요약 (story-graph.js 의 writebackSummary)
+ * @returns {Promise<boolean>} 실제로 남겼으면 true
+ */
+async function putHistory(projectId, wb) {
+  if (!HISTORY_TABLE || !wb || typeof wb !== 'object') return false
+  // at 이 비어 있으면 정렬 키가 없다. 받은 시각으로 채워 두고 본문에도 같은 값을 남긴다
+  const at = str(wb.at) || new Date().toISOString()
+  await openDdb().send(new PutCommand({
+    TableName: HISTORY_TABLE,
+    Item: { projectId, timestamp: historyKey(at, wb.branch), body: JSON.stringify({ ...wb, at }) },
+  }))
+  return true
+}
+
+/**
+ * 한 프로젝트의 역기입 이력을 오래된 것부터 전부 읽는다.
+ *
+ * 던지지 않는다. 이력을 못 읽어도 질문에는 답해야 한다 — 그때는 지금 그래프와
+ * 최근 한 건만으로 답하는, 이력이 붙기 전의 동작으로 내려간다.
+ *
+ * @param {string} projectId
+ * @returns {Promise<Array<Object>>} 1회차부터 순서대로. 못 읽으면 빈 배열
+ */
+async function listHistory(projectId) {
+  if (!HISTORY_TABLE) return []
+  const out = []
+  try {
+    let start
+    do {
+      const r = await openDdb().send(new QueryCommand({
+        TableName: HISTORY_TABLE,
+        KeyConditionExpression: 'projectId = :p',
+        ExpressionAttributeValues: { ':p': projectId },
+        ExclusiveStartKey: start,
+      }))
+      for (const it of asList(r.Items)) {
+        const wb = parseJson(it?.body, null)
+        if (wb && typeof wb === 'object') out.push(wb)
+      }
+      start = r.LastEvaluatedKey
+    } while (start && out.length < HISTORY_READ_MAX)
+  } catch (err) {
+    console.error('[graph] 세계관 이력을 읽지 못했다', projectId, err)
+  }
+  return out
+}
+
 /**
  * Bedrock 을 부르고 결과를 적는다. 성공이든 실패든 반드시 한 건 적는다. * 안 적으면 브라우저가 타임아웃까지 빈손으로 기다린다.
  *
@@ -426,12 +555,31 @@ const NAVIGATE_SYSTEM = [
   '규칙:',
   '1. 반드시 그래프 데이터에 근거하여 답변하세요.',
   '2. 그래프에 없는 내용은 추측하지 말고 "현재 그래프에 해당 정보가 없습니다"라고 답하세요.',
-  '3. 캐릭터 간 관계를 설명할 때 구체적인 관계(엣지)를 인용하세요.',
+  '3. 캐릭터 간 관계를 설명할 때 그 관계를 구체적으로 짚어 말하세요.',
   '4. 추론 규칙으로 파생된 관계는 "[추론]"으로 표시하세요.',
   '5. 비전문가가 이해할 수 있는 자연어로, 한국어로 답변하세요.',
   '6. 답변은 간결하게 하되, 필요한 맥락은 빠뜨리지 마세요.',
-  '7. "## 최근 역기입 변경 사항" 블록이 있으면, 방금 무엇이 바뀌었는지 묻는 질문에는'
+  '7. "## 최근 세계관 변경 사항" 블록이 있으면, 방금 무엇이 바뀌었는지 묻는 질문에는'
     + ' 그 목록만 근거로 답하세요. 블록이 없으면 최근에 무엇이 바뀌었는지 알 수 없다고 답하세요.',
+  /*
+   * 아래 컨텍스트는 그래프에서 편 것이라 목록 모양이다. 그것을 그대로 베끼면 작가·PD 가
+   * 읽는 자리에 "재혁 → reveals → 강회장 비리" 같은 줄이 찍힌다. 답변은 사람의 말이어야 한다.
+   */
+  '8. 그래프 용어(노드, 엣지, 트리플, 술어)와 영문 관계 이름을 답변에 쓰지 마세요.'
+    + ' "A → rel → B" 같은 화살표 표기도 쓰지 마세요. 한국어 문장으로 풀어 쓰세요'
+    + ' (예: "재혁이 강회장의 비리를 폭로했습니다", "재혁이 강회장을 보좌하던 관계가 사라졌습니다").',
+  /*
+   * 9~11 은 누적 이력을 묻는 질문의 자리다. 이력 블록이 붙기 전에는 최근 한 건만
+   * 들고 있었고, "세계관이 몇 번 확장됐어?" 에 늘 1회라고 답했다. 회차 수와 회차별
+   * 요약은 블록에 그대로 적혀 오므로, 모델이 할 일은 그것을 사람의 말로 옮기는 것뿐이다.
+   */
+  '9. 세계관이 몇 번 업데이트·확장되었는지 묻는 질문에는 "## 세계관 확장 누적 이력" 블록의'
+    + ' 총 회차 수를 먼저 말하고, 회차마다 한 줄 요약을 이어 붙이세요.'
+    + ' 그 블록이 없으면 확장된 적이 없다고 답하세요.',
+  '10. 누적 히스토리를 묻는 질문에는 1회차부터 시간순으로 회차별 추가·변경·삭제 내역을'
+    + ' 정리해서 답하세요. 생략된 회차가 있다고 적혀 있으면 그 사실도 함께 말하세요.',
+  '11. 회차는 "1회차", "2회차" 처럼 번호로 구분하고, 그 회차에 붙인 분기 이름이 있으면'
+    + ' 번호와 함께 적으세요 (예: "2회차: \'A. 먼저 보여준 손\'").',
 ].join('\n')
 
 /** 챗봇 답변 상한. 대본 생성(2000~4000)보다 짧다 */
@@ -453,56 +601,164 @@ function parseJson(raw, dflt) {
   }
 }
 
+/** 프롬프트에 회차별로 펴 놓는 이력의 상한. 더 있으면 오래된 쪽을 생략하고 그 사실을 적는다 */
+const HISTORY_ROUNDS_MAX = 10
+
+/** 목록이 잘려 왔으면 개수를 앞세워 "이게 전부" 로 읽히지 않게 한다 */
+function headKo(name, list, total) {
+  const n = Number(total) >= list.length ? total : list.length
+  return `${name} ${n}개${n > list.length ? ` (아래는 그중 ${list.length}개)` : ''}:`
+}
+
+/**
+ * 역기입 한 회차의 변경 목록을 사람이 읽는 줄로 편다. 최근 한 건 블록과 누적 이력의
+ * 회차 하나가 같은 줄 모양을 쓰도록 한 곳에 둔다.
+ *
+ * 줄은 브라우저가 한국어로 옮겨 보낸 것(wb.ko)을 먼저 쓴다. 술어 → 한국어 표는
+ * app/domain/graph-ko.js 한 벌이고 이 Lambda 는 그것을 모른다 — 옮긴 줄이 없을 때만
+ * 영문 술어를 그대로 적는다 (지난 판의 브라우저가 보낸 요약).
+ *
+ * @param {Object} wb - {at, branch, addedNodes, addedEdges, removedEdges, counts, ko?}
+ * @param {Function} nm - id → 이름. graphContext 가 만든 표를 그대로 받는다
+ * @returns {Array<string>|null} 변경이 하나도 없으면 null
+ */
+function changeLines(wb, nm) {
+  if (!wb) return null
+  const arrow = (e) => `${nm(e?.s)} --${str(e?.p) || '관계'}--> ${nm(e?.o)}${e?.derived ? ' [추론]' : ''}`
+  /** 한국어로 옮겨 온 줄이 있으면 그것, 없으면 날것을 fmt 로 편다 */
+  const lines = (ko, raw, fmt) => (asList(ko).length ? asList(ko).map(str) : asList(raw).map(fmt))
+  const nodes = lines(wb?.ko?.nodes, wb?.addedNodes, nm)
+  const added = lines(wb?.ko?.added, wb?.addedEdges, arrow)
+  const removed = lines(wb?.ko?.removed, wb?.removedEdges, arrow)
+  if (!nodes.length && !added.length && !removed.length) return null
+
+  const counts = wb?.counts || {}
+  const out = []
+  if (nodes.length) out.push(headKo('새로 생긴 것', nodes, counts?.addedNodes), ...nodes.map((s) => `- ${s}`))
+  else out.push('새로 생긴 것: 없다')
+  if (added.length) out.push(headKo('새 관계', added, counts?.addedEdges), ...added.map((s) => `- ${s}`))
+  else out.push('새 관계: 없다')
+  if (removed.length) out.push(headKo('사라진 관계', removed, counts?.removedEdges), ...removed.map((s) => `- ${s}`))
+  else out.push('사라진 관계: 없다')
+  return out
+}
+
 /**
  * 방금 판에 붙인 역기입 한 번의 변경을 텍스트로 편다. 브라우저가 graphData 에
- * recentWriteback 으로 얹어 보낸다 (story-graph.html 의 writebackSummary) —
+ * recentWriteback 으로 얹어 보낸다 (story-graph.js 의 writebackSummary) —
  * 현재 스냅샷만으로는 무엇이 새것인지 알 수 없어서 "방금 뭐가 추가됐어?" 에 답할 수 없다.
  *
  * 역기입을 한 적이 없으면 빈 문자열이다. 그때는 이 블록이 아예 붙지 않는다.
  *
- * @param {Object} wb - {at, branch, addedNodes, addedEdges, removedEdges, counts}
- * @param {Function} nm - id → 이름. graphContext 가 만든 표를 그대로 받는다
+ * @param {Object} wb - 회차 하나의 변경 요약
+ * @param {Function} nm - id → 이름
+ * @param {Object} [o]
+ * @param {boolean} [o.earlier] - 앞 회차도 함께 넘겼는가. 누적 이력 블록이 붙는 판에서는
+ *        "그 앞은 알 수 없다" 가 거짓이 되므로 그 한 줄을 뺀다
  * @returns {string} 프롬프트에 붙이는 블록. 변경이 없으면 빈 문자열
  */
-function writebackContext(wb, nm) {
-  if (!wb) return ''
-  const nodes = asList(wb?.addedNodes)
-  const added = asList(wb?.addedEdges)
-  const removed = asList(wb?.removedEdges)
-  if (!nodes.length && !added.length && !removed.length) return ''
-
-  const counts = wb?.counts || {}
-  /** 목록이 잘려 왔으면 개수를 앞세워 "이게 전부" 로 읽히지 않게 한다 */
-  const head = (name, list, total) => {
-    const n = Number(total) >= list.length ? total : list.length
-    return `${name} ${n}개${n > list.length ? ` (아래는 그중 ${list.length}개)` : ''}:`
-  }
-  const edgeLine = (e) => `- ${nm(e?.s)} --${str(e?.p) || '관계'}--> ${nm(e?.o)}${e?.derived ? ' [추론]' : ''}`
-
-  const out = ['## 최근 역기입 변경 사항']
+function writebackContext(wb, nm, { earlier = false } = {}) {
+  const body = changeLines(wb, nm)
+  if (!body) return ''
+  const out = ['## 최근 세계관 변경 사항']
   if (wb?.branch) out.push(`붙인 분기: ${str(wb.branch)}`)
   if (wb?.at) out.push(`붙인 시각: ${str(wb.at)}`)
-  out.push('이 목록이 이 그래프에서 가장 최근에 바뀐 것 전부다. 그 앞의 변경은 알 수 없다.')
-  if (nodes.length) out.push(head('추가된 노드', nodes, counts?.addedNodes), ...nodes.map((id) => `- ${nm(id)}`))
-  else out.push('추가된 노드: 없다')
-  if (added.length) out.push(head('추가된 엣지', added, counts?.addedEdges), ...added.map(edgeLine))
-  else out.push('추가된 엣지: 없다')
-  if (removed.length) out.push(head('제거된 엣지', removed, counts?.removedEdges), ...removed.map(edgeLine))
-  else out.push('제거된 엣지: 없다')
+  out.push(earlier
+    ? '이 목록이 이 그래프에서 가장 최근에 바뀐 것 전부다. 그 앞의 변경은 누적 이력에 있다.'
+    : '이 목록이 이 그래프에서 가장 최근에 바뀐 것 전부다. 그 앞의 변경은 알 수 없다.')
+  out.push(...body)
   return out.join('\n')
+}
+
+/**
+ * 이 프로젝트의 역기입 이력을 회차별로 편다. "세계관이 몇 번 확장됐어?" 와
+ * "누적 히스토리 알려줘" 가 근거로 쓰는 블록이다 (NAVIGATE_SYSTEM 9~11).
+ *
+ * 회차 번호는 1회차부터 센다. 총 회차 수는 생략한 것까지 포함한 전체이고,
+ * 펴 놓는 것은 뒤쪽 HISTORY_ROUNDS_MAX 회차뿐이다 — 프롬프트가 이력만으로
+ * 불어나면 정작 답이 짧아진다.
+ *
+ * @param {Array<Object>} rounds - 1회차부터 순서대로 (listHistory 가 준 순서)
+ * @param {Function} nm - id → 이름
+ * @returns {string} 프롬프트에 붙이는 블록. 이력이 없으면 빈 문자열
+ */
+function historyContext(rounds, nm) {
+  const all = asList(rounds)
+  if (!all.length) return ''
+  const skipped = Math.max(0, all.length - HISTORY_ROUNDS_MAX)
+  const out = [
+    '## 세계관 확장 누적 이력',
+    `이 프로젝트의 세계관은 지금까지 총 ${all.length}회 확장되었다.`,
+    '회차는 1회차부터 시간순이다.',
+  ]
+  if (skipped) out.push(`아래에는 최근 ${HISTORY_ROUNDS_MAX}회차만 적는다. 이전 ${skipped}회차는 생략했다.`)
+  for (let i = skipped; i < all.length; i++) {
+    const wb = all[i]
+    const head = `### ${i + 1}회차${wb?.branch ? ` · ${str(wb.branch)}` : ''}${wb?.at ? ` (${str(wb.at)})` : ''}`
+    out.push('', head, ...(changeLines(wb, nm) || ['변경 내역이 남아 있지 않다.']))
+  }
+  return out.join('\n')
+}
+
+/** 회차 하나의 신원. putHistory 의 정렬 키와 같은 짝이다 (historyKey) */
+const roundKey = (wb) => `${str(wb?.at)}#${str(wb?.branch)}`
+
+/** 이 회차에 남아 있는 내역의 양. 같은 회차가 두 곳에서 오면 많은 쪽을 남긴다 */
+const roundDetail = (wb) => asList(wb?.ko?.nodes).length + asList(wb?.ko?.added).length
+  + asList(wb?.ko?.removed).length + asList(wb?.addedNodes).length
+  + asList(wb?.addedEdges).length + asList(wb?.removedEdges).length
+
+/**
+ * 서버 이력과 브라우저가 들고 온 회차를 한 줄로 합친다. 회차 수를 세는 근거다.
+ *
+ * 세 곳에서 온다. 서버 이력(listHistory)이 사실이고, 나머지 둘은 그것이 모자랄 때의
+ * 받침이다 — 이력 쓰기는 실패할 수 있고(putHistory 는 던지지 않는다), 이력 표가 없는
+ * 배포도 있고, 로컬·인메모리 판에는 남길 곳이 아예 없다.
+ *
+ *   rounds   StoryHistory 에 쌓인 회차. 1회차부터 순서대로
+ *   session  브라우저가 이 판에서 센 회차 전부 (graphData.writebackRounds)
+ *   recent   그중 마지막 한 건을 통째로 (graphData.recentWriteback)
+ *
+ * 한때 recent 하나만 받았다. 그래서 이력 쓰기 한 건이 떨어지면 두 번 붙인 세계관이
+ * "1회 확장" 으로 답해지고 첫 회차가 사라졌다 — 화면에도 콘솔에도 아무 말이 없었다.
+ *
+ * 같은 회차는 시각+분기로 하나로 센다. 겹칠 때는 내역이 많은 쪽을 남긴다 (브라우저가
+ * 들고 오는 지난 회차는 줄 수를 줄여 온다 · graph-writeback.js 의 thinWritebackRound).
+ *
+ * @param {Array<Object>} rounds - listHistory 가 읽어 온 회차
+ * @param {Object|null} recent - 브라우저가 얹어 보낸 recentWriteback
+ * @param {Array<Object>} [session] - 브라우저가 얹어 보낸 writebackRounds
+ * @returns {Array<Object>} 시간순. 1회차부터
+ */
+function allRounds(rounds, recent, session) {
+  const byKey = new Map()
+  const put = (wb) => {
+    if (!wb || typeof wb !== 'object') return
+    const k = roundKey(wb)
+    const had = byKey.get(k)
+    if (!had || roundDetail(wb) > roundDetail(had)) byKey.set(k, wb)
+  }
+  asList(rounds).forEach(put)
+  asList(session).forEach(put)
+  put(recent)
+  // at 이 ISO 시각이라 사전순이 곧 시간순이다 (historyKey 와 같은 근거)
+  return [...byKey.values()].sort((a, b) => str(a.at).localeCompare(str(b.at)))
 }
 
 /**
  * 그래프 하나를 사람이 읽는 텍스트로 편다. 엣지 이름은 s/p/o 로 오지만
  * source/predicate/target 으로 오는 경우도 받는다.
  *
- * 최근 역기입 요약(recentWriteback)이 함께 왔으면 블록 하나를 뒤에 붙인다. 그래프를
- * 상한에서 자른 뒤에 붙이므로, 판이 커도 이 블록은 잘려 나가지 않는다.
+ * 역기입 이력(rounds)과 최근 역기입 요약(recentWriteback)이 있으면 블록 두 개를 뒤에
+ * 붙인다. 그래프를 상한에서 자른 뒤에 붙이므로, 판이 커도 이 블록들은 잘려 나가지 않는다.
  *
- * @param {string|Object} raw - JSON 문자열 또는 {nodes, edges, recentWriteback?}
+ * @param {string|Object} raw - JSON 문자열 또는
+ *        {nodes, edges, recentWriteback?, writebackRounds?}. 뒤의 둘은 브라우저가
+ *        이 판에서 센 회차다. 서버 이력과 겹치는 것은 allRounds 가 하나로 센다
+ * @param {Array<Object>} [rounds] - listHistory 가 읽어 온 회차. 1회차부터 순서대로
  * @returns {string} 프롬프트에 그대로 붙이는 그래프 컨텍스트
  */
-function graphContext(raw) {
+function graphContext(raw, rounds = []) {
   const data = parseJson(raw, {})
   const nodes = asList(data?.nodes)
   const edges = asList(data?.edges)
@@ -513,22 +769,42 @@ function graphContext(raw) {
   const nm = (id) => label.get(str(id)) || str(id) || '(알 수 없음)'
 
   const nodeLines = nodes.map((n) => `- ${str(n?.name) || str(n?.id)} (${str(n?.kind) || '종류 없음'})`)
+  /*
+   * 엣지 한 줄. 브라우저가 한국어 서술(e.ko)을 달아 보내면 그것을 쓴다 — 영문 술어를
+   * 프롬프트에 넣으면 모델이 그대로 베껴 답변에 새어 나온다 (NAVIGATE_SYSTEM 8번).
+   * 술어 → 한국어 표는 app/domain/graph-ko.js 한 벌이라 이쪽에서는 옮길 수 없다.
+   */
+  const koEdges = edges.some((e) => str(e?.ko))
   const edgeLines = edges.map((e) => {
     const p = str(e?.p ?? e?.predicate)
-    return `- ${nm(e?.s ?? e?.source)} --${p || '관계'}--> ${nm(e?.o ?? e?.target)}`
-      + `${isDerived(e) ? ' [추론]' : ''}`
+    const body = str(e?.ko) || `${nm(e?.s ?? e?.source)} --${p || '관계'}--> ${nm(e?.o ?? e?.target)}`
+    // ko 는 [추론] 을 이미 달고 온다. 두 번 붙지 않게 본다
+    return `- ${body}${isDerived(e) && !body.includes('[추론]') ? ' [추론]' : ''}`
   })
 
   const text = [
     `[노드 ${nodes.length}개] 이름 (종류)`,
     ...nodeLines,
     '',
-    `[관계 ${edges.length}개] 출발 --관계--> 도착`,
+    koEdges ? `[관계 ${edges.length}개] 한 줄에 관계 하나씩, 한국어 서술이다`
+      : `[관계 ${edges.length}개] 출발 --관계--> 도착`,
     ...edgeLines,
   ].join('\n')
   const body = text.length <= GRAPH_CTX_MAX ? text : `${text.slice(0, GRAPH_CTX_MAX)}\n(그래프를 여기서 잘랐다)`
-  const recent = writebackContext(data?.recentWriteback, nm)
-  return recent ? `${body}\n\n${recent}` : body
+
+  /*
+   * 이력의 마지막 회차가 곧 「최근 변경」이다. 두 블록에 같은 회차가 두 번 적히지만
+   * 하는 일이 다르다 — 이력은 회차를 세는 근거고(9~11번), 최근 블록은 "방금 뭐가
+   * 바뀌었어?" 의 근거다(7번). 총 회차 수는 이력 블록에 숫자로 적어 두므로 두 번
+   * 세이지 않는다.
+   */
+  const all = allRounds(rounds, data?.recentWriteback, data?.writebackRounds)
+  const parts = [body]
+  const past = historyContext(all, nm)
+  if (past) parts.push(past)
+  const recent = writebackContext(all[all.length - 1], nm, { earlier: all.length > 1 })
+  if (recent) parts.push(recent)
+  return parts.join('\n\n')
 }
 
 /**
@@ -578,9 +854,12 @@ async function navigate(payload) {
 
     const asked = str(payload?.model)
     const modelId = MODELS[MODEL_NAMES.includes(asked) ? asked : DEFAULT_MODEL]
+    // 역기입 이력은 서버에 남아 있다. 브라우저가 들고 오는 것은 마지막 한 건뿐이라
+    // 이것 없이는 "몇 번 확장됐어?" 에 늘 1회라고 답한다 (listHistory 의 머리글)
+    const rounds = await listHistory(pid(payload))
     const messages = chatMessages(payload?.conversationHistory, [
       '## 현재 세계관 그래프',
-      graphContext(payload?.graphData),
+      graphContext(payload?.graphData, rounds),
       '',
       '## 질문',
       question,
@@ -597,7 +876,7 @@ async function navigate(payload) {
       }))
     } catch (err) {
       console.error('[graph] Bedrock Converse 실패', modelId, err)
-      throw new Error(`Bedrock ${err.name || 'Error'}: ${err.message}`)
+      throw new Error(bedrockSay(err))
     }
 
     // 여러 칸으로 쪼개져 올 수 있다. text 인 칸만 이어 붙인다

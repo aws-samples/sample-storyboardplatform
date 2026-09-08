@@ -26,8 +26,12 @@ import { readHeading } from '../domain/scene-split.js'
 import { GENRES, TONES, LENGTHS, CUTCOUNTS } from '../domain/prompts.js'
 import { planClient, graphClient, opsClient, runNavigateJob } from '../services/api.js'
 import { mountNavigatorChat, readHistory } from '../components/navigator-chat.js'
-import { createGraphView, graphDelta, KIND_COLOR, KIND_LABEL } from '../components/graph-canvas.js'
+import { createGraphView, graphDelta, KIND_COLOR, KIND_LABEL, edgeLabel } from '../components/graph-canvas.js'
 import { edgeKey } from '../domain/graph-schema.js'
+import {
+  predicateToKo, tensionKo, whenKo, nodeKindKo, writebackKo, writebackCountsKo,
+} from '../domain/graph-ko.js'
+import { josa } from '../lib/josa.js'
 import { configured, session, login, setNewPassword, logout } from '../services/auth.js'
 import { DEMO_USERS } from '../components/login-form.js'
 import { NAV_TABS, navHref, navTabFromSearch, boardFromSearch, openFromSearch } from '../domain/routes.js'
@@ -231,7 +235,7 @@ function pickHist(e) {
   }
   if (e.refKind === 'seed') {
     const i = SEEDS.findIndex((s) => seedKey(s) === e.ref)
-    if (i < 0) return say('그 씨앗은 지금 판에 없습니다. 그래프가 바뀌었을 수 있습니다.')
+    if (i < 0) return say('그 씨앗은 지금 판에 없습니다. 세계관이 바뀌었을 수 있습니다.')
     pickSeed(i)
     return
   }
@@ -362,23 +366,24 @@ function showNode(id) {
   if (!n) return
   const props = Object.entries(n.props || {})
     .map(([k, v]) => `<span class="k">${esc(k)}</span><span class="v">${esc(v)}</span>`).join('')
+  // 술어는 한국어 서술로 읽는다. "→ 을 은닉함 시한부 비밀" 처럼 화살표를 따라 읽힌다
   const line = (e, dir) => {
     const other = dir === 'out' ? e.o : e.s
     const arrow = dir === 'out' ? '→' : '←'
-    const t = e.props?.tension === undefined ? '' : ` (긴장 ${e.props.tension})`
-    return `<div class="edge-line${e.asserted ? '' : ' der'}">${arrow} <b>${esc(e.p)}</b> `
-      + `${esc(STORE.getNode(other)?.name || other)}${t}${e.asserted ? '' : ' · 추론'}</div>`
+    return `<div class="edge-line${e.asserted ? '' : ' der'}">${arrow} <b>${esc(edgeLabel(e.p, e.props))}</b> `
+      + `${esc(STORE.getNode(other)?.name || other)}${esc(tensionKo(e.props?.tension))}`
+      + `${e.asserted ? '' : ' · 추론'}</div>`
   }
   const out = STORE.getEdgesFrom(id).map((e) => line(e, 'out')).join('')
   const inc = STORE.getEdgesTo(id).map((e) => line(e, 'in')).join('')
   $('nodeBody').innerHTML = `
     <div class="kv">
       <span class="k">이름</span><span class="v">${esc(n.name)}</span>
-      <span class="k">kind</span><span class="v">${esc(n.kind)}</span>
-      <span class="k">id</span><span class="v">${esc(n.id)}</span>
+      <span class="k">종류</span><span class="v">${esc(KIND_LABEL[n.kind] || n.kind)}</span>
+      <span class="k">식별자</span><span class="v">${esc(n.id)}</span>
       ${props}
     </div>
-    ${out || inc ? '<div class="sec-label">엣지</div>' : '<div class="hint">붙어 있는 엣지가 없습니다.</div>'}
+    ${out || inc ? '<div class="sec-label">관계</div>' : '<div class="hint">붙어 있는 관계가 없습니다.</div>'}
     ${out}${inc}`
   $('nodeCard').hidden = false
 }
@@ -407,7 +412,7 @@ function renderSeeds() {
     const fresh = NEW_SEEDS.has(seedKey(s))
     return `
     <div class="seed-card ${i === CUR.seed ? 'on' : ''}${fresh ? ' is-new' : ''}" style="${tint(s.probe)}">
-      ${fresh ? '<div class="seed-new-tag">역기입 후 새로 발견</div>' : ''}
+      ${fresh ? '<div class="seed-new-tag">세계관 업데이트 후 새로 발견</div>' : ''}
       <div class="seed-head">
         <span class="probe-tag">${esc(probeLabel(s.probe))}</span>
         ${fresh ? '<span class="new-badge">NEW</span>' : ''}
@@ -628,6 +633,14 @@ const wbCount = (b) => ({
   x: b.writeback.remove_edges.length,
 })
 
+/**
+ * 분기의 역기입을 writebackCountsKo 가 읽는 모양으로. 아직 점검을 지나지 않은 날것이라
+ * s·o 가 이름이지만, 개수를 세는 데는 이름인지 id 인지가 상관없다.
+ */
+const wbRaw = (b) => ({
+  nodes: b.writeback.nodes, edges: b.writeback.edges, removes: b.writeback.remove_edges,
+})
+
 function warnBlock(warnings) {
   if (!warnings?.length) return ''
   return `<details class="warns"><summary>검증 경고 ${warnings.length}건</summary>
@@ -698,16 +711,16 @@ function renderStory() {
     <div class="outcome"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join('')
     || '<div class="hint">이 분기의 결과가 비어 있습니다.</div>'
 
+  // 세계관 업데이트 목록도 사람이 읽는 자리다. 종류·관계·시점을 전부 한국어로 옮긴다
   const wbNodes = b.writeback.nodes.map((n) => `
-    <div class="item"><span class="nt">${esc(n.kind)}</span> ${esc(n.name)}
-      ${n.t === undefined ? '' : `<span class="p">t=${esc(n.t)}</span>`}
+    <div class="item"><span class="nt">${esc(nodeKindKo(n.kind))}</span> ${esc(n.name)}
+      ${n.t === undefined ? '' : `<span class="p">${esc(whenKo(n.t))}</span>`}
       ${n.desc ? `<div class="p">${esc(n.desc)}</div>` : ''}</div>`).join('')
   const wbEdge = (e, cut) => `
-    <div class="item${cut ? ' cut' : ''}"><span class="nt">edge</span>
-      ${esc(e.s)} <b>${esc(e.p)}</b> ${esc(e.o)}${e.note ? ` <span class="p">(${esc(e.note)})</span>` : ''}</div>`
+    <div class="item${cut ? ' cut' : ''}"><span class="nt">${cut ? '변경' : '관계'}</span>
+      ${esc(predicateToKo(e.s, e.p, e.o, e.props))}${e.note ? ` <span class="p">(${esc(e.note)})</span>` : ''}</div>`
   const wbEdges = b.writeback.edges.map((e) => wbEdge(e, false)).join('')
   const wbCuts = b.writeback.remove_edges.map((e) => wbEdge(e, true)).join('')
-  const c = wbCount(b)
 
   const keys = [...new Set(st.branches.flatMap((x) => Object.keys(x.outcome)))]
   const cmp = `
@@ -715,9 +728,9 @@ function renderStory() {
       <tr><th></th>${st.branches.map((x) => `<th>${esc(x.id)}. ${esc(x.label)}</th>`).join('')}</tr>
       ${keys.map((k) => `<tr><th>${esc(k)}</th>${st.branches.map((x, n) =>
         `<td class="${n === bi ? 'on' : ''}">${esc(x.outcome[k] || '-')}</td>`).join('')}</tr>`).join('')}
-      <tr><th>역기입</th>${st.branches.map((x, n) => {
+      <tr><th>세계관 변경</th>${st.branches.map((x, n) => {
         const q = wbCount(x)
-        return `<td class="${n === bi ? 'on' : ''}">+${q.n}노드 +${q.e}엣지 −${q.x}</td>`
+        return `<td class="${n === bi ? 'on' : ''}">새 항목 ${q.n} · 새 관계 ${q.e} · 변경 ${q.x}</td>`
       }).join('')}</tr>
     </table>`
 
@@ -748,11 +761,12 @@ function renderStory() {
       <div class="sec-label">이 분기의 결과</div>
       ${outcome}
 
-      <div class="sec-label">그래프 역기입</div>
-      <div class="wb-sum">+ 노드 <b>${c.n}</b> · + 엣지 <b>${c.e}</b> · − 엣지 <i>${c.x}</i></div>
+      <div class="sec-label">세계관 업데이트</div>
+      <div class="wb-sum">${countLine(writebackCountsKo(wbRaw(b)))}</div>
       <div class="wb-box">${wbNodes}${wbEdges}${wbCuts || ''}</div>
       <div class="card__row"><button class="btn btn--wide" id="expandBtn">이 분기로 대본 생성</button></div>
-      <div class="hint" id="expandNote">이 분기를 개요 → 컷으로 펼치고, 판에 붙일 때 위 역기입을 그래프에 적용합니다.</div>
+      <div class="hint" id="expandNote">이 분기를 개요 → 컷으로 펼치고,
+        스토리보드에 추가할 때 위 내용을 세계관에 반영합니다.</div>
 
       <div class="sec-label">분기 비교</div>
       ${cmp}
@@ -776,7 +790,7 @@ const STEPS = [
   { id: 'options', label: '옵션' },
   { id: 'outline', label: '개요' },
   { id: 'cuts', label: '컷' },
-  { id: 'done', label: '판에 붙이기' },
+  { id: 'done', label: '세계관 반영' },
 ]
 
 const OPT_DEFAULT = { mode: 'next', genre: GENRES[0], tone: TONES[0], secs: 60, cuts: CUTCOUNTS[1] }
@@ -818,27 +832,69 @@ function expandCtx(x) {
   }
 }
 
-/** "이 분기로 대본 생성" 을 누른 자리. 역기입을 미리 점검해 두고 옵션부터 묻는다 */
+/**
+ * 세계관 업데이트 점검 결과를 콘솔에 남긴다.
+ *
+ * 여기 오는 말은 "id 가 없어 xxx 로 만들었습니다" · "어휘에 없는 술어" 처럼 데이터를 고치는
+ * 사람에게 뜻이 있는 것이다. 작가·PD 가 읽는 패널에 올리면 무엇을 해야 하는지 알 수 없는
+ * 줄만 늘어난다. 그래서 화면에는 사람의 말(notices)만 올리고 원문은 이쪽에 남긴다.
+ */
+function logWbWarnings(where, warnings) {
+  if (!warnings?.length) return
+  console.warn(`[story-graph] ${where} 점검 ${warnings.length}건`, warnings)
+}
+
+/** "이 분기로 대본 생성" 을 누른 자리. 세계관 업데이트를 미리 점검해 두고 옵션부터 묻는다 */
 function expandToScript(seed, story, branch) {
+  const check = validateWritebackBeforeApply(STORE, branch.writeback, { seed })
+  logWbWarnings('세계관 업데이트 미리보기', check.warnings)
   EXPAND = {
     seed, story, branch,
     step: 'options', busy: '', err: '',
     opts: { ...OPT_DEFAULT },
-    check: validateWritebackBeforeApply(STORE, branch.writeback),
+    check,
     spec: null, outline: null, cuts: null, applied: null, epIndex: null,
   }
   renderExpand()
 }
 
-/** 역기입 미리보기. 옵션 단계와 컷 단계에서 같은 것을 보여 준다 */
+/** 노드 id → 이름. 세계관 업데이트 문장이 id 대신 이름을 부르게 한다 */
+const nodeName = (id) => STORE?.getNode(id)?.name || id
+
+/**
+ * 엣지 하나를 네비게이터 프롬프트에 넣을 한국어 한 줄로 옮긴다.
+ *
+ * 술어 → 한국어 표는 graph-ko.js 한 벌뿐이고 그것은 브라우저에만 있다. Lambda 는
+ * 그 표를 모르므로, 옮기지 않고 보내면 프롬프트에 영문 술어가 들어가고 모델이 그것을
+ * 그대로 베낀다 — 챗봇 답변에 "재혁 → reveals → 강회장 비리" 가 새어 나오던 자리다.
+ *
+ * @param {{s: string, p: string, o: string, props?: Object, asserted?: boolean, derived?: boolean}} e
+ * @returns {string} "재혁이 강회장 비리를 폭로함". 파생 엣지는 [추론] 을 달아 둔다
+ */
+const edgeKo = (e) => `${predicateToKo(nodeName(e?.s), e?.p, nodeName(e?.o), e?.props)}`
+  + `${e?.asserted === false || e?.derived ? ' [추론]' : ''}`
+
+/**
+ * 변경 개수 한 줄. writebackCountsKo 가 나눈 조각을 굵게·흐리게만 입혀 잇는다.
+ * 늘어난 것은 굵게, 바뀐 것은 흐리게다 (weak).
+ */
+const countLine = (parts) => (parts.length
+  ? parts.map((p) => `${esc(p.label)} ${p.weak ? `<i>${p.n}</i>` : `<b>${p.n}</b>`}${esc(p.tail)}`).join(' · ')
+  : '세계관에서 바뀌는 것이 없습니다')
+
+/**
+ * 세계관 업데이트 미리보기. 옵션 단계와 컷 단계에서 같은 것을 보여 준다.
+ *
+ * 개수만 적던 자리다. 무엇이 늘어나는지를 보지 못하면 적용을 누를지 말지를 짐작으로
+ * 정하게 된다. 넣을 수 없는 항목이 있다는 사실만 남기고, 왜 넣을 수 없는지는
+ * 개발자용 말이라 여기 올리지 않는다 (expandToScript 가 console.warn 으로 남긴다).
+ */
 function wbPreview(x) {
-  const p = x.check.preview
-  const bad = x.check.warnings
-  return `<div class="wb-sum">역기입 미리보기 · + 노드 <b>${p.nodesAdded}</b> · + 엣지 <b>${p.edgesAdded}</b>
-      · − 엣지 <i>${p.edgesRemoved}</i></div>
-    ${x.check.safe ? '' : '<div class="warn">넣을 수 없는 항목이 있습니다. 그 항목만 빼고 적용합니다.</div>'}
-    ${bad.length ? `<details class="warns"><summary>역기입 점검 ${bad.length}건</summary>
-      <ul>${bad.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></details>` : ''}`
+  const ko = writebackKo(x.check.changes, nodeName, { notices: x.check.notices })
+  return `<div class="wb-sum">세계관 업데이트 미리보기 · ${countLine(ko.counts)}</div>
+    ${x.check.safe ? '' : '<div class="warn">반영할 수 없는 내용이 있습니다. 그 부분만 빼고 반영합니다.</div>'}
+    ${ko.notes.length ? `<details class="warns"><summary>확인사항 ${ko.notes.length}건</summary>
+      <ul>${ko.notes.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></details>` : ''}`
 }
 
 function renderExpand() {
@@ -882,7 +938,7 @@ const expandOptions = (x) => `
     <button class="btn btn--wide" id="exGo">생성</button>
     <button class="btn btn--line" id="exBack">분기로</button>
   </div>
-  <div class="hint">개요를 먼저 보여드립니다. 판에 붙이는 것과 역기입은 그다음입니다.</div>`
+  <div class="hint">개요를 먼저 보여드립니다. 스토리보드에 추가하고 세계관에 반영하는 것은 그다음입니다.</div>`
 
 const expandOutline = (x) => {
   const o = x.outline
@@ -914,15 +970,15 @@ const expandCuts = (x) => {
     <div class="logline">${x.opts.mode === 'spin' ? '스핀오프' : '새 회차'} · 컷 ${x.cuts.length}개 · ${Math.round(secs)}초</div>
     ${wbPreview(x)}
     <div class="card__row">
-      <button class="btn btn--wide" id="exApply">판에 붙이고 역기입 적용</button>
+      <button class="btn btn--wide" id="exApply">이 스토리를 세계관에 반영하기</button>
     </div>
     <div class="card__row">
       <button class="btn btn--line" id="exExport">대본으로 내보내기</button>
       <button class="btn btn--line" id="exRecut">컷 다시</button>
       <button class="btn btn--line" id="exBack">분기로</button>
     </div>
-    <div class="hint">판에 붙이면 위 역기입이 그래프에 적용되고 씨앗을 다시 뽑습니다.
-      대본으로 내보내기만 하면 그래프는 그대로 둡니다.</div>
+    <div class="hint">이 스토리를 반영하면 캐릭터 관계가 업데이트되고, 새로운 스토리 소재를 다시 찾습니다.
+      대본만 내보내면 세계관은 변경되지 않습니다.</div>
     <div class="sec-label">컷 ${x.cuts.length}개</div>
     ${x.cuts.map(cutRow).join('')}`
 }
@@ -930,21 +986,24 @@ const expandCuts = (x) => {
 const expandDone = (x) => {
   const a = x.applied.applied
   const n = x.applied.newSeeds.length
+  const title = x.outline.title || '새 회차'
+  const ko = writebackKo(x.applied.changes, nodeName, { done: true, notices: x.applied.notices })
   return `
-    <div class="ok">${esc(x.outline.title || '새 회차')} 를 판에 붙였습니다. 컷 ${x.cuts.length}개.</div>
-    <div class="sec-label">그래프에 적용한 역기입</div>
-    <div class="wb-sum">+ 노드 <b>${a.nodesAdded}</b> · + 엣지 <b>${a.edgesAdded}</b> · − 엣지 <i>${a.edgesRemoved}</i>
-      ${a.derivedLost ? ` · 함께 사라진 추론 <i>${a.derivedLost}</i>` : ''}</div>
-    <div class="ok">${n ? `새 회차 씨앗 ${n}개를 발견했습니다.` : '이번에는 새 씨앗이 나오지 않았습니다.'}</div>
-    ${x.applied.warnings.length ? `<details class="warns"><summary>적용 기록 ${x.applied.warnings.length}건</summary>
-      <ul>${x.applied.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></details>` : ''}
+    <div class="ok">"${esc(title)}"${josa(title, '을', '를')} 스토리보드에 추가했습니다. 컷 ${x.cuts.length}개.</div>
+    <div class="sec-label">세계관 업데이트 내역</div>
+    <div class="wb-sum">${countLine(ko.counts)}${a.derivedLost
+      ? ` · 함께 정리된 관계 <i>${a.derivedLost}</i>개` : ''}</div>
+    <div class="ok">${n ? `새로운 스토리 소재 ${n}개를 발견했습니다.` : '이번에는 새로운 스토리 소재가 나오지 않았습니다.'}</div>
+    ${ko.notes.length ? `<details class="warns"><summary>확인사항 ${ko.notes.length}건</summary>
+      <ul>${ko.notes.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></details>` : ''}
     <div class="card__row">
-      <button class="btn btn--wide" id="exSeeds">씨앗 ${n}개 보기</button>
+      <button class="btn btn--wide" id="exSeeds">스토리 소재 ${n}개 보기</button>
       <button class="btn btn--line" id="exScript">대본화</button>
     </div>
     <div class="card__row"><button class="btn btn--line btn--wide" id="exClose">닫기</button></div>
-    <div class="hint">새로 생긴 노드·엣지는 판에서 녹색으로 표시했습니다. 끊긴 엣지 자리는 붉은 점선으로 잠깐 남습니다.<br>
-      씨앗을 다시 고르면 자란 그래프에서 다음 회차가 갈라집니다.</div>`
+    <div class="hint">새로 추가된 인물·관계는 관계도에서 녹색으로 표시됩니다.
+      변경된 관계는 붉은 점선으로 잠시 표시됩니다.<br>
+      소재를 다시 선택하면 업데이트된 세계관에서 다음 회차 스토리가 만들어집니다.</div>`
 }
 
 function bindExpand() {
@@ -973,7 +1032,7 @@ function bindExpand() {
   on('exBack', () => { EXPAND = null; renderStory() })
   on('exClose', () => {
     EXPAND = null
-    renderFreeOnly('역기입을 적용했습니다. 씨앗 탭에서 자란 그래프의 다음 씨앗을 고르세요.')
+    renderFreeOnly('세계관에 반영했습니다. 씨앗 탭에서 업데이트된 세계관의 다음 스토리 소재를 고르세요.')
   })
 }
 
@@ -1049,6 +1108,9 @@ const WB_LIST_MAX = 40
  * 만들어 두고 있어 거기서 풀리고, 페이로드도 작다. 목록은 WB_LIST_MAX 에서 자르고
  * 전체 개수는 counts 에 남긴다 (자른 것을 전부라고 답하지 않게).
  *
+ * 술어는 id 처럼 풀리지 않는다. 그래서 ko 에 한국어 한 줄씩을 함께 실어 보낸다
+ * (edgeKo · nodeKindKo). Lambda 는 ko 가 있으면 그것만 프롬프트에 적는다.
+ *
  * @param {{nodes: Array, edges: Array}} before - 역기입 전 판
  * @param {{nodes: Array, edges: Array}} after - 역기입 뒤 판
  * @param {string} branch - 어느 분기의 역기입인가
@@ -1060,7 +1122,8 @@ function writebackSummary(before, after, branch) {
   const hasEdge = new Set(after.edges.map(edgeKey))
   // 파생 엣지는 규칙이 다시 만든 것이라 갈라 적는다. 작가가 직접 넣은 것이 아니다
   const triple = (e) => (e.asserted ? { s: e.s, p: e.p, o: e.o } : { s: e.s, p: e.p, o: e.o, derived: true })
-  const nodes = after.nodes.filter((n) => !hadNode.has(n.id)).map((n) => n.id)
+  const fresh = after.nodes.filter((n) => !hadNode.has(n.id))
+  const nodes = fresh.map((n) => n.id)
   const added = after.edges.filter((e) => !hadEdge.has(edgeKey(e)))
   const removed = before.edges.filter((e) => !hasEdge.has(edgeKey(e)))
   return {
@@ -1070,6 +1133,11 @@ function writebackSummary(before, after, branch) {
     addedEdges: added.slice(0, WB_LIST_MAX).map(triple),
     removedEdges: removed.slice(0, WB_LIST_MAX).map(triple),
     counts: { addedNodes: nodes.length, addedEdges: added.length, removedEdges: removed.length },
+    ko: {
+      nodes: fresh.slice(0, WB_LIST_MAX).map((n) => `「${n.name}」 ${nodeKindKo(n.kind)}`),
+      added: added.slice(0, WB_LIST_MAX).map(edgeKo),
+      removed: removed.slice(0, WB_LIST_MAX).map(edgeKo),
+    },
   }
 }
 
@@ -1122,7 +1190,8 @@ async function applyToBoard() {
   // 무엇이 새로 생겼는지는 개수(applied)만으로는 알 수 없다. 전후 판을 견줘 id 를 뽑는다
   const before = STORE.toJSON()
   const seedsBefore = new Set(SEEDS.map(seedKey))
-  x.applied = applyWriteback(STORE, x.branch.writeback)
+  x.applied = applyWriteback(STORE, x.branch.writeback, { seed: x.seed })
+  logWbWarnings('세계관 업데이트 적용', x.applied.warnings)
   const after = STORE.toJSON()
   x.delta = graphDelta(before, after)
   // 챗봇이 볼 변경 요약. 역기입을 또 하면 마지막 것만 남는다
@@ -1139,14 +1208,20 @@ async function applyToBoard() {
   VIS?.markNew(x.delta)
   renderSeeds()
   renderExpand()
-  const a = x.applied.applied
-  mark(`역기입으로 노드 ${a.nodesAdded}개 · 엣지 ${a.edgesAdded}개가 붙고 ${a.edgesRemoved}개가 끊겼습니다`)
+  // 기록 목록도 작가·PD 가 읽는 자리다. 개수는 종류별로 갈라 사람의 말로 적는다
+  const said = writebackCountsKo(x.applied.changes, { done: true })
+    .map((p) => `${p.label} ${p.n}${p.tail}`).join(' · ')
+  mark(said ? `세계관에 ${said}${josa(said, '을', '를')} 반영했습니다` : '세계관에 반영할 변경이 없었습니다')
 
   // Neptune 모드에서는 여기서야 저장이 끝난다. 판은 이미 자랐으니 화면은 건드리지
-  // 않고, 저장이 어긋난 것만 적용 기록에 덧붙여 다시 그린다
+  // 않고, 저장이 어긋난 것만 확인사항에 덧붙여 다시 그린다. 어긋난 이유는 Neptune 이
+  // 돌려준 말이라 사람이 읽을 것이 아니다. 화면에는 다시 해 보라는 한 줄만 올린다
   const { failures } = (await STORE.flush?.()) || { failures: [] }
   if (failures.length) {
     x.applied.warnings.push(...failures)
+    logWbWarnings('세계관 저장', failures)
+    x.applied.notices.push(`세계관 저장이 ${failures.length}건 실패했습니다.`
+      + ' 화면에는 반영되었지만 다음에 열면 빠져 있을 수 있습니다')
     renderExpand()
   }
 
@@ -1716,12 +1791,19 @@ function mountChat() {
       try {
         // 히스토리는 navigator-ui.js 가 sessionStorage 에 적어 둔 것을 그대로 읽는다.
         // 이번 질문은 아직 들어 있지 않다. Lambda 가 마지막 user 메시지로 따로 붙인다
+        const snap = STORE.toJSON()
         return await runNavigateJob(NET, {
           projectId: STORE.projectId || DEFAULT_PROJECT,
           question,
           // 스냅샷에 최근 역기입의 변경 요약을 얹어 보낸다. 역기입을 한 적이 없으면
-          // null 이고, 그때는 Lambda 가 스냅샷만으로 답한다
-          graphData: { ...STORE.toJSON(), recentWriteback: LAST_WRITEBACK },
+          // null 이고, 그때는 Lambda 가 스냅샷만으로 답한다.
+          // 엣지에는 한국어 서술을 한 줄씩 달아 둔다 (edgeKo) — 술어 표가 없는 Lambda 가
+          // 프롬프트를 지을 때 영문 술어를 쓰지 않게 한다
+          graphData: {
+            ...snap,
+            edges: snap.edges.map((e) => ({ ...e, ko: edgeKo(e) })),
+            recentWriteback: LAST_WRITEBACK,
+          },
           conversationHistory: readHistory(),
           model: MODEL(),
         })
