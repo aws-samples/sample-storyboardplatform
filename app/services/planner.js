@@ -11,6 +11,7 @@ import { asList } from '../lib/guards.js'
 import { PROMPT_SAFE, chunkText, SUMMARY_CHARS, summarizePrompt, extractGraphPrompt, CTX_BUDGET, contextPackPrompt, BRANCH_TOKENS, branchPrompt, freeDirectionPrompt, outlinePrompt, perBeat, BATCH, HARD_MAX, cutsPrompt } from '../domain/prompts.js'
 import { finishStory, localBranches, localOutline, localCuts, BRANCH_OUTLINE_TOKENS, branchOutlinePrompt, localBranchOutline } from '../domain/local-fallback.js'
 import { parseJson } from '../domain/json-repair.js'
+import { isDenied } from '../domain/permissions.js'
 import { SCRIPT_BATCH, SCRIPT_TOKENS, scriptFormatPrompt, scriptText, localScript } from '../domain/script-format.js'
 
 const bodyRoom = (build) => Math.max(600, PROMPT_SAFE - build('').length)
@@ -52,15 +53,23 @@ export async function summarizeForExtraction(net, source, ctx = {}) {
     SUMMARY_TOKENS, ctx.model))))
 
   const out = []
+  const failed = []
   got.forEach((r, i) => {
     const body = r.status === 'fulfilled' ? String(r.value?.text ?? '').trim() : ''
     if (!body) {
       warnings.push(`${i + 1}/${parts.length} 조각 요약 실패 · 건너뛴다: ${r.reason?.message || ''}`)
+      if (r.reason) failed.push(r.reason)
       return
     }
     out.push(body)
   })
-  if (!out.length) throw new Error('대본 요약을 받지 못했습니다. 다시 시도해 주세요.')
+  // 권한 때문이면 그 말을 올린다. 부르는 쪽(planGraph)이 요약 실패를 삼키고 조각내는
+  // 길로 내려가는데, 권한이 없으면 그 길도 같은 자리에서 막히므로 사유가 남아야 한다
+  if (!out.length) {
+    const denied = failed.find((e) => isDenied(e))
+    if (denied) throw denied
+    throw new Error('대본 요약을 받지 못했습니다. 다시 시도해 주세요.')
+  }
   return { text: out.join('\n\n'), warnings }
 }
 
@@ -114,14 +123,32 @@ export async function planGraph(net, source, ctx = {}) {
     4000, { model: ctx.model })))
 
   const raws = []
+  const failed = []
   got.forEach((r, i) => {
     if (r.status === 'rejected') {
       warnings.push(`${i + 1}/${parts.length} 조각 추출 실패 · 건너뛴다: ${r.reason?.message || ''}`)
+      failed.push(r.reason)
       return
     }
     raws.push(r.value)
   })
-  if (!raws.length) throw new Error('그래프를 받지 못했습니다. 다시 시도해 주세요.')
+  /*
+   * 조각이 전부 실패했으면 왜 실패했는지 그대로 올린다.
+   *
+   * 전에는 사유를 warnings 에 적어 두고 「받지 못했습니다. 다시 시도해 주세요」 만 던졌다.
+   * 그 warnings 는 성공했을 때만 화면에 그려지므로(story-graph.js 의 extract) 실패한
+   * 사람은 사유를 볼 길이 아예 없었다. 권한이 없어서 막힌 경우가 특히 나빴다. 역할은
+   * 다시 눌러서 바뀌지 않는데 「다시 시도해 주세요」 라고 안내하고 있었다.
+   *
+   * 권한 문제면 그 말을 그대로 올린다. 그 밖의 실패는 첫 사유를 붙인다. 조각마다 다른
+   * 이유로 죽는 일은 드물고, 여섯 줄을 붙여 놓으면 사람이 읽지 않는다.
+   */
+  if (!raws.length) {
+    const denied = failed.find((e) => isDenied(e))
+    if (denied) throw denied
+    const why = failed[0]?.message || ''
+    throw new Error(`그래프를 받지 못했습니다.${why ? ` ${why}` : ' 다시 시도해 주세요.'}`)
+  }
 
   // 조각을 먼저 합친 뒤 한 번에 정규화한다. 따로 정규화하면 조각을 넘나드는 엣지가
   // 없는 노드를 가리킨다는 이유로 버려진다.
@@ -330,7 +357,13 @@ export async function planScript(net, cuts, options = {}) {
   })
 
   const body = out.filter(Boolean).join('\n\n')
-  if (failed === batches.length || !body) throw new Error('대본을 받지 못했습니다. 다시 시도해 주세요.')
+  if (failed === batches.length || !body) {
+    // 권한이 없어 막힌 것이면 그 말을 올린다. 여기서 「다시 시도해 주세요」 로 덮으면
+    // 역할을 바꿔야 하는 사람이 같은 버튼을 계속 누른다
+    const denied = got.map((r) => r.reason).find((e) => isDenied(e))
+    if (denied) throw denied
+    throw new Error('대본을 받지 못했습니다. 다시 시도해 주세요.')
+  }
   return body
 }
 

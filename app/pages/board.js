@@ -5,11 +5,13 @@ import { planOutline, planCuts } from '../services/planner.js'
 import { esc, setHtml } from '../lib/dom.js'
 import { srcOf, downscale } from '../lib/placeholder-art.js'
 import { SEED_ART } from '../lib/seed-art.js'
+import { gpuDownHint } from '../lib/gpu-hours.js'
 import { connect } from '../services/api.js'
 import { configured, idToken, session, logout } from '../services/auth.js'
 import { showLogin } from '../components/login-form.js'
 import { NAV_TABS, navHref, boardFromSearch } from '../domain/routes.js'
 import { mountNav } from '../components/nav-tabs.js'
+import { mountBrand } from '../components/brand.js'
 import * as coach from '../components/coachmark.js'
 import { emptyPanel } from '../components/empty-panel.js'
 import { guiding } from '../../app-walkthrough/guide.js'
@@ -18,6 +20,8 @@ import { entries, group, toEntry } from '../services/activity-log.js'
 import { paintList } from '../components/history-list.js'
 import { pickProject } from '../components/project-picker.js'
 import { touch as touchProject } from '../services/projects.js'
+import { saveAsset } from '../services/assets.js'
+import { allowed, denyReason } from '../domain/permissions.js'
 import { wire as wireTour, demoActive, demoAdvance, demoSay, demoTitle } from '../../app-walkthrough/tour.js'
 
 /*
@@ -184,7 +188,81 @@ function touchCard(op) {
   clearTimeout(cardTimer)
   cardTimer = setTimeout(() => {
     touchProject({ boardId: boardFromSearch(), actor: me.id, what: cardWhat })
+    /*
+     * 리뷰 역할은 에셋을 쓰지 못합니다(infra/resolvers/putAsset.js). 메모를 남기는 것도
+     * op 이므로 여기를 지나는데, 막힐 것을 보내고 401 을 받아 로그에 적기만 하는 것은
+     * 왕복만 늘립니다. 리뷰가 남긴 메모로 콘티 요약이 바뀔 일도 없습니다.
+     *
+     * 여기서만 아무 말도 하지 않습니다. 다른 화면들은 못 담았다고 알리는데(키비주얼의
+     * noteKeepDenied), 그쪽은 대본·씬처럼 사람이 방금 만든 것이 사라지는 자리입니다.
+     * 이쪽에서 못 담는 것은 서랍에 보일 요약 숫자이고, 컷과 메모는 op 로그에 그대로
+     * 남습니다. 잃는 것이 없는 일로 안내문을 띄우면 다음 안내문이 안 읽힙니다.
+     *
+     * 로컬 모드는 막지 않습니다. 그때는 브라우저 저장소에 쓰는 것이라 리졸버를 지나지
+     * 않고, 무엇보다 로컬에서는 자리를 돌려 가며 앉히므로(resolveMe) 다섯 명 중 한 명이
+     * 리뷰어입니다. 그 자리에 앉은 사람만 콘티가 서랍에 안 보이면 까닭을 알 수 없습니다.
+     */
+    if (configured && !allowed('putAsset', me.role)) return
+    keepConti()
+    keepSynopsis()
   }, 600)
+}
+
+/*
+ * 서랍에 보일 콘티 요약을 담습니다. 컷 자체는 담지 않습니다.
+ *
+ * 컷은 op 로그가 들고 있고 그것이 이 화면의 사실입니다. 여기 한 벌 더 담으면 두 곳이
+ * 어긋날 자리가 생기고, 컷 수십 개를 op 하나 올릴 때마다 통째로 다시 쓰는 셈입니다.
+ * 그래서 세어 본 숫자만 담습니다. 서랍은 「무엇이 얼마나 있나」만 보여주면 되고, 컷을
+ * 보려면 「열기」로 이 화면에 옵니다.
+ *
+ * 이것이 없으면 서랍의 콘티 줄은 컷이 가득한 보드에서도 늘 「아직 없습니다」입니다.
+ * 서랍은 op 로그를 읽지 않기 때문입니다.
+ */
+async function keepConti() {
+  const cuts = Object.values(state.panels).filter((p) => !p.charId)
+  if (!cuts.length) return
+  try {
+    await saveAsset({
+      boardId: boardFromSearch(), kind: 'conti', actor: me.id,
+      body: {
+        cuts: cuts.length,
+        approved: cuts.filter((p) => p.status === 'approved').length,
+        eps: epList().length,
+      },
+    })
+  } catch (err) {
+    console.warn('[board] 콘티 요약을 담지 못했습니다', err)
+  }
+}
+
+/*
+ * 시나리오를 시놉시스 에셋으로 옮겨 둡니다.
+ *
+ * 지금 이 글은 op 로그에만 있습니다(board.patch 의 scenario). op 에는 30일 TTL 이 걸려
+ * 있어서(infra/resolvers/putOp.js) 한 달 쉰 프로젝트는 시나리오가 사라진 채 컷만 남습니다.
+ * 에셋에는 TTL 이 없으니 여기 옮겨 두면 남습니다.
+ *
+ * 회차를 보고 있으면 그 회차의 글입니다. 프로젝트 하나에 시놉시스 한 칸이라 마지막에
+ * 손댄 것이 남습니다. 회차마다 남기려면 sk 에 회차를 넣어야 하는데, 서랍이 여섯 줄을
+ * 보여주는 화면이라 지금은 그렇게까지 하지 않습니다.
+ */
+async function keepSynopsis() {
+  const ep = viewEp ? state.eps[viewEp] : null
+  const text = ((ep ? ep.scenario : state.board.scenario) || '').trim()
+  if (!text) return
+  try {
+    await saveAsset({
+      boardId: boardFromSearch(), kind: 'synopsis', actor: me.id,
+      body: {
+        title: (ep ? ep.title : state.board.title) || '',
+        logline: ep?.logline || '',
+        synopsis: text,
+      },
+    })
+  } catch (err) {
+    console.warn('[board] 시놉시스를 담지 못했습니다', err)
+  }
 }
 
 function emit(op) {
@@ -973,7 +1051,8 @@ async function pollGpu() {
     clearTimeout(fastPoll)
     if (j.loading) fastPoll = setTimeout(pollGpu, 4000)
   } catch {
-    gpu = { state: 'down', text: '생성 서버 연결 안 됨', hint: '인스턴스가 꺼져 있을 수 있습니다' }
+    // 업무 시간 밖이면 꺼져 있는 것이 정상입니다. 시간표와 다음에 켜지는 때를 적습니다
+    gpu = { state: 'down', text: '생성 서버 연결 안 됨', hint: gpuDownHint() }
   }
   renderGpu()
   renderDetail()
@@ -1604,8 +1683,12 @@ function runExample() {
     // 인물 구도도 같은 panels 에 삽니다(charId 가 붙습니다). 컷만 셉니다
     cuts: () => Object.values(state.panels).filter((p) => !p.charId).length,
     selected: () => selectedId,
-    afterDone: () => render(),
-    openCoach: () => openCoach(),
+    /*
+     * 예시를 마치면 끝입니다. 예전에는 여기서 코치마크 넉 장을 이어 열었습니다. 예시가
+     * 이미 화면을 짚어 가며 다 보여준 뒤라, 끝났다고 생각한 사람에게 막이 한 번 더
+     * 덮였습니다. 봤다고 적어 두는 이유는 coach.skip 에 있습니다.
+     */
+    afterDone: () => { coach.skip(COACH_KEY); render() },
   })
 }
 
@@ -2352,7 +2435,8 @@ function renderDetail() {
   if (!refs.some((r) => r.key === o.ref)) o.ref = 'none'
   const hint = !canGen ? '' : {
     warm: '모델을 올리는 중입니다. 잠시 뒤 다시 눌러주세요.',
-    down: '생성 서버에 연결되지 않습니다. 인스턴스가 켜져 있는지 확인해주세요.',
+    // 시간표 밖에서 꺼진 것과 시간표 안에서 닿지 않는 것을 가려서 적습니다
+    down: gpuDownHint(),
     error: '생성 서버에 문제가 있습니다.',
   }[gpu.state] || ''
 
@@ -3190,6 +3274,8 @@ byId('print').addEventListener('click', () => window.print())
 // key-visual.html 로 넘어갑니다(모두 링크). 그래서 handled 에는 board 하나만 남습니다.
 // keyvisual 을 여기 넣으면 버튼이 되어 눌러도 이동하지 않습니다.
 mountNav({ mount: byId('navMount'), active: 'board', handled: ['board'] })
+// 머리의 왼쪽. 네 화면이 같은 것을 씁니다. 누르면 홈입니다
+mountBrand('#brandMount')
 
 let picking = false
 

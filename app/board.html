@@ -74,6 +74,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
   border-bottom: 1px solid var(--edge);
 }
 .slate__mark { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+/* 브랜드와 프로젝트 이름 사이. 세로줄로 「서비스 | 지금 보는 것」 을 가릅니다 */
+.slate > #brandMount + .slate__mark {
+  padding-left: 12px; border-left: 1px solid var(--sb-line, #e4e7ec);
+}
 .slate__title { font-size: 16px; font-weight: 650; margin: 0; letter-spacing: -.02em; white-space: nowrap; }
 .slate__sub { color: var(--pencil-2); }
 /* LIVE 표시. 색을 칠하지 않고 옅은 면 위에 글자만 진하게 둔다 */
@@ -979,6 +983,14 @@ dialog.plan { width: min(680px, 95vw); }
 <body>
 
 <header class="slate">
+  <!--
+    머리의 왼쪽은 네 화면이 같습니다. 「S 여름 스튜디오」이고 누르면 홈입니다
+    (app/components/brand.js).
+
+    그 오른쪽의 제목은 지금 열어 둔 프로젝트 이름입니다. 화면 이름이 아니라서 남깁니다.
+    보드는 프로젝트마다 따로 있으므로 「어느 프로젝트를 보고 있는지」가 여기서 필요합니다.
+  -->
+  <div id="brandMount"></div>
   <div class="slate__mark">
     <span class="mono tape" id="liveFlag">LIVE</span>
     <h1 class="slate__title" id="boardTitle">보드</h1>

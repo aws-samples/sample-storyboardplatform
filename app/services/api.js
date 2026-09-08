@@ -296,6 +296,10 @@ const M_PUT_PROJECT = `mutation PutProject($boardId: ID!, $name: String, $actor:
   putProject(boardId: $boardId, name: $name, actor: $actor, what: $what, ts: $ts) { ${PROJECT_FIELDS} }
 }`
 
+const M_DEL_PROJECT = `mutation DeleteProject($boardId: ID!) {
+  deleteProject(boardId: $boardId) { boardId ops assets card left graph }
+}`
+
 /**
  * 프로젝트 카드를 읽고 쓰는 클라이언트. 작업판 앞에 세우는 보드가 씁니다.
  *
@@ -304,8 +308,8 @@ const M_PUT_PROJECT = `mutation PutProject($boardId: ID!, $name: String, $actor:
  * 한 달 쉰 프로젝트는 이름까지 사라집니다. 카드는 pk='PROJECTS' 한 자리에 모으고
  * TTL 을 걸지 않습니다.
  *
- * @returns {{list: Function, put: Function}|null} 설정이 없으면 null · 부르는 쪽이
- *          브라우저 저장소로 내려갑니다
+ * @returns {{list: Function, put: Function, remove: Function}|null} 설정이 없으면 null ·
+ *          부르는 쪽이 브라우저 저장소로 내려갑니다
  */
 export function projectsClient() {
   const cfg = window.SB_CONFIG
@@ -326,6 +330,90 @@ export function projectsClient() {
         boardId, name: name ?? null, actor, what: what ?? null, ts: pad(ts ?? Date.now()),
       })
       return d.putProject
+    },
+    /*
+     * 프로젝트 하나를 지웁니다. 카드 · 에셋 · op 로그 · Neptune 그래프 전부입니다.
+     *
+     * 지운 수를 세어 돌려주는 이유는 사람에게 무엇을 잃었는지 말해 주려는 것입니다.
+     * 「지웠습니다」만으로는 컷 340개가 같이 사라진 것을 모릅니다. left 가 0 이 아니면
+     * 다 못 지운 것이고, 그때 카드는 서버가 일부러 남깁니다 — 다시 지울 수 있어야
+     * 합니다(infra/resolvers/deleteProject.js).
+     */
+    remove: async (boardId) => {
+      const d = await gqlPost(cfg, M_DEL_PROJECT, { boardId })
+      return d.deleteProject
+    },
+  }
+}
+
+const ASSET_FIELDS = 'boardId kind body actor updatedAt'
+
+const Q_ASSETS = `query Assets($boardId: ID!, $nextToken: String) {
+  listAssets(boardId: $boardId, nextToken: $nextToken) {
+    items { ${ASSET_FIELDS} }
+    nextToken
+  }
+}`
+
+const M_PUT_ASSET = `mutation PutAsset($boardId: ID!, $kind: String!, $body: AWSJSON!, $actor: ID!, $ts: String!) {
+  putAsset(boardId: $boardId, kind: $kind, body: $body, actor: $actor, ts: $ts) { ${ASSET_FIELDS} }
+}`
+
+/*
+ * 에셋 본문을 싸는 봉투입니다. { v: <본문> } 한 겹입니다.
+ *
+ * 봉투가 필요한 이유는 대본이 통째로 긴 「문자열」이라는 것입니다. 본문을 그대로
+ * JSON.stringify 해서 보내면 저장되는 값이 '"대본 전문…"' 이 되고, 돌아올 때
+ * parseField 가 그것을 풀지 못합니다. 그 함수는 한 겹 더 싸여 온 것을 여는 괄호로
+ * 가려내는데(api.js 의 parseField), 문자열은 따옴표로 시작하므로 거기서 걸러지지
+ * 않고 따옴표가 붙은 채로 나옵니다. 대본 앞뒤에 " 가 하나씩 붙습니다. 숫자만 적힌
+ * 대본('42')은 더 나쁩니다.
+ *
+ * 봉투를 씌우면 인코딩된 값이 늘 '{' 로 시작합니다. 그래서 AppSync 가 한 겹을 싸든
+ * 두 겹을 싸든 parseField 가 같은 것을 돌려줍니다. 어느 쪽인지 알아야 할 필요가
+ * 없어지는 것이 이 봉투의 값입니다.
+ */
+const envelope = (body) => JSON.stringify({ v: body ?? null })
+const unwrap = (raw) => parseField(raw)?.v ?? null
+
+/**
+ * 프로젝트 에셋을 읽고 쓰는 클라이언트. 서랍 화면과 네 작업 화면이 씁니다.
+ *
+ * op 로그와 다른 점은 두 가지입니다. 쌓지 않고 종류마다 하나를 덮어쓰고, TTL 이
+ * 없습니다. op 는 「무슨 일이 있었나」라서 쌓이고 30일 뒤 사라져도 되지만, 에셋은
+ * 「지금의 대본」이라서 하나면 되고 사라지면 안 됩니다.
+ *
+ * @returns {{list: Function, put: Function}|null} 설정이 없으면 null · 부르는 쪽이
+ *          브라우저 저장소로 내려갑니다
+ */
+export function assetsClient() {
+  const cfg = window.SB_CONFIG
+  if (!cfg?.graphqlUrl) return null
+  return {
+    list: async (boardId) => {
+      const out = []
+      let token = null
+      do {
+        const d = await gqlPost(cfg, Q_ASSETS, { boardId, nextToken: token })
+        for (const it of d.listAssets.items) {
+          // 한 에셋의 본문이 깨져 있어도 나머지는 그립니다. 서랍이 통째로 비면
+          // 사람은 프로젝트가 사라진 줄로 봅니다
+          try {
+            out.push({ ...it, body: unwrap(it.body) })
+          } catch (e) {
+            console.warn(`[api] ${it.kind} 에셋의 본문을 읽지 못했습니다`, e.message)
+          }
+        }
+        token = d.listAssets.nextToken
+      } while (token)
+      return out
+    },
+    put: async ({ boardId, kind, body, actor, ts }) => {
+      const d = await gqlPost(cfg, M_PUT_ASSET, {
+        boardId, kind, body: envelope(body), actor,
+        ts: pad(ts ?? Date.now()),
+      })
+      return { ...d.putAsset, body }
     },
   }
 }

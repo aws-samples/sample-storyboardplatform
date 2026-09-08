@@ -23,13 +23,16 @@ import { demoActive, demoAdvance, demoSay, demoTitle } from '../tour.js'
  *   cuts       () => 지금 판의 컷 수. done 의 got 이 셉니다
  *   selected   () => 고른 컷의 id. 예시가 도는 사이에 바뀝니다
  *   afterDone  예시가 끝났습니다. 화면이 다시 그립니다
- *   openCoach  그 뒤에 코치마크. 예시가 남긴 컷을 짚으므로 순서가 이래야 합니다
+ *
+ * 예전에는 afterDone 뒤에 openCoach 를 하나 더 받아 코치마크를 이어 열었습니다.
+ * 예시가 이미 화면을 다 짚은 뒤라 「여기까지가 예시입니다」 를 읽고 끝났다고 생각한
+ * 사람에게 막이 한 번 더 덮였습니다. 예시 하나로 충분해서 그 자리를 없앴습니다.
  */
-let seedBuild, push, render, pickView, cuts, selected, afterDone, openCoach
+let seedBuild, push, render, pickView, cuts, selected, afterDone
 
 /** 예시를 시작합니다. 화면의 「예시 보기」와 코치마크가 부릅니다 */
 export function boardExample(o) {
-  ;({ seedBuild, push, render, pickView, cuts, selected, afterDone, openCoach } = o)
+  ;({ seedBuild, push, render, pickView, cuts, selected, afterDone } = o)
   return runExample()
 }
 
@@ -119,13 +122,9 @@ function runExample() {
       afterDone()
       /*
        * 예시 프로젝트를 밟고 있으면 다음 화면으로 넘어간다. 보드는 마지막 단계라
-       * 홈으로 돌아간다(tour.js 의 DEMO_STEPS). 그때는 코치마크를 열지 않는다.
-       * 화면을 떠나는 중에 막을 덮으면 한 번 반짝하고 사라진다.
+       * 홈으로 돌아간다(tour.js 의 DEMO_STEPS).
        */
-      if (demoAdvance('board')) return
-      // 예시를 다 본 뒤에 화면의 어디를 눌러야 하는지 짚어 준다. 순서가 반대면
-      // (코치마크 먼저) 가리킬 컷이 아직 없어 빈 자리를 가리키게 된다
-      openCoach()
+      demoAdvance('board')
     },
   })
 }

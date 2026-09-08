@@ -25,7 +25,7 @@
  * Cognito 없이 화면만 보는 용도이고, 보드도 같은 조건에서 로그인을 건너뜁니다
  * (app/board.js 의 boot 이 configured 로 갈라지는 것과 같습니다).
  */
-import { NAV_TABS, navHref, newHref } from '../domain/routes.js'
+import { NAV_TABS, navHref, newHref, drawerHref } from '../domain/routes.js'
 import { configured, session, logout } from '../services/auth.js'
 import { showLogin, DEMO_USERS } from '../components/login-form.js'
 import { setHtml } from '../lib/dom.js'
@@ -33,8 +33,13 @@ import { opsClient } from '../services/api.js'
 import { entries, group } from '../services/activity-log.js'
 import { paintTable } from '../components/history-list.js'
 import { emptyPanel } from '../components/empty-panel.js'
-import { list as listProjects, touch as touchProject } from '../services/projects.js'
+import {
+  list as listProjects, remove as removeProject, touch as touchProject,
+} from '../services/projects.js'
 import { paintCards } from '../components/project-picker.js'
+import { confirmAsk } from '../components/confirm.js'
+import { allowed, denyReason, isDenied, roleName, JOB_ROLES } from '../domain/permissions.js'
+import { mountBrand } from '../components/brand.js'
 import { wire as wireTour, startDemo, DEMO_BOARD, DEMO_NAME, DEMO_TOTAL } from '../../app-walkthrough/tour.js'
 import * as coach from '../components/coachmark.js'
 
@@ -124,7 +129,15 @@ function paintSide() {
     </li>`
   }).join(''))
   for (const b of byId('sideList').querySelectorAll('[data-view]')) {
-    b.onclick = () => show(b.dataset.view)
+    b.onclick = () => {
+      /*
+       * 메뉴로 들어온 것은 「팀 전체의 작업 상황」입니다. 한 판만 보던 것을 풀어 둡니다.
+       * 그대로 두면 왼쪽 메뉴의 숫자(전체 건수)와 표에 보이는 줄 수가 어긋나고, 사람은
+       * 자기가 무엇을 걸러 두었는지 기억하지 못합니다.
+       */
+      if (b.dataset.view === 'activity' && actBoard) { actBoard = null; paintActs() }
+      show(b.dataset.view)
+    }
   }
 }
 
@@ -201,9 +214,11 @@ function paintDone() {
  * 각 화면 앞에 서는 문(projects.pickProject)과 같은 목록·같은 모양입니다. 다른 것은
  * 여기서는 문이 아니라 목록이라는 것뿐입니다.
  *
- * 카드를 누르면 스토리보드로 갑니다. 프로젝트에서 마지막으로 한 일이 어느 단계였든
- * 컷이 모이는 곳은 보드이고, 다른 단계로는 거기서 상단 탭으로 갑니다. 그때 ?board=
- * 가 따라갑니다(navHref).
+ * 카드를 누르면 프로젝트 서랍으로 갑니다(app/project.html). 전에는 곧장 스토리보드로
+ * 보냈는데, 그러면 대본과 시놉시스만 들고 일하는 사람이 카드를 누를 때마다 자기 작업이
+ * 없는 컷 화면에 도착했습니다. 게다가 프로젝트가 무엇을 들고 있는지는 어느 화면에서도
+ * 보이지 않았습니다. 서랍이 그것을 먼저 펴 보이고, 거기서 원하는 에셋의 화면으로
+ * 갑니다. 그때 ?board= 가 따라갑니다(drawerHref · navHref).
  */
 let projects = []
 
@@ -221,13 +236,120 @@ function paintProjects() {
   const who = nameMap(rawOps)
   paintCards(byId('pjList'), projects, {
     who: (id) => who.get(id) || null,
-    onPick: (p) => { location.href = navHref('board', p.boardId) },
+    onPick: (p) => { location.href = drawerHref(p.boardId) },
+    menu: cardMenu,
     none: '아직 만든 프로젝트가 없습니다. 「새로 생성」에서 한 단계를 고르면 이름을 붙여 첫 판을 엽니다.',
   })
   setHtml(byId('pjNote'), projects.length
     ? '카드를 누르면 그 프로젝트의 보드가 열립니다. 주소에 프로젝트가 담기므로 '
-      + '상단 탭으로 다른 단계로 넘어가도 같은 판을 봅니다.'
+      + '상단 탭으로 다른 단계로 넘어가도 같은 판을 봅니다. '
+      + '카드 오른쪽 위의 「⋮」로 그 판의 작업 기록을 보거나 판을 지울 수 있습니다.'
     : '')
+}
+
+/* ══ 카드의 「⋮」 메뉴 ═════════════════════════════ */
+
+/*
+ * 나는 지금 무엇으로 앉아 있나. 로컬 모드에는 역할이라는 것이 없습니다.
+ *
+ * 로컬 모드(configured 가 거짓)에서는 막지 않습니다. 로그인이 없어서 역할이 없고,
+ * 지워지는 것도 이 브라우저의 저장소뿐입니다. project.js 가 같은 판단을 합니다.
+ */
+const myRole = () => session()?.role || 'reviewer'
+const mayDelete = () => !configured || allowed('deleteProject', myRole())
+
+/**
+ * 카드 하나의 메뉴에 세울 줄들.
+ *
+ * 세 줄입니다. 열기 · 작업 기록 보기 · 프로젝트 삭제.
+ *
+ * 전에는 지우기가 카드를 눌러 서랍(project.html)까지 들어가야 나왔습니다. 지우려고
+ * 들어간 사람이 서랍의 여섯 줄을 지나 맨 아래까지 내려가야 했고, 그래서 「이 판을
+ * 없애고 싶다」가 화면에서 보이지 않는 일이 되었습니다. 목록에서 바로 닿게 둡니다.
+ *
+ * 지우기는 감독만 됩니다. 흐리게 두고 왜 막혔는지를 title 로 답니다 — 숨기면 사람은
+ * 기능이 없는 줄로 알고 찾아다니고, 감독에게 부탁할 일이라는 것도 모릅니다
+ * (project.js 의 paintDanger 와 같은 판단입니다).
+ */
+const cardMenu = (p) => [
+  { label: '열기', on: () => { location.href = drawerHref(p.boardId) } },
+  { label: '작업 기록 보기', on: () => showActsFor(p.boardId) },
+  {
+    label: '프로젝트 삭제',
+    danger: true,
+    disabled: !mayDelete(),
+    why: denyReason('deleteProject', myRole())
+      || `삭제는 ${JOB_ROLES.deleteProject.map(roleName).join('·')}만 할 수 있습니다.`,
+    on: () => askDelete(p),
+  },
+]
+
+/**
+ * 이 판을 지웁니다. 묻고, 지우고, 목록을 다시 그립니다.
+ *
+ * 무엇을 잃는지는 여기서 세지 못합니다. 홈은 에셋을 읽지 않고(services/assets.js 를
+ * 부르는 것은 서랍입니다) op 로그만 들고 있습니다. 세지 못하는 것을 「에셋 0개」로
+ * 적으면 거짓이 되므로, 셀 수 있는 것만 적습니다 — 이 표에 들어온 기록의 줄 수입니다.
+ * 정확한 셈은 지운 뒤에 서버가 돌려줍니다.
+ */
+async function askDelete(p) {
+  const name = p.name || p.boardId
+  const logs = acts.filter((e) => e.boardId === p.boardId).length
+  const ok = await confirmAsk({
+    title: '이 프로젝트를 지우시겠습니까?',
+    body: `「${name}」를 지웁니다. 대본·시놉시스·씬·키비주얼·콘티와 보드의 컷·댓글이 `
+      + '모두 함께 사라집니다. 되돌릴 수 없습니다.',
+    list: [
+      `프로젝트 「${name}」`,
+      ...(logs ? [`이 표에 들어온 작업 기록 ${logs}건`] : []),
+      '스토리보드의 컷과 댓글 전부',
+    ],
+    yes: '지웁니다',
+    danger: true,
+  })
+  if (!ok) return
+
+  const note = byId('pjNote')
+  note.textContent = `「${name}」를 지우는 중입니다.`
+  try {
+    const r = await removeProject(p.boardId)
+    const bits = [
+      r.ops ? `기록 ${r.ops.toLocaleString('ko-KR')}줄` : '',
+      r.assets ? `에셋 ${r.assets}개` : '',
+    ].filter(Boolean).join(' · ')
+    if (r.left) {
+      /*
+       * 다 못 지웠습니다. 카드는 서버가 일부러 남겨 두었으므로(deleteProject.js) 다시
+       * 지울 수 있습니다. 「지웠습니다」로 덮지 않는 것이 요점입니다. 목록은 그대로
+       * 다시 읽습니다 — 카드가 남아 있어야 다시 누를 자리가 있습니다.
+       */
+      await loadProjects()
+      note.textContent = `${bits ? `${bits}을 지웠지만 ` : ''}`
+        + `${r.left.toLocaleString('ko-KR')}줄이 남았습니다. 한 번에 지울 수 있는 양을 넘었습니다. `
+        + '카드의 「⋮」에서 다시 지워 주세요. 남은 것부터 이어서 지웁니다.'
+      return
+    }
+    /*
+     * 표에서도 그 판의 줄을 걷어냅니다. 로그를 다시 읽지 않는 이유는 방금 지운 판을
+     * 읽으러 가는 셈이 되기 때문입니다. 지운 판의 기록이 「팀원들의 작업 상황」에
+     * 그대로 남아 있으면 「열기」가 없는 판으로 데려갑니다.
+     */
+    acts = acts.filter((e) => e.boardId !== p.boardId)
+    if (actBoard === p.boardId) actBoard = null
+    await loadProjects()
+    paintActs()
+    byId('pjNote').textContent = `「${name}」를 지웠습니다.${bits ? ` ${bits}이 사라졌습니다.` : ''}`
+  } catch (err) {
+    console.warn('[home] 프로젝트를 지우지 못했습니다', err)
+    /*
+     * 권한 때문이면 「다시 시도해 주세요」를 붙이지 않습니다. 역할은 다시 눌러서 바뀌지
+     * 않습니다. 메뉴에서 미리 막았는데도 여기 오는 경우가 있습니다 — 탭을 열어 둔 사이에
+     * 관리자가 역할을 바꾸면 서버의 거부가 유일한 신호입니다.
+     */
+    note.textContent = isDenied(err)
+      ? (denyReason('deleteProject', myRole()) || '프로젝트를 지울 권한이 없습니다.')
+      : `「${name}」를 지우지 못했습니다. ${err.message} 다시 시도해 주세요.`
+  }
 }
 
 /* ══ 팀원들의 작업 상황 ════════════════════════════ */
@@ -255,6 +377,14 @@ let rawOps = []
 /** 못 읽고 자른 판의 수 */
 let dropped = 0
 let mine = false
+/*
+ * 한 판만 보고 있으면 그 boardId. 카드의 「작업 기록 보기」가 이것을 세웁니다.
+ *
+ * 표를 따로 두지 않고 같은 표를 걸러 씁니다. 그래야 「이 판만」과 「내 것만」이 함께
+ * 걸리고, 줄의 「열기」가 가는 곳도 한 곳에서만 정해집니다(pickHref). 판마다 표를 새로
+ * 만들면 그 두 가지를 두 번 적어 두게 됩니다.
+ */
+let actBoard = null
 
 /** actor id → { name }. 명부(member.set)에 있는 사람과 데모 계정을 합쳐 씁니다 */
 function nameMap(list) {
@@ -309,17 +439,40 @@ async function loadActs() {
 
 function paintActs() {
   const s = configured ? session() : null
-  const list = (mine && s ? acts.filter((e) => e.actor === s.id) : acts).slice(0, 60)
+  /*
+   * 두 가지를 걸러 냅니다. 어느 판인지(actBoard)와 누가 했는지(mine)입니다. 판을 먼저
+   * 거르는 이유는 그것이 사람이 고른 「보고 있는 자리」이고, 「내 것만」은 그 안에서
+   * 다시 좁히는 것이기 때문입니다.
+   */
+  const inBoard = actBoard ? acts.filter((e) => e.boardId === actBoard) : acts
+  const list = (mine && s ? inBoard.filter((e) => e.actor === s.id) : inBoard).slice(0, 60)
+  // 이 판의 이름. 카드가 지워졌으면 표의 줄에 적힌 것을 씁니다
+  const pjName = actBoard
+    ? (projects.find((p) => p.boardId === actBoard)?.name
+      || inBoard[0]?.pjName || actBoard)
+    : ''
 
-  byId('actN').textContent = acts.length ? `${acts.length}건` : ''
+  byId('actN').textContent = inBoard.length ? `${inBoard.length}건` : ''
   byId('actMine').setAttribute('aria-pressed', String(mine))
   byId('actMine').hidden = !s
+  /*
+   * 한 판만 보고 있다는 것과 그것을 푸는 길을 같이 세웁니다. 이 표는 원래 여러 판을
+   * 모아 보는 자리라서, 걸러진 것을 말해 주지 않으면 나머지 판의 일이 사라진 것으로
+   * 읽힙니다. 조용히 자르지 않는 것은 위의 dropped 와 같은 판단입니다.
+   */
+  const one = byId('actOnly')
+  one.hidden = !actBoard
+  if (actBoard) byId('actOnlyName').textContent = pjName
 
   paintTable(byId('act'), list, {
-    caption: acts.length ? '최근에 한 일이 위에 옵니다.' : '',
-    none: mine
-      ? '내가 한 것이 아직 없습니다.'
-      : '아직 지나간 일이 없습니다. 「새로 생성」에서 한 단계를 열어 보십시오.',
+    caption: inBoard.length
+      ? (actBoard ? `「${pjName}」에서 한 일입니다. 최근 것이 위에 옵니다.` : '최근에 한 일이 위에 옵니다.')
+      : '',
+    none: actBoard
+      ? (mine ? `「${pjName}」에서 내가 한 것이 아직 없습니다.`
+        : `「${pjName}」에는 아직 기록이 없습니다. 이 판에서 무언가를 하면 여기에 쌓입니다.`)
+      : (mine ? '내가 한 것이 아직 없습니다.'
+        : '아직 지나간 일이 없습니다. 「새로 생성」에서 한 단계를 열어 보십시오.'),
     onPick: (e) => { location.href = pickHref(e) },
   })
 
@@ -331,6 +484,23 @@ function paintActs() {
       + '네 화면이 같은 기록을 보므로 여기 없는 일은 어디에도 없습니다.'
       + (dropped ? ` 프로젝트 ${dropped}개는 이 표에 넣지 않았습니다. 최근에 손댄 ${FANOUT}개까지만 읽습니다.` : '')
     : '')
+}
+
+/**
+ * 한 판의 작업 기록만 펼칩니다. 카드의 「⋮ → 작업 기록 보기」가 부릅니다.
+ *
+ * 새로 읽지 않습니다. 이 표에 쓸 줄은 홈이 뜰 때 이미 판마다 읽어 두었고(loadActs),
+ * 각 줄에 boardId 가 붙어 있습니다. 여기서 다시 읽으면 같은 것을 두 번 읽는 셈이고
+ * 배포에서는 AppSync 왕복이 한 번 더 붙습니다.
+ *
+ * 아직 못 읽었으면(FANOUT 밖으로 밀린 판이거나 로그를 읽는 중) 그 사실을 표의 빈 줄이
+ * 말합니다. 여기서 기다리게 하지 않는 이유는 사람이 고른 것이 「이 판을 보겠다」이고,
+ * 그 화면은 기록이 없어도 성립하기 때문입니다.
+ */
+function showActsFor(boardId) {
+  actBoard = boardId
+  show('activity')
+  paintActs()
 }
 
 /**
@@ -428,7 +598,8 @@ const HOME_CARDS = [
     head: '우리 팀이 하던 것',
     body: '프로젝트마다 판이 따로 있습니다. 대본도, 씬별 그림도, 컷도 그 안에 담깁니다.\n'
       + '카드를 누르면 그 판의 보드가 열리고, 상단 탭으로 넘어가도 같은 판을 봅니다.\n'
-      + '새 프로젝트는 각 단계에 들어갈 때 이름을 붙여 만듭니다.',
+      + '카드 오른쪽 위의 「⋮」에 열기 · 작업 기록 보기 · 프로젝트 삭제가 있습니다.\n'
+      + '지우기는 감독만 됩니다. 되돌릴 자리가 없는 일이라 그렇습니다.',
     spot: ['projects'],
     next: '알겠습니다', skip: '다시 보지 않기',
   },
@@ -452,7 +623,8 @@ function openCoach() {
 /* ══ 시작 ══════════════════════════════════════════ */
 
 async function boot() {
-  byId('env').textContent = configured ? '배포' : '로컬'
+  // 여기는 홈이라 누를 곳이 없습니다. 누를 수 있게 보이면 눌러 보고 아무 일도 안 일어납니다
+  mountBrand('#brandMount', { home: true })
   paintSteps()
   wireDemo()
   paintDone()
@@ -464,6 +636,7 @@ async function boot() {
 
   byId('meOut').onclick = () => { logout(); location.reload() }
   byId('actMine').onclick = () => { mine = !mine; paintActs() }
+  byId('actOnlyX').onclick = () => { actBoard = null; paintActs() }
   // 뒤로 가기로 돌아온 메뉴를 다시 펼칩니다. 주소만 바뀌고 화면이 그대로면 안 됩니다
   window.addEventListener('popstate', () => show(viewParam() || 'new', false))
 

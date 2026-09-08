@@ -36,6 +36,28 @@ const GPU_TYPE = 'g6e.2xlarge'
 // run-instances --dry-run 으로는 확인할 수 없다. 리전에 없는 타입에도
 // "성공했을 것"이라고 답한다. 문법만 검사하며 가용성도 용량도 보지 않는다.
 const GPU_AZS = ['ap-northeast-2a', 'ap-northeast-2b']
+
+/*
+ * GPU 의 AMI. 리전마다 ID 가 다르므로 리전별로 적는다.
+ *
+ * 예전에는 SSM 의 `.../latest/ami-id` 를 그대로 읽었다. 그러면 AWS 가 새 Deep Learning
+ * AMI 를 내는 날 ImageId 가 바뀌고, ImageId 는 교체가 필요한 속성이라 그날의 배포가
+ * *무엇을 고쳤든* GPU 를 새로 만든다. 프런트엔드 한 줄만 바꾼 배포에서도 그렇다.
+ *
+ * 교체의 대가가 크다. 새 인스턴스는 빈 루트 볼륨으로 뜨므로 모델 가중치 약 67GB 를
+ * 다시 받는다. 옛 볼륨은 deleteOnTermination: false 라서 지워지지는 않지만, 아무것에도
+ * 붙지 않은 채 남아 월 $16~27 이 계속 붙는다(200GB gp3).
+ *
+ * 그래서 지금 돌고 있는 이미지를 적어 둔다. AMI 를 올리는 것은 그 자체로 하나의 작업이다.
+ * 올릴 때는 이 값을 바꾸고, 뜬 뒤에 /gen/health 가 답하는지 보고, 떠도는 옛 볼륨을 지운다.
+ *   aws ssm get-parameter --region ap-northeast-2 \
+ *     --name /aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-22.04/latest/ami-id
+ */
+const GPU_AMI = {
+  // Deep Learning Base OSS Nvidia Driver GPU AMI (Ubuntu 22.04) 20260902
+  'ap-northeast-2': 'ami-0998eac84900cf563',
+}
+
 const MODEL = 'chroma'
 const NEPTUNE_VERSION = '1.3.4.0'
 const NEPTUNE_PORT = 8182
@@ -125,6 +147,11 @@ class StoryboardStack extends Stack {
     // 프로젝트 카드는 같은 Ops 테이블의 pk='PROJECTS' 한 자리에 산다. op 와 달리 TTL 이 없다
     js(ops, 'PutProject', 'Mutation', 'putProject', 'putProject.js')
     js(ops, 'ListProjects', 'Query', 'listProjects', 'listProjects.js')
+    // 에셋(대본·시놉시스·그래프·씬·키비주얼·콘티)은 op 와 같은 pk=BOARD#<id> 에 살고
+    // sk 만 'ASSET#<kind>' 다. 프로젝트 하나의 에셋 전부를 Query 한 번에 읽는다.
+    // op 처럼 쌓지 않고 kind 마다 덮어쓰며, 카드와 같이 TTL 이 없다
+    js(ops, 'PutAsset', 'Mutation', 'putAsset', 'putAsset.js')
+    js(ops, 'ListAssets', 'Query', 'listAssets', 'listAssets.js')
     // plan 결과는 GraphFn 이 Ops 테이블에 적어 둔 것을 읽어 온다
     js(ops, 'PlanResult', 'Query', 'planResult', 'planResult.js')
     // navigate 결과도 같은 항목이다. GraphFn 이 두 잡을 같은 키로 적는다
@@ -229,8 +256,13 @@ class StoryboardStack extends Stack {
       },
     })
     graphFn.node.addDependency(graphInstance)
-    // plan 결과를 적는다. 읽기는 planResult 리졸버(OpsDs)가 한다
-    table.grantWriteData(graphFn)
+    /*
+     * plan 결과를 적는다. 그것만이면 grantWriteData 로 충분했다. 읽기가 붙은 것은
+     * deleteProject 때문이다 — 지울 것을 먼저 Query 로 세어야 하고, 그 수가 몇인지
+     * 아무도 모른다(op 는 한 판에 수백 줄이 된다). grantReadWriteData 가 Query 와
+     * BatchWriteItem 을 함께 연다. plan 결과 읽기는 여전히 planResult 리졸버가 한다.
+     */
+    table.grantReadWriteData(graphFn)
     history.grantReadWriteData(graphFn)
 
     // 교차 리전 추론 프로필을 부르면 Bedrock 이 뒤에서 다른 리전의 파운데이션 모델을
@@ -252,6 +284,18 @@ class StoryboardStack extends Stack {
     js(graphDs, 'Plan', 'Mutation', 'plan', 'plan.js')
     // 네비게이터 챗봇도 같은 Lambda·같은 Event 패턴이다. 새 권한은 필요 없다
     js(graphDs, 'Navigate', 'Mutation', 'navigate', 'navigate.js')
+    /*
+     * 프로젝트 삭제. OpsDs 가 아니라 GraphFn 이 받는다.
+     *
+     * op 는 한 판에 수백 줄이 되고 JS 리졸버는 한 요청 안에서 돌 수 없다.
+     * BatchDeleteItem 한 번은 25건이라 그것을 넘는 판은 반쯤만 지워지고, 그러면 카드는
+     * 사라졌는데 주소로 열면 컷이 남아 아무 화면에서도 다시 지울 수 없다. Lambda 는
+     * Query → BatchWrite 를 다 지울 때까지 돈다. Neptune 도 같은 자리에서 지운다.
+     *
+     * Event 가 아니라 동기다(plan 과 다르다). 「몇 줄을 지웠나」와 「몇 줄이 남았나」는
+     * 사람이 다음에 할 일이 달라서 결과를 봐야 한다.
+     */
+    js(graphDs, 'DeleteProject', 'Mutation', 'deleteProject', 'deleteProject.js')
 
     const sg = new ec2.SecurityGroup(this, 'GpuSg', { vpc: net, description: 'storyboard gpu' })
 
@@ -343,10 +387,14 @@ class StoryboardStack extends Stack {
       vpc: net,
       vpcSubnets: gpuSubnets,
       instanceType: new ec2.InstanceType(GPU_TYPE),
-      machineImage: ec2.MachineImage.fromSsmParameter(
-        '/aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-22.04/latest/ami-id',
-        { os: ec2.OperatingSystemType.LINUX },
-      ),
+      // 적어 둔 AMI 를 쓴다(GPU_AMI). 적어 두지 않은 리전에서는 SSM 의 latest 로
+      // 떨어진다. 그 리전은 첫 배포이므로 교체할 인스턴스도 잃을 볼륨도 없다.
+      machineImage: GPU_AMI[this.region]
+        ? ec2.MachineImage.genericLinux({ [this.region]: GPU_AMI[this.region] })
+        : ec2.MachineImage.fromSsmParameter(
+          '/aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-22.04/latest/ami-id',
+          { os: ec2.OperatingSystemType.LINUX },
+        ),
       securityGroup: sg,
       role: gpuRole,
       userData: ec2.UserData.custom(userData),
@@ -468,8 +516,8 @@ class StoryboardStack extends Stack {
      *   app/*             → 버킷 루트. 아래 폴더 구조는 그대로 남습니다
      *   app-walkthrough/* → /app-walkthrough/. 예시 코드와 목데이터입니다
      * 최종 구조:
-     *   /aws-config.js  /index.html(홈)  /board.html  /story-graph.html
-     *   /key-visual.html
+     *   /aws-config.js  /index.html(홈)  /project.html(프로젝트 서랍)
+     *   /board.html  /story-graph.html  /key-visual.html
      *   /platform/…  /chrome/…  /story/…  /art/…  /screens/…
      *   /app-walkthrough/tour.js  /app-walkthrough/guide.js
      *   /app-walkthrough/steps/…  /app-walkthrough/data/graph.json …
