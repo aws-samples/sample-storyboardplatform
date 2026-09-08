@@ -22,6 +22,7 @@ import { planGraph, planBranches, planFreeBranches, planBranchOutline, planCuts,
 import { localBranches, branchToSpec } from '../domain/local-fallback.js'
 import { scriptToText, scriptBlob, scriptFileName, SCRIPT_FORMATS } from '../domain/script-format.js'
 import { applyWriteback, validateWritebackBeforeApply } from '../domain/graph-writeback.js'
+import { readHeading } from '../domain/scene-split.js'
 import { GENRES, TONES, LENGTHS, CUTCOUNTS } from '../domain/prompts.js'
 import { planClient, graphClient, opsClient, runNavigateJob } from '../services/api.js'
 import { mountNavigatorChat, readHistory } from '../components/navigator-chat.js'
@@ -1096,6 +1097,15 @@ async function applyToBoard() {
     x.applied.warnings.push(...failures)
     renderExpand()
   }
+
+  /*
+   * 서랍이 읽는 사본도 자란 판으로 갈아 둡니다. 여기가 빠지면 그래프를 뽑을 때 담은
+   * 사본이 그대로 남아, 역기입을 다섯 번 해도 서랍의 수는 처음 뽑았을 때의 것입니다.
+   *
+   * flush 뒤에 담습니다. Neptune 이 사실이고 이것은 사본이므로, 사실이 어긋난 것을
+   * 알고 나서 담는 편이 맞습니다.
+   */
+  await keepGraph(after)
 }
 
 // ── 대본화 ───────────────────────────────────────────────────────────────────
@@ -1277,6 +1287,116 @@ async function keepScript(text) {
   }
 }
 
+/* ══ 그래프와 시놉시스를 프로젝트에 담습니다 ═══════ */
+
+/*
+ * ══ 서랍에서 그래프가 늘 「아직 없습니다」였던 까닭
+ *
+ * 그래프는 Neptune 에만 있었습니다. newStore 의 store.save() 와 역기입의 STORE.flush()
+ * 가 그쪽으로 흘려보냅니다. 그런데 프로젝트 서랍(pages/project.js)이 읽는 곳은
+ * DynamoDB 의 ASSET#<kind> 입니다. 두 저장소가 다릅니다. 그래서 그래프를 뽑아 판이 다
+ * 자란 뒤에도 서랍의 「관계 그래프」 줄은 비어 있었습니다. 대본은 keepScript 가 에셋에
+ * 담고 있었으므로 그 줄만 채워졌고, 그 대비가 「그래프는 저장이 안 되는 것인가」로
+ * 보였습니다.
+ *
+ * 여기서 노드·엣지를 에셋에도 한 벌 담습니다. Neptune 을 대신하는 것이 아니라 서랍이
+ * 읽을 사본입니다 — 카드의 lastWhat 이 op 로그의 사본인 것과 같은 자리입니다
+ * (services/projects.js 의 머리글). 사본이라서 어긋날 수 있고, 어긋나도 됩니다. 서랍은
+ * 「무엇이 얼마나 있나」를 말하고, 판을 열면 Neptune 이 사실을 말합니다.
+ *
+ * Neptune 이 없는 로컬 모드에서는 이 사본이 유일한 기록입니다. 그래서 GRAPH_NET 을
+ * 보지 않고 늘 담습니다 — 없을 때 담지 않으면 로컬에서 서랍이 계속 비어 보입니다.
+ */
+
+/**
+ * 그래프를 이 프로젝트의 에셋으로 담습니다. 실패는 삼키고 콘솔에만 남깁니다.
+ *
+ * 안내문을 띄우지 않습니다. keepScript 와 다른 판단이고, 이유는 사람이 방금 한 일이
+ * 다르다는 것입니다. 대본은 그 글이 결과물이라서 못 담았으면 「받아 두라」고 말할 것이
+ * 있습니다. 그래프는 판에 이미 그려져 있고 Neptune 에도 갔으며, 여기서 못 담은 것은
+ * 서랍의 요약 한 줄입니다. 그것 때문에 추출을 끝낸 화면에 경고를 세우면 사람은 그래프가
+ * 잘못 뽑힌 줄로 읽습니다.
+ *
+ * @param {{nodes: Array, edges: Array}} g - STORE.toJSON() 의 결과
+ */
+async function keepGraph(g) {
+  const nodes = g?.nodes || []
+  const edges = g?.edges || []
+  // 빈 판은 담지 않습니다. 담으면 서랍이 「노드 0 · 관계 0」을 「있다」로 그립니다
+  if (!nodes.length && !edges.length) return
+  // 리뷰 역할은 에셋을 쓰지 못합니다(infra/resolvers/putAsset.js). 왕복하지 않습니다
+  if (configured && !allowed('putAsset', myRole())) return
+  try {
+    /*
+     * 요약이 세는 것만 담습니다(domain/assets.js 의 SUM.graph 가 nodes·edges 의 길이를
+     * 봅니다). props 와 파생 엣지까지 통째로 넣으면 큰 판에서 한 항목이 400KB 를 넘고,
+     * 그때 saveAsset 이 거부합니다 — 서랍의 한 줄 때문에 그렇게까지 하지 않습니다.
+     *
+     * 노드는 id·kind·name 만, 엣지는 삼항만 남깁니다. 서랍이 이 이상 읽지 않고, 그래프의
+     * 사실은 Neptune 에 있습니다. 나중에 서랍이 그래프를 그리게 되면 그때 늘리면 됩니다.
+     */
+    await saveAsset({
+      boardId: BOARD,
+      kind: 'graph',
+      body: {
+        nodes: nodes.map((n) => ({ id: n.id, kind: n.kind, name: n.name })),
+        edges: edges.map((e) => ({ s: e.s, p: e.p, o: e.o })),
+      },
+      actor: session()?.id,
+    })
+  } catch (err) {
+    console.warn('[story-graph] 그래프를 프로젝트에 담지 못했습니다', err.message)
+  }
+}
+
+/**
+ * 그래프를 뽑는 데 쓴 글을 그 글에 맞는 칸에 담습니다.
+ *
+ * ══ 왜 이것이 필요한가
+ *
+ * 왼쪽 카드의 이름이 「대본 · 시놉시스」입니다. 시놉시스를 붙여넣고 그래프를 뽑는 것이
+ * 이 화면이 권하는 길인데, 그렇게 하면 서랍에서 그래프와 시놉시스 둘 다 「아직
+ * 없습니다」로 남았습니다. 시놉시스를 담는 곳이 보드 화면 하나뿐이었기 때문입니다
+ * (pages/board.js 의 keepSynopsis 가 state.board.scenario 를 옮깁니다). 이 화면에
+ * 넣은 글은 어느 에셋도 되지 못하고 textarea 값으로만 있다가 새로고침에 사라졌습니다.
+ *
+ * ══ 두 칸 중 하나에만 담습니다
+ *
+ * 씬 머리글이 하나라도 있으면 대본이고, 없으면 시놉시스입니다. 양쪽에 다 담으면 서랍의
+ * 두 줄이 같은 글을 다르게 이름 붙여 보여주고, 「시놉시스 열기」가 대본을 펼칩니다.
+ * 가르는 자리는 domain/scene-split.js 의 readHeading 입니다 — 씬 나누기가 쓰는 것과
+ * 같은 판단이어야 두 화면이 같은 글을 같은 것으로 봅니다.
+ *
+ * 시놉시스의 제목과 로그라인은 비워 둡니다. 붙여넣은 글에서 그것을 짚어내는 것은 모델이
+ * 할 일이고, 여기서 첫 줄을 제목으로 잘라 두면 첫 줄이 제목이 아닌 글에서 늘 틀립니다.
+ * 서랍의 요약은 「줄거리」 한 조각으로 섭니다(domain/assets.js 의 SUM.synopsis).
+ *
+ * ══ 이미 담긴 대본을 덮지 않습니다
+ *
+ * 대본 칸은 대본화(keepScript)도 씁니다. 컷에서 만든 정식 대본이 그쪽으로 들어갑니다.
+ * 붙여넣은 글이 대본이면 여기서도 같은 칸을 쓰는데, 그것이 맞습니다 — 사람이 방금 넣은
+ * 것이 이 프로젝트의 대본입니다. 순서를 뒤집을 자리는 없습니다. 추출은 사람이 글을
+ * 넣고 누르는 일이고, 대본화는 컷이 생긴 뒤의 일입니다.
+ *
+ * @param {string} text - 붙여넣은 글 (scriptToText 를 지난 것)
+ */
+async function keepSource(text) {
+  const t = String(text || '').trim()
+  if (!t) return
+  if (configured && !allowed('putAsset', myRole())) return
+  const script = t.split('\n').some((l) => readHeading(l))
+  try {
+    await saveAsset({
+      boardId: BOARD,
+      kind: script ? 'script' : 'synopsis',
+      body: script ? t : { title: '', logline: '', synopsis: t },
+      actor: session()?.id,
+    })
+  } catch (err) {
+    console.warn(`[story-graph] ${script ? '대본' : '시놉시스'}을 프로젝트에 담지 못했습니다`, err.message)
+  }
+}
+
 async function copyScript(text) {
   const note = $('scNote')
   try {
@@ -1337,6 +1457,23 @@ async function extract() {
     build(newStore(g))
     // 노드 수는 아래 mark 와 hint 가 이미 말합니다. 머리의 배지는 없앴습니다
     mark(`대본에서 노드 ${g.nodes.length}개 · 씨앗 ${SEEDS.length}개를 뽑았습니다`)
+    /*
+     * 서랍이 읽을 사본을 담습니다. 판(STORE)에서 꺼내는 이유는 planGraph 가 돌려준 g 와
+     * 저장소의 판이 다를 수 있다는 것입니다 — 정규화가 노드를 합치고 규칙이 파생 엣지를
+     * 얹습니다(graph-store.js 의 load · rebuild). 서랍에 적히는 수는 사람이 화면 위쪽
+     * 숫자에서 보는 것과 같아야 합니다.
+     *
+     * 판을 세운 뒤에 담습니다. 화면은 이미 그려져 있으므로 이 기다림이 사람을 막지
+     * 않고, 실패해도 판은 그대로입니다.
+     *
+     * 넣은 글도 같이 담습니다. 머리글이 있으면 대본 칸, 없으면 시놉시스 칸입니다
+     * (keepSource). 전에는 이 글이 어느 쪽도 되지 못하고 textarea 값으로만 있다가
+     * 새로고침에 사라졌습니다.
+     *
+     * 둘을 나란히 보냅니다. 서로를 기다릴 이유가 없고, 하나가 실패해도 나머지는
+     * 담깁니다(각 함수가 자기 실패를 삼킵니다).
+     */
+    await Promise.all([keepGraph(STORE.toJSON()), keepSource(text)])
     const bad = [...(g.warnings || []), ...(g.conflicts || []).map((c) => `${c.level}: ${c.msg}`)]
     hint.className = bad.length ? 'warn' : 'hint'
     hint.innerHTML = bad.length

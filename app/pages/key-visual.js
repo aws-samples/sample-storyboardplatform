@@ -630,6 +630,44 @@ async function keepKeyVisual() {
   }
 }
 
+/*
+ * 보드에 붙인 만큼 서랍의 콘티 줄을 올려 둡니다.
+ *
+ * 서랍(project.html)은 op 로그를 읽지 않고 ASSET#conti 한 칸만 봅니다. 그 칸을 쓰는
+ * 곳이 지금까지 보드 화면 하나뿐이었습니다(pages/board.js 의 keepConti). 그래서 여기서
+ * 키 비주얼을 다 만들어 붙여 놓고도, 보드 화면을 한 번도 열지 않으면 서랍의 콘티는
+ * 계속 「아직 없습니다」였습니다. 붙인 사람 입장에서는 보드에 컷이 서 있는데 서랍이
+ * 없다고 말하는 셈입니다.
+ *
+ * 세는 방식이 보드 쪽과 다릅니다. 보드는 판에 있는 컷을 통째로 세지만 이 화면은
+ * 자기가 방금 보낸 것만 압니다(state.panels 이 여기에는 없습니다). 그래서 담겨 있던
+ * 수에 이번에 붙인 수를 더합니다. 새로 쓰지 않는 이유는 컷이 서른 개인 판에 키 비주얼
+ * 세 장을 붙였을 때 서랍이 「컷 3개」로 줄어들기 때문입니다.
+ *
+ * 승인 수와 회차 수는 담겨 있던 값을 그대로 넘깁니다. 여기서 붙는 패널은 draft 이고
+ * 회차에 속하지 않으므로 둘 다 늘지 않습니다. 보드 화면을 열면 그쪽이 판을 통째로
+ * 다시 세어 정확한 값으로 갈아 둡니다. 이것은 그 전까지의 어림값입니다.
+ */
+async function keepConti(added) {
+  if (!added) return
+  if (!mayKeep()) { noteKeepDenied(); paint(); return }
+  const board = boardFromSearch()
+  try {
+    // 못 읽으면 loadAsset 이 null 을 줍니다. 그때는 이번에 붙인 것만이라도 담습니다
+    const prev = (await loadAsset(board, 'conti')) || {}
+    await saveAsset({
+      boardId: board, kind: 'conti', actor: S.me?.id,
+      body: {
+        cuts: (Number(prev.cuts) || 0) + added,
+        approved: Number(prev.approved) || 0,
+        eps: Number(prev.eps) || 0,
+      },
+    })
+  } catch (err) {
+    console.warn('[key-visual] 콘티 요약을 담지 못했습니다', err)
+  }
+}
+
 /* ══ 보드에 붙이기 · publishOp ════════════════════ */
 
 /*
@@ -729,6 +767,15 @@ async function postToBoard() {
   aimBoardLink(ops[0].panel.id)
   paint()
   say(`${ops.length}장을 보드에 붙였습니다`)
+  /*
+   * 붙인 다음에 담습니다. 붙이는 것이 이 화면의 일이고 서랍의 한 줄은 그 사본입니다.
+   * 앞에 두면 담기를 기다리는 동안 「붙였습니다」가 늦게 뜹니다.
+   *
+   * 예시로 만든 그림도 셉니다. 키 비주얼 목록(keepKeyVisual)에서는 예시를 빼지만, 이쪽은
+   * 보드에 실제로 선 컷의 수입니다. 예시 패널도 op 로 보드에 남아 보이므로 그것을 빼면
+   * 서랍의 수가 보드의 컷 수와 어긋납니다.
+   */
+  await keepConti(ops.length)
 }
 
 /* ══ 그리기 ════════════════════════════════════════ */

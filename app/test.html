@@ -3282,6 +3282,41 @@
   })())
 
   /*
+   * 여섯 종류 모두 「담는 자리」가 있어야 합니다.
+   *
+   * 서랍(project.html)은 ASSET#<kind> 여섯 칸만 읽습니다. 종류를 표에 적어 두고 그 칸에
+   * 쓰는 화면이 없으면, 서랍은 사람이 그 일을 다 해 놓은 뒤에도 「아직 없습니다」라고
+   * 말합니다. 실제로 세 칸이 그랬습니다 — 그래프는 Neptune 에만 갔고(story-graph.js),
+   * 붙여넣은 시놉시스는 textarea 값으로만 있었고, 콘티는 보드 화면을 한 번 열어야
+   * 채워졌습니다. 화면을 열지 않은 사람에게는 없는 일이 됩니다.
+   *
+   * 소스를 읽어 봅니다. 담기는 boot·확인창·네트워크를 지나야 실제로 불리는 길이라 여기서
+   * 실행할 수 없습니다. 그래서 「어느 화면이 이 칸에 쓰기로 적어 두었나」를 봅니다.
+   */
+  try {
+    const WRITERS = ['pages/board.js', 'pages/key-visual.js', 'pages/story-graph.js']
+    const srcs = await Promise.all(WRITERS.map(text))
+    // `kind: 'conti'` · `kind: script ? 'script' : 'synopsis'` 를 모두 집습니다
+    const written = new Set(srcs.flatMap((s) =>
+      [...s.matchAll(/kind:\s*(?:[^,\n]*\?\s*)?'([a-z]+)'(?:\s*:\s*'([a-z]+)')?/g)]
+        .flatMap((m) => [m[1], m[2]]).filter((k) => KIND_KEYS.includes(k))))
+    const orphan = KIND_KEYS.filter((k) => !written.has(k))
+    ok('여섯 종류 모두 담는 화면이 있다. 없으면 서랍이 늘 「아직 없습니다」다',
+      !orphan.length, `담는 곳이 없는 종류: ${orphan.join('·')}`)
+
+    const [, kv, sg] = srcs
+    /*
+     * 어느 화면이 어느 칸을 맡는지까지 못 박습니다. 위의 검사는 셋 중 아무 화면이 쓰면
+     * 통과하는데, 그러면 보드 화면만 콘티를 쓰던 예전 상태도 통과합니다.
+     */
+    ok('그래프를 뽑으면 그래프 칸에 사본을 담는다', /kind:\s*'graph'/.test(sg))
+    ok('붙여넣은 글이 시놉시스면 시놉시스 칸에 담는다', /'script'\s*:\s*'synopsis'/.test(sg))
+    ok('보드에 붙이면 키비주얼 화면도 콘티 칸을 올린다', /kind:\s*'conti'/.test(kv))
+  } catch (err) {
+    ok(`에셋을 담는 화면을 읽지 못했다 (${err.message})`, false)
+  }
+
+  /*
    * AWSJSON 봉투.
    *
    * 대본은 통째로 긴 「문자열」이다. 본문을 그대로 stringify 해서 보내면 돌아올 때
