@@ -29,7 +29,7 @@ import { ASSET_KINDS, summarize } from '../domain/assets.js'
 import { loadAssets } from '../services/assets.js'
 import { list as listProjects, remove as removeProject } from '../services/projects.js'
 import { allowed, denyReason, isDenied, roleName, JOB_ROLES } from '../domain/permissions.js'
-import { navHref, boardParam } from '../domain/routes.js'
+import { navHref, openHref, boardParam } from '../domain/routes.js'
 import { configured, session } from '../services/auth.js'
 import { showLogin, DEMO_USERS } from '../components/login-form.js'
 import { mountBrand } from '../components/brand.js'
@@ -88,10 +88,18 @@ const rows = () => ASSET_KINDS.map((k) => {
 })
 
 /*
- * 「열기」와 「만들기」가 같은 곳으로 갑니다. 그 에셋을 만드는 화면입니다. 말만 다른
+ * 「열기」와 「만들기」가 같은 화면으로 갑니다. 그 에셋을 만드는 화면입니다. 말만 다른
  * 이유는 사람이 하려는 일이 다르기 때문입니다. 있는 것은 보러 가고 없는 것은 만들러
  * 갑니다. 주소에 ?board= 를 늘 답니다. 빼면 그 화면이 「아직 프로젝트를 고르지 않았다」
  * 로 보고 문을 다시 세웁니다(components/project-picker.js 의 pickProject).
+ *
+ * 「열기」에는 무엇을 열라는 말까지 답니다(?open=<kind>). 이것이 없어서 「관계 그래프
+ * 열기」와 「시놉시스 열기」가 똑같이 스토리 디벨롭의 첫 화면으로 갔습니다. 그 화면은
+ * 판이 비어 있으면 「처음 오셨나요? 판이 비어 있습니다」를 세우므로, 여기서 그래프가
+ * 있는 것을 보고 누른 사람이 없다는 말을 만났습니다. 실제로 그랬습니다.
+ *
+ * 「만들기」에는 붙이지 않습니다. 담긴 것이 없는 줄이라 열 것이 없고, 그 화면의 평소
+ * 첫 모습이 바로 만드는 자리입니다.
  */
 function paintAssets(list) {
   byId('haveN').textContent = `${list.filter((r) => !r.none).length}/${list.length}`
@@ -104,7 +112,7 @@ function paintAssets(list) {
       <span class="as__name">${esc(kind.label)}</span>
       <span class="as__sum">${none ? '아직 없습니다' : esc(sum)}</span>
       <span class="as__who">${esc(who)}</span>
-      <a class="as__go" href="${esc(navHref(kind.step, BOARD))}">${
+      <a class="as__go" href="${esc(none ? navHref(kind.step, BOARD) : openHref(kind.step, BOARD, kind.key))}">${
         esc(none ? kind.make : '열기')}</a>
       ${peek(kind, got, none)}
     </div>`

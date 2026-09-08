@@ -49,7 +49,8 @@
   const { applyWriteback, validateWritebackBeforeApply } = await import(`./domain/graph-writeback.js?t=${Date.now()}`)
   const { edgeLabel, graphDelta, EDGE_LABELS_KR } = await import(`./components/graph-canvas.js?t=${Date.now()}`)
   const { parseField, runPlanJob, PLAN_TIMEOUT_MS } = await import(`./services/api.js?t=${Date.now()}`)
-  const { NAV_TABS, navTab, navHref, newHref, wantsNew, navTabFromSearch, drawerHref } = await import(`./domain/routes.js?t=${Date.now()}`)
+  const { NAV_TABS, navTab, navHref, newHref, wantsNew, navTabFromSearch, drawerHref,
+    openHref, openFromSearch } = await import(`./domain/routes.js?t=${Date.now()}`)
   const { mountNav } = await import(`./components/nav-tabs.js?t=${Date.now()}`)
   const { MARK, markOp, toEntry, entries, group } = await import(`./services/activity-log.js?t=${Date.now()}`)
   const { when, paintList, paintTable } = await import(`./components/history-list.js?t=${Date.now()}`)
@@ -1324,6 +1325,35 @@
   ok('이름에 든 특수문자가 주소를 깨지 않는다',
     drawerHref('p a&b') === '/project.html?board=p%20a%26b')
   ok('서랍은 탭이 아니다', !NAV_TABS.some((t) => t.href.includes('project.html')))
+
+  /*
+   * 서랍의 「열기」는 무엇을 열라는 말까지 들고 갑니다 (?open=<kind>).
+   *
+   * 이것이 없어서 「관계 그래프 열기」와 「시놉시스 열기」가 똑같이 스토리 디벨롭의 첫
+   * 화면으로 갔습니다. 그 화면은 판이 비어 있으면 「처음 오셨나요? 판이 비어 있습니다」를
+   * 세우므로, 서랍에서 그래프가 있는 것을 보고 누른 사람이 없다는 말을 만났습니다.
+   */
+  ok('열기는 어느 에셋을 열지도 들고 간다',
+    openHref('develop', 'p-a', 'graph') === '/story-graph.html?board=p-a&open=graph')
+  ok('이미 ?tab= 이 붙은 주소에도 & 로 이어진다',
+    openHref('script', 'p-a', 'script') === '/story-graph.html?tab=script&board=p-a&open=script')
+  ok('종류를 안 주면 navHref 와 같다. 「만들기」가 그 길이다',
+    openHref('develop', 'p-a') === navHref('develop', 'p-a'))
+  ok('보드가 없어도 종류는 붙는다', openHref('develop', null, 'graph') === '/story-graph.html?open=graph')
+
+  ok('받는 화면이 그 값을 읽는다', openFromSearch('?open=graph', KIND_KEYS) === 'graph'
+    && openFromSearch('?board=p-a&open=synopsis', KIND_KEYS) === 'synopsis')
+  /*
+   * 모르는 값은 무시합니다. 종류를 지운 뒤에 남은 링크나 사람이 손으로 고친 주소로
+   * 화면이 멈추지 않아야 합니다. 그때는 그 화면의 평소 첫 모습입니다.
+   */
+  ok('모르는 종류는 무시한다', openFromSearch('?open=없는것', KIND_KEYS) === null
+    && openFromSearch('?open=legacy', KIND_KEYS) === null)
+  ok('없으면 null 이다', openFromSearch('?board=p-a', KIND_KEYS) === null
+    && openFromSearch('', KIND_KEYS) === null && openFromSearch(undefined, KIND_KEYS) === null)
+  // 목록을 안 주면 모양만 봅니다. 이 파일이 에셋 표를 import 하지 않는 이유가 그것입니다
+  ok('목록을 주지 않으면 모양만 본다',
+    openFromSearch('?open=graph') === 'graph' && openFromSearch('?open=한글') === null)
 
   ok('탭 바는 내가 처리할 탭만 버튼으로, 나머지는 링크로 그린다', (() => {
     const mount = document.createElement('div')

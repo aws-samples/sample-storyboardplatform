@@ -30,7 +30,7 @@ import { createGraphView, graphDelta, KIND_COLOR, KIND_LABEL } from '../componen
 import { edgeKey } from '../domain/graph-schema.js'
 import { configured, session, login, setNewPassword, logout } from '../services/auth.js'
 import { DEMO_USERS } from '../components/login-form.js'
-import { NAV_TABS, navHref, navTabFromSearch, boardFromSearch } from '../domain/routes.js'
+import { NAV_TABS, navHref, navTabFromSearch, boardFromSearch, openFromSearch } from '../domain/routes.js'
 import { mountNav } from '../components/nav-tabs.js'
 import { mountBrand } from '../components/brand.js'
 import { entries, group, markOp } from '../services/activity-log.js'
@@ -43,6 +43,7 @@ import * as coach from '../components/coachmark.js'
 import { pickProject } from '../components/project-picker.js'
 import { touch as touchProject } from '../services/projects.js'
 import { saveAsset, loadAsset } from '../services/assets.js'
+import { KIND_KEYS } from '../domain/assets.js'
 import { allowed, denyReason, isDenied } from '../domain/permissions.js'
 import { confirmAsk } from '../components/confirm.js'
 
@@ -467,6 +468,57 @@ async function restoreScript() {
   if (!kept || SCRIPT.text) return
   SCRIPT.text = kept
   renderScriptPanel()
+}
+
+/*
+ * ══ 서랍의 「열기」를 받는 자리 (?open=<kind>)
+ *
+ * 서랍은 담긴 에셋을 줄마다 보여주고 「열기」를 답니다. 그 링크에 무엇을 열라는 말이
+ * 없어서 세 줄(시놉시스·대본·관계 그래프)이 모두 이 화면의 첫 모습으로 왔습니다. 방금
+ * 서랍에서 시놉시스가 있는 것을 보고 누른 사람이 빈 입력 칸을 만났습니다.
+ *
+ * 그래프는 여기서 따로 할 일이 없습니다. 판 자체가 그래프이고 start() 가 이미 세웁니다
+ * (Neptune 이 빈손이면 graphFromDrawer 가 사본으로 채웁니다). 대본은 대본화 칸이 그
+ * 글을 들고 있어서 그 탭을 열면 됩니다(restoreScript 가 읽어 옵니다).
+ *
+ * 시놉시스는 담아 둔 글을 입력 칸에 다시 걸어 줍니다. 그 글이 이 화면에 들어와야 「그래프
+ * 추출」을 다시 누를 수 있고, 무엇보다 서랍에서 본 것과 같은 글을 눈으로 확인할 수
+ * 있습니다. 담긴 글을 덮지는 않습니다 — 사람이 이미 무언가 적어 두었으면 그것이 새것입니다.
+ */
+const OPEN = openFromSearch(location.search, KIND_KEYS)
+
+/*
+ * 글을 보러 온 것인지. 시놉시스와 대본이 그렇습니다.
+ *
+ * 이때는 판이 비어 있어도 「처음 오셨나요?」를 세우지 않습니다. 그 판은 입력 카드 위에
+ * 앉으므로, 방금 걸어 준 시놉시스를 그것이 가립니다. 서랍에서 「시놉시스 열기」를 누른
+ * 사람에게 「판이 비어 있습니다」를 내미는 것은 묻지 않은 것에 답하는 셈입니다.
+ *
+ * 그래프(?open=graph)는 여기 넣지 않습니다. 사본까지 봤는데도 판이 비어 있다면 정말로
+ * 없는 것이고, 그때는 그 판이 할 말이 맞습니다.
+ */
+const OPEN_TEXT = OPEN === 'synopsis' || OPEN === 'script'
+
+async function openAsset() {
+  if (!OPEN) return
+  if (OPEN === 'script') { openTab('script'); return }
+  if (OPEN !== 'synopsis') return
+
+  const box = $('scriptIn')
+  if (!box || box.value.trim()) return
+  const kept = await loadAsset(BOARD, 'synopsis')
+  // 서랍이 보여주는 것과 같은 조각을 씁니다(pages/project.js 의 peek)
+  const text = [kept?.logline, kept?.synopsis].filter(Boolean).join('\n\n').trim()
+  if (!text || box.value.trim()) return
+  box.value = text
+  // 입력 카드가 접혀 있으면 펼칩니다. 글을 걸어 두고 안 보이면 아무 일도 안 한 것입니다
+  if ($('inputCard')?.hidden) $('inputToggle')?.click()
+  const hint = $('inputHint')
+  if (hint) {
+    hint.className = 'hint'
+    hint.textContent = '프로젝트에 담아 둔 시놉시스입니다. 「그래프 추출」로 다시 뽑거나 고쳐 쓰셔도 됩니다.'
+  }
+  box.focus()
 }
 
 /** 지금 보고 있는 스토리의 캐시 키. 씨앗을 안 골랐으면 자유 입력 자리다 */
@@ -1332,15 +1384,20 @@ async function keepGraph(g) {
      * 봅니다). props 와 파생 엣지까지 통째로 넣으면 큰 판에서 한 항목이 400KB 를 넘고,
      * 그때 saveAsset 이 거부합니다 — 서랍의 한 줄 때문에 그렇게까지 하지 않습니다.
      *
-     * 노드는 id·kind·name 만, 엣지는 삼항만 남깁니다. 서랍이 이 이상 읽지 않고, 그래프의
-     * 사실은 Neptune 에 있습니다. 나중에 서랍이 그래프를 그리게 되면 그때 늘리면 됩니다.
+     * 노드는 id·kind·name 만, 엣지는 삼항과 asserted 만 남깁니다. 서랍이 이 이상 읽지
+     * 않고, 그래프의 사실은 Neptune 에 있습니다.
+     *
+     * asserted 를 남기는 것은 이 사본으로 판을 다시 세울 수 있기 때문입니다
+     * (graphFromDrawer). 그 값을 빼면 파생 엣지가 명시 엣지로 들어와, 판을 세울 때
+     * 「파생 전용 술어라 asserted:false 로 내립니다」 경고가 그 수만큼 섭니다. 값은
+     * 맞게 떨어지지만 사람이 열지도 않은 판에 경고가 붙어 있는 셈입니다.
      */
     await saveAsset({
       boardId: BOARD,
       kind: 'graph',
       body: {
         nodes: nodes.map((n) => ({ id: n.id, kind: n.kind, name: n.name })),
-        edges: edges.map((e) => ({ s: e.s, p: e.p, o: e.o })),
+        edges: edges.map((e) => ({ s: e.s, p: e.p, o: e.o, asserted: e.asserted !== false })),
       },
       actor: session()?.id,
     })
@@ -1547,7 +1604,7 @@ function syncWelcome() {
   const slot = $('onbSlot')
   if (!slot) return
   const empty = !STORE || !STORE.stats().nodes
-  if (empty && !guiding() && !demoActive()) paintWelcome()
+  if (empty && !guiding() && !demoActive() && !OPEN_TEXT) paintWelcome()
   else slot.hidden = true
 }
 
@@ -1774,11 +1831,42 @@ async function boot() {
   }
 }
 
+/*
+ * ══ 서랍이 「그래프 열기」로 보낸 사람에게 그래프를 보여 줍니다
+ *
+ * 그래프의 사실은 Neptune 입니다. 그런데 서랍(project.html)이 읽는 것은 DynamoDB 에 담긴
+ * 사본이고(keepGraph), 두 곳이 어긋날 수 있습니다. 어긋나는 자리가 실제로 둘입니다.
+ *
+ *   hasGraph 가 꺼진 배포   GRAPH_NET 이 null 이라 Neptune 을 아예 읽지 않습니다.
+ *                          사본만 있고, 그것이 이 판의 유일한 기록입니다.
+ *   Neptune 이 비었을 때   읽기가 실패했거나 저장이 못 붙은 판입니다.
+ *
+ * 두 경우 모두 서랍은 「노드 12 · 관계 30」을 보여주는데 이 화면은 「판이 비어 있습니다」를
+ * 세웠습니다. 그래서 Neptune 이 빈손일 때 사본으로 판을 채웁니다.
+ *
+ * Neptune 을 앞세우는 순서는 그대로입니다. 사본은 요약용이라 props 와 파생 엣지가 없고
+ * (keepGraph 가 id·kind·name 과 삼항만 남깁니다), Neptune 에 판이 있으면 그쪽이 더
+ * 자세합니다. 사본은 그것이 없을 때만 씁니다.
+ *
+ * 사본으로 세운 판은 저장하지 않습니다(createGraphStore 를 쓰고 newStore 를 쓰지 않는
+ * 이유입니다). 사본을 사실로 되돌려 쓰면 props 를 잃은 판이 Neptune 을 덮어씁니다.
+ * 사람이 여기서 추출이나 역기입을 하면 그때 정식으로 저장됩니다.
+ */
+async function graphFromDrawer() {
+  const kept = await loadAsset(BOARD, 'graph')
+  const nodes = Array.isArray(kept?.nodes) ? kept.nodes : []
+  const edges = Array.isArray(kept?.edges) ? kept.edges : []
+  if (!nodes.length) return null
+  console.info('[story-graph] Neptune 이 비어 서랍의 사본으로 판을 세웁니다. 노드 %d', nodes.length)
+  return createGraphStore({ nodes, edges }, { net: GRAPH_NET, projectId: BOARD })
+}
+
 /**
  * 첫 로드.
  *
  * Neptune 에 남아 있는 그래프가 있으면 그것으로 시작한다. 새로고침해도 지난번에
- * 자란 판이 그대로 나온다. 저장된 것이 없으면 **비운 채로** 시작한다.
+ * 자란 판이 그대로 나온다. Neptune 이 빈손이면 서랍의 사본을 본다. 그것도 없으면
+ * **비운 채로** 시작한다.
  *
  * 예전에는 여기서 목데이터를 얹었다. 그러면 처음 온 사람이 자기가 만들지 않은 케데헌
  * 그래프 앞에 앉게 되고, 무엇이 예시이고 무엇이 자기 것인지 가를 수 없었다. 이제
@@ -1802,8 +1890,18 @@ async function start() {
   }
 
   if (!stored || !stored.stats().nodes) {
+    /*
+     * Neptune 이 빈손입니다. 서랍의 사본을 봅니다. 이 왕복을 늘 하지 않고 여기서만
+     * 하는 이유는, Neptune 에 판이 있으면 사본은 볼 일이 없다는 것입니다.
+     */
+    let copy = null
+    try {
+      copy = await graphFromDrawer()
+    } catch (err) {
+      console.warn('[story-graph] 서랍의 그래프 사본도 읽지 못했다', err.message)
+    }
     // 빈 저장소로 판을 세운다. STORE 가 null 이면 renderNetwork·renderSeeds 가 터진다
-    build(createGraphStore({ nodes: [], edges: [] }, { projectId: BOARD }))
+    build(copy || createGraphStore({ nodes: [], edges: [] }, { projectId: BOARD }))
     return
   }
   build(stored)
@@ -1989,6 +2087,11 @@ if (configured && !session()) {
      * 읽힌다. 실제로 그랬다.
      */
     if (demoActive()) { runExample(); return }
+    /*
+     * 서랍의 「열기」로 온 것이면 그것을 먼저 펼칩니다. 코치마크보다 앞입니다 — 무엇을
+     * 보러 온 사람인지가 이미 주소에 적혀 있는데 그 위에 막을 덮을 이유가 없습니다.
+     */
+    if (OPEN) { openAsset(); return }
     /*
      * 판이 비어 있으면 코치마크를 열지 않는다. 그때는 화면에 「처음 오셨나요?」 판이
      * 있고 그 판이 두 갈래를 이미 말해 준다. 막을 덮어 그것을 가릴 이유가 없다.
