@@ -683,6 +683,53 @@ const VID_RE = new RegExp(`^(?:${VID_SRC})$`)
 /** 판이 받아 주는 바깥 영상 주소인지. 주소를 판에 넣기 전에 이것으로 걸러 주십시오 */
 export const isVideoSrc = (s) => VID_RE.test(String(s || ''))
 
+/*
+ * ══ 자산 — 승인된 컷에서 떼어 낸 인물·배경·상품 그림
+ *
+ * 컷 하나가 승인되면 그 그림은 「이 얼굴, 이 장소, 이 물건으로 간다」는 결정입니다. 그런데
+ * 그 결정이 컷 한 장에 묶여 있으면 다음 컷을 만들 때 다시 쓸 수 없습니다 — 그 컷을 통째로
+ * 기반 이미지로 넣으면 구도까지 따라옵니다. 그래서 승인 직후 그 그림에서 인물마다 한 장,
+ * 배경 한 장, 상품 한 장을 klein 으로 따로 그려 내어 자산으로 둡니다(pages/board.js 의
+ * extractAssets). 다음 컷은 그 자산들을 참조 이미지로 여러 장 받아 새 구도를 그립니다.
+ *
+ * 여기는 「무엇을 뽑을지」만 정합니다. 그림을 부르는 것은 화면이고, 저장은 op(asset.add)입니다.
+ */
+export const ASSET_TYPES = { char: '인물', bg: '배경', prop: '상품' }
+
+/**
+ * 승인된 컷 하나에서 뽑을 자산 목록. 인물은 컷에 붙인 등장 인물마다 하나, 배경·상품은 하나씩.
+ *
+ * refKind 는 server.py 의 ISOLATE 열쇠와 같아야 합니다 — 서버는 그것으로 「이 인물만」
+ * 「사람 없는 이 장소만」 「이 물건만」 앞말을 고릅니다. kind 는 나오는 그림의 크기입니다:
+ * 배경은 컷과 같은 가로(cut), 인물·상품은 정방형(asset)입니다.
+ *
+ * @param {object} panel - 컷. 인물 구도(charId)면 빈 배열
+ * @param {object} chars - state.chars
+ * @returns {Array<{type: string, name: string, kind: string, refKind: string, prompt: string, charId?: string}>}
+ */
+export function assetJobs(panel, chars = {}) {
+  if (!panel || panel.charId) return []
+  const jobs = []
+  for (const id of panel.cast || []) {
+    const c = chars[id]
+    if (!c) continue
+    jobs.push({
+      type: 'char', charId: id, name: c.name || '인물', kind: 'asset', refKind: 'asset_char',
+      prompt: [c.name, c.brief].filter(Boolean).join(' - '),
+    })
+  }
+  const where = sceneMeta(panel.scene).where || String(panel.scene || '').trim()
+  jobs.push({
+    type: 'bg', name: where ? `${where} 배경` : '배경', kind: 'cut', refKind: 'asset_bg',
+    prompt: [where, panel.action].filter(Boolean).join(', '),
+  })
+  jobs.push({
+    type: 'prop', name: where ? `${where} 상품` : '상품', kind: 'asset', refKind: 'asset_prop',
+    prompt: String(panel.action || ''),
+  })
+  return jobs
+}
+
 const RE = {
   id: /^[A-Za-z0-9._:#-]{1,64}$/,
   color: /^#[0-9A-Fa-f]{3,8}$/,
@@ -693,14 +740,14 @@ const RE = {
 
 const SHAPE = {
   id: RE.id, panelId: RE.id, charId: RE.id, parentId: RE.id, refPanelId: RE.id,
-  verId: RE.id,
+  verId: RE.id, assetId: RE.id, fromPanelId: RE.id,
   actor: RE.id, author: RE.id, assignee: RE.id, generating: RE.id, to: RE.id,
   epId: RE.id, fromEp: RE.id, centerChar: RE.id,
   userId: RE.id,
   at: RE.id, view: RE.id,
   color: RE.color, src: RE.src,
 }
-const NUMS = new Set(['x', 'y', 'secs', 'ts', 'onVersion', 'current', 'w', 'h', 'genAt', 'epNo'])
+const NUMS = new Set(['x', 'y', 'secs', 'ts', 'onVersion', 'current', 'w', 'h', 'genAt', 'epNo', 'fromN'])
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0)
 

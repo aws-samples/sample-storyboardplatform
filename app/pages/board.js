@@ -4,7 +4,7 @@ import {
   FEEDBACK_TAGS, NEEDS, canTransition, canEditContent, splitScenario, splitScript,
   scenarioFromScript, mergeField, handBackTo, notifFor, sceneGroups, sceneKey, sceneMeta,
   clock, startTimes, scrub, debounceBy, epLabel, lostEdit, isActionable, changedSince,
-  workload, liveVer, deadVer, tally, actorPace, CUT_MAX,
+  workload, liveVer, deadVer, tally, actorPace, CUT_MAX, ASSET_TYPES, assetJobs,
 } from '../domain/panels.js'
 import { confirmAsk } from '../components/confirm.js'
 import { josa } from '../lib/josa.js'
@@ -82,6 +82,8 @@ const emptyState = () => ({
   board: { title: '스토리보드', scenario: '', _ts: {} },
   eps: {},
   chars: {},
+  // 승인된 컷에서 떼어 낸 인물·배경·상품 그림 (asset.add). 컷 생성의 참조가 됩니다
+  assets: {},
   panels: {},
   members: {},
   // 권한 손질. 칸 하나가 한 줄이라 두 사람이 같이 만져도 서로를 덮지 않는다 (perm.set)
@@ -544,6 +546,28 @@ function applyOp(op) {
       break
     }
 
+    /*
+     * 자산. 인물과 같은 모양의 세 op 입니다. 옛 판에는 assets 칸이 없어서 (state.assets ??= {})
+     * 로 받습니다 — 저장된 판을 load 가 되살릴 때도 같은 일을 합니다.
+     */
+    case 'asset.add':
+      state.assets ??= {}
+      if (!op.asset?.id || state.assets[op.asset.id]) { landed = false; break }
+      state.assets[op.asset.id] = { ...op.asset, _ts: {} }
+      break
+
+    case 'asset.patch': {
+      const a = state.assets?.[op.assetId]
+      if (!a) { landed = false; break }
+      for (const [k, v] of Object.entries(op.fields)) mergeField(a, k, v, op.ts)
+      break
+    }
+
+    case 'asset.remove':
+      if (!state.assets?.[op.assetId]) { landed = false; break }
+      delete state.assets[op.assetId]
+      break
+
     case 'panel.add':
       if (state.panels[op.panel.id]) { landed = false; break }
       state.panels[op.panel.id] = { ...op.panel, _ts: {} }
@@ -720,6 +744,7 @@ function load() {
       if (!s.chars || !s.notifs) return false
       s.members ||= {}
       s.eps ||= {}
+      s.assets ||= {}
       state = s
       return true
     }
@@ -1086,6 +1111,12 @@ function transition(panel, action, note) {
   }
   emit({ kind: 'panel.status', panelId: panel.id, from: panel.status, to: check.to, assignee })
   /*
+   * 승인은 「이 그림으로 간다」는 결정입니다. 그 자리에서 그림 속 인물·배경·상품을 자산으로
+   * 떼어 둡니다(extractAssets). 기다리지 않습니다 — 상태는 이미 바뀌었고, 뽑기는 GPU 가
+   * 몇 십 초를 쓰는 뒷일입니다. 진행과 결과는 컷 상세의 「자산」칸이 보여줍니다.
+   */
+  if (action === 'approve') extractAssets(state.panels[panel.id], { auto: true })
+  /*
    * 됐다는 말을 한 줄 띄웁니다. 세 부르는 자리(단추·키보드·메모와 함께)가 다 여기를 지나므로
    * 이 자리에 두면 한 곳입니다.
    *
@@ -1160,9 +1191,33 @@ const optsFor = (panel) => {
    * 변형 정도는 '새로 그리기'로 둡니다. 얼굴이든 씬이든 물려받을 것은 룩이지 구도가
    * 아닙니다. 구도까지 물려받으면 여덟 컷이 다 같은 그림이 됩니다.
    */
-  if (!o) genOpts.set(panel.id, (o = { ref: null, strength: autoRef(panel) === 'none' ? 0.85 : 0.95, prompt: null }))
+  if (!o) genOpts.set(panel.id, (o = { ref: null, assets: null, strength: autoRef(panel) === 'none' ? 0.85 : 0.95, prompt: null }))
   return o
 }
+
+/*
+ * 아무것도 고르지 않았을 때의 참조 자산. 컷에 붙인 인물의 자산과, 같은 씬의 다른 컷에서
+ * 뽑은 배경입니다. 상품은 넣지 않습니다 — 이 컷에 그 물건이 나오는지는 사람만 압니다.
+ * autoRef 와 같은 이유로 값으로 박아 두지 않고 쓸 때마다 다시 셉니다.
+ */
+function autoAssets(panel) {
+  if (panel.charId) return []
+  const out = []
+  for (const id of panel.cast || []) {
+    const a = assetList().filter((x) => x.type === 'char' && x.charId === id && assetSrc(x)).at(-1)
+    if (a) out.push(a.id)
+  }
+  const k = sceneKey(panel.scene)
+  if (k) {
+    const bg = assetList().filter((x) => x.type === 'bg' && assetSrc(x) && x.fromPanelId !== panel.id
+      && sceneKey(state.panels[x.fromPanelId]?.scene) === k).at(-1)
+    if (bg) out.push(bg.id)
+  }
+  return out
+}
+
+/** 이 컷이 참조로 보낼 자산 id. 지워진 자산은 뺍니다 */
+const assetIdsOf = (panel) => (optsFor(panel).assets ?? autoAssets(panel)).filter((id) => assetSrc(state.assets?.[id]))
 
 /*
  * 아무것도 고르지 않았을 때의 기반 이미지. ref 를 null 로 두고 쓸 때마다 다시 셈합니다.
@@ -1177,7 +1232,11 @@ function autoRef(panel) {
 }
 
 /** 지금 이 컷의 기반 이미지 키. 고른 것이 없으면 기본값입니다 */
-const refKeyOf = (panel) => optsFor(panel).ref ?? autoRef(panel)
+/*
+ * 고른 기반 이미지. 자산이 들어가는 컷은 기본 기반 이미지를 잡지 않습니다 — 인물 자산이
+ * 얼굴을 대신하는데 얼굴 칩까지 자동으로 잡으면 같은 사람이 두 번 들어갑니다
+ */
+const refKeyOf = (panel) => optsFor(panel).ref ?? (assetIdsOf(panel).length ? 'none' : autoRef(panel))
 
 const morph = (v) => (v < 0.8 ? '선 그대로' : v < 0.9 ? '구도 유지' : '새로 그리기')
 
@@ -1350,13 +1409,20 @@ async function generate(panel, again = false) {
     // 얼굴 여럿을 고른 컷은 여기서 한 장으로 붙입니다. 그 밖은 고른 그림 하나입니다
     const src = choice.srcs ? await faceSheet(choice.srcs) : choice.src
     const init = choice.key === 'none' ? null : await asInit(src)
+    /*
+     * 참조 자산. 고른 것이 있으면 그 그림들이 앞에 가고 기반 이미지는 뒤에 한 장 붙습니다
+     * (server.py 의 refs_of). 자산이 있을 때의 앞말은 「자산들로 새 구도」(ASSETS)입니다.
+     */
+    const assetIds = assetIdsOf(panel)
+    const refs = assetIds.length ? await Promise.all(assetIds.map((id) => asInit(assetSrc(state.assets[id])))) : null
     const body = {
       prompt,
       kind: panel.charId ? 'pose' : 'cut',
-      model: pickedModel,
+      model: modelFor(!!(init || refs)),
       seed: ch?.seedNo ?? null,
       init,
-      refKind: init ? refKindOf(choice) : null,
+      refs,
+      refKind: refs ? 'assets' : init ? refKindOf(choice) : null,
       strength: o.strength,
     }
     const r = isConn(pickedModel) ? await conn.gen(body) : await askGpu(body)
@@ -1365,21 +1431,23 @@ async function generate(panel, again = false) {
       version: {
         n: (panel.versions?.length || 0) + 1,
         src: r.url, source: init ? 'sketch' : 'ai', author: me.id, ts: now(), prompt,
-        gen: { model: r.model, seed: r.seed, ms: r.ms, ref: choice.key, strength: init ? o.strength : null },
+        gen: { model: r.model, seed: r.seed, ms: r.ms, ref: refs ? 'assets' : choice.key, strength: init ? o.strength : null },
         refFrom: choice.from ? { panelId: choice.from.panelId, n: choice.from.n, pose: choice.from.pose } : null,
+        ...(refs ? { assets: assetIds } : {}),
       },
     })
   } catch (err) {
     // 모델을 올리는 중이라 503 이면, 사유를 적어 두고 준비될 때까지 기다린 뒤 한 번만 다시.
     // 영상 일감 때문의 503 이면 기다리지 않습니다(worthWait) — 사유를 그대로 보여줍니다
-    if (err.status === 503 && !again && !isConn(pickedModel)
-        && worthWait(await genHealth(), pickedModel)) {
+    const want = modelFor(refKeyOf(panel) !== 'none' || assetIdsOf(panel).length > 0)
+    if (err.status === 503 && !again && !isConn(want)
+        && worthWait(await genHealth(), want)) {
       emit({
         kind: 'panel.patch', panelId: panel.id,
         fields: { generating: me.id, genAt: now(), genError: `${err.message} 준비되면 자동으로 다시 만듭니다.` },
       })
       pollGpu()
-      if (await waitModel(pickedModel)) return generate(panel, true)
+      if (await waitModel(want)) return generate(panel, true)
     }
     emit({ kind: 'panel.patch', panelId: panel.id, fields: { generating: false, genError: err.message } })
     pollGpu()
@@ -1533,6 +1601,161 @@ async function animate(panel) {
     clipWork.delete(panel.id)
     emit({ kind: 'panel.patch', panelId: panel.id, fields: { generating: false, genError: err.message } })
   }
+}
+
+/* ══ 자산 — 승인된 컷에서 인물·배경·상품을 떼어 둡니다 ═══════════════════════════════
+ *
+ * 무엇을 뽑는지는 domain/panels.js 의 assetJobs 가 정하고, 어떻게 그리는지는 server.py 의
+ * ISOLATE 가 정합니다. 여기는 그 둘을 이어 부르고 결과를 op(asset.add)로 남기는 자리입니다.
+ */
+
+const assetWork = new Map()   // panelId → 진행 한 줄. 이 브라우저에서 뽑는 것만 압니다
+const assetList = () => Object.values(state.assets || {}).sort((a, b) => (a.ts || 0) - (b.ts || 0))
+const assetsFrom = (panelId) => assetList().filter((a) => a.fromPanelId === panelId)
+const mayExtract = () => allowed('extract', roleOf(me.id))
+/** 참조로 쓸 수 있는 그림. 영상은 참조가 못 됩니다(faceOf 와 같은 이유) */
+const assetSrc = (a) => (a?.src && !isVideoSrc(a.src) ? a.src : null)
+
+/** 이 컷에서 자산을 뽑을 수 있는지. 못 하면 그 이유 한 줄입니다 */
+function whyNotExtract(panel) {
+  if (!canGen) return '이 배포에는 생성 서버가 없습니다'
+  if (panel.charId) return '인물 구도에서는 뽑지 않습니다. 인물은 기준 이미지가 그 역할입니다'
+  if (panel.status !== 'approved') {
+    return `${STATUS[panel.status].label} 상태입니다. 감독이 승인하면 그 그림에서 뽑습니다`
+  }
+  if (!stillOf(panel)) return '먼저 이미지가 있어야 합니다'
+  if (!mayExtract()) return denyReason('extract', roleOf(me.id))
+  if (assetWork.has(panel.id)) return '이미 뽑고 있습니다'
+  if (genBy(panel)) return '이 컷을 만들고 있습니다. 끝나면 눌러주세요'
+  return ''
+}
+
+/*
+ * 그림을 조건으로 받는 모델. 자산 뽑기는 「이 그림 속 이것만」이라 참조를 조건으로 받아야
+ * 합니다. img2img 갈래(chroma·sd3)는 그림을 지우고 다시 그려서 다른 사람이 나옵니다.
+ * 화면이 고른 모델과 상관없이 이것으로 뽑습니다. 목록에 없으면 서버 기본(klein)에 맡깁니다.
+ */
+const keepModelId = () => gpuModels.find((m) => m.strength === false && m.init !== false)?.id ?? null
+
+/*
+ * 이 요청을 실제로 그릴 모델. 고른 모델이 그림을 받지 않으면(Krea 2 Turbo — /health 의
+ * init:false) 참조가 있는 요청은 조건으로 받는 모델(klein)로 보냅니다. 그렇지 않으면 참조를
+ * 골라 놓고도 글만 보고 그린 그림이 나와, 참조가 고장난 것처럼 보입니다.
+ */
+function modelFor(hasRef) {
+  const m = modelOf(pickedModel)
+  if (hasRef && m && m.init === false && !isConn(m.id)) return keepModelId() ?? pickedModel
+  return pickedModel
+}
+
+/** 503 이면 모델이 올라올 때까지 한 번 기다린 뒤 다시 보냅니다. 그 밖은 그대로 던집니다 */
+async function askGpuPatient(body, tick) {
+  try {
+    return await askGpu(body)
+  } catch (err) {
+    if (err.status !== 503 || !worthWait(await genHealth(), body.model)) throw err
+    tick(`${err.message} 준비되면 이어서 뽑습니다.`)
+    pollGpu()
+    if (!await waitModel(body.model)) throw err
+    return askGpu(body)
+  }
+}
+
+/**
+ * 승인된 컷 한 장에서 인물(출연자마다)·배경·상품을 따로 그려 자산으로 둡니다.
+ *
+ * 같은 컷에서 같은 것을 다시 뽑으면 그 자산의 그림을 갈아 끼웁니다(asset.patch). 자산이
+ * 두 배로 늘지 않고, 그것을 참조로 고른 컷도 다음 생성부터 새 그림을 받습니다.
+ *
+ * @param {object} panel
+ * @param {{auto?: boolean}} [o] - auto 는 승인 직후 자동으로 온 것. 못 할 때 말없이 돌아갑니다
+ */
+async function extractAssets(panel, { auto = false } = {}) {
+  const why = whyNotExtract(panel)
+  if (why) { if (!auto) notice(why); return }
+  const jobs = assetJobs(panel, state.chars)
+  const tick = (t) => { assetWork.set(panel.id, t); renderDetail() }
+  tick('승인된 그림을 읽습니다…')
+  // 그림 생성과 같은 칸(generating)입니다. 남의 화면에 「○○ 생성 중」으로 보여 같은 GPU 를 겹쳐 부르지 않습니다
+  emit({ kind: 'panel.patch', panelId: panel.id, fields: { generating: me.id, genAt: now(), genError: null } })
+  const fromN = (liveVer(panel)?.i ?? 0) + 1
+  const model = keepModelId()
+  const failed = []
+  let made = 0
+  try {
+    const init = await asInit(stillOf(panel))
+    for (const [i, j] of jobs.entries()) {
+      tick(`${ASSET_TYPES[j.type]} · ${j.name} (${i + 1}/${jobs.length})…`)
+      try {
+        const r = await askGpuPatient(
+          { prompt: j.prompt, kind: j.kind, model, refs: [init], refKind: j.refKind, strength: 0.95 }, tick)
+        const gen = { model: r.model, seed: r.seed ?? null, ms: r.ms ?? null }
+        const prev = assetsFrom(panel.id).find((a) => a.type === j.type && (a.charId ?? null) === (j.charId ?? null))
+        if (prev) {
+          emit({ kind: 'asset.patch', assetId: prev.id, fields: { src: r.url, fromN, gen, ts: now() } })
+        } else {
+          emit({
+            kind: 'asset.add',
+            asset: {
+              id: uid(), type: j.type, name: j.name, charId: j.charId ?? null, src: r.url,
+              fromPanelId: panel.id, fromN, author: me.id, ts: now(), gen,
+            },
+          })
+        }
+        made += 1
+      } catch (err) {
+        failed.push(`${j.name}: ${err.message}`)
+        // 서버가 꺼졌거나 권한이 없으면 나머지도 같은 사유입니다. 셋을 다 기다리게 하지 않습니다
+        if ([502, 503, 401, 403].includes(err.status)) break
+      }
+    }
+  } catch (err) {
+    failed.push(err.message)
+  }
+  assetWork.delete(panel.id)
+  emit({
+    kind: 'panel.patch', panelId: panel.id,
+    fields: { generating: false, genError: failed.length ? `자산 뽑기 · ${failed[0]}` : null },
+  })
+  if (made) announce(`${labelOf(panel)} · 자산 ${made}개를 뽑았습니다.`)
+  if (failed.length) notice(`${labelOf(panel)} · 자산 ${failed.length}개를 못 뽑았습니다. ${failed[0]}`)
+}
+
+/** 자산 카드 한 장. pick 이면 참조로 고르는 단추, 아니면 이름을 고치고 지울 수 있는 칸입니다 */
+function assetCard(a, { pick = null, edit = false } = {}) {
+  const src = assetSrc(a)
+  const type = esc(ASSET_TYPES[a.type] || a.type || '')
+  const img = src ? `<img src="${src}" alt="" loading="lazy">` : '<span class="asset__none mono">그림 없음</span>'
+  if (pick !== null) {
+    return `<button type="button" class="asset asset--pick" data-asset="${a.id}" data-on="${pick ? 1 : 0}"
+      aria-pressed="${pick ? 'true' : 'false'}" title="${type} · ${esc(a.name || '')}${pick ? ' · 참조에서 뺍니다' : ' · 참조에 넣습니다'}">
+      ${img}<span class="asset__cap"><b class="mono">${type}</b>${esc(a.name || '')}</span></button>`
+  }
+  return `<figure class="asset asset--mine" data-type="${esc(a.type || '')}">
+    ${img}
+    <figcaption class="asset__cap"><b class="mono">${type}</b>${edit ? '' : esc(a.name || '')}</figcaption>
+    ${edit ? `<input class="asset__name" data-aname="${a.id}" value="${esc(a.name || '')}" aria-label="자산 이름" maxlength="40">
+    <div class="asset__foot"><button type="button" class="mini" data-arm="${a.id}">지우기</button></div>` : ''}
+  </figure>`
+}
+
+/*
+ * 왼쪽 기둥의 자산 목록. 누르면 그것을 뽑은 컷으로 갑니다 — 이름을 고치고 지우는 것은 그
+ * 컷의 상세에서 합니다. 생성 서버도 없고 자산도 없는 판(로컬 모드)에는 칸을 내지 않습니다.
+ */
+function renderAssets() {
+  const list = assetList()
+  byId('assetBox').hidden = !list.length && !canGen
+  byId('assetCount').textContent = list.length || ''
+  setHtml(byId('assetNav'), list.length ? [...list].reverse().map((a) => {
+    const from = state.panels[a.fromPanelId]
+    const src = assetSrc(a)
+    return `<li><button type="button" class="asset asset--nav" data-goto="${a.fromPanelId}" data-type="${esc(a.type || '')}"
+      title="${esc(from ? `${labelOf(from)}에서 뽑았습니다. 누르면 그 컷으로 갑니다` : '뽑은 컷이 지워졌습니다')}">
+      ${src ? `<img src="${src}" alt="" loading="lazy">` : ''}
+      <span class="asset__cap"><b class="mono">${esc(ASSET_TYPES[a.type] || a.type || '')}</b>${esc(a.name || '')}</span>
+    </button></li>`
+  }).join('') : '<li class="hint">감독이 컷을 승인하면 그 그림에서 인물·배경·상품이 여기 모입니다.</li>')
 }
 
 let fastPoll = null
@@ -1766,6 +1989,7 @@ function render() {
   renderMe()
   renderGpu()
   renderNav()
+  renderAssets()
   renderMine()
   renderHist()
   renderTime()
@@ -3324,6 +3548,13 @@ function renderDetail() {
   if (o.ref !== null && !refs.some((r) => r.key === o.ref)) o.ref = null
   const refKey = refKeyOf(p)
   const pickedRef = refs.find((r) => r.key === refKey)
+  // 참조 자산. 고른 것(없으면 autoAssets)과 고를 수 있는 전부, 그리고 이 컷에서 뽑은 것
+  const assetIds = assetIdsOf(p)
+  const assetOn = new Set(assetIds)
+  const assetPool = p.charId ? [] : assetList().filter(assetSrc)
+  const assetMine = p.charId ? [] : assetsFrom(p.id)
+  const extracting = assetWork.get(p.id)
+  const extractWhy = whyNotExtract(p)
   const picked = modelOf(pickedModel) || modelOf(gpu.resident)
   // 커넥터 모델을 고른 사람에게 GPU 상태를 알릴 이유가 없습니다. 그 길을 지나지 않습니다
   const connPick = !!picked && isConn(picked.id)
@@ -3403,6 +3634,28 @@ function renderDetail() {
     <p class="why">승인된 이미지가 첫 프레임입니다. 움직임은 이 컷의 작업 지시·대사·카메라에서
       만들어 보냅니다. 나온 영상은 이 컷의 다음 버전으로 붙습니다.</p>`
 
+  /*
+   * 이 컷의 자산. 승인된 그림에서 뽑은 인물·배경·상품이 여기 나오고, 이름을 고치거나 지웁니다.
+   * 승인 전에는 「승인하면 뽑는다」만 말합니다. 생성 칸(genBlock)과 달리 감독에게도 보입니다 —
+   * 승인을 누르는 사람이 감독이라 뽑는 진행도 그 화면에 뜹니다.
+   */
+  const canEditAsset = mayExtract()
+  const assetBlock = p.charId || !canGen ? '' : `
+    <h2 class="mono h" style="margin-top:22px">이 컷의 자산 <span class="count">${assetMine.length || ''}</span></h2>
+    ${assetMine.length ? `<div class="alib">${assetMine.map((a) => assetCard(a, { edit: canEditAsset })).join('')}</div>` : ''}
+    ${extracting ? `<p class="why why--busy">${esc(extracting)}</p>`
+    : p.status !== 'approved' ? `
+    <p class="why">감독이 이 컷을 승인하면 그 그림에서 인물·배경·상품을 따로 그려 자산으로 둡니다.
+      다음 컷을 만들 때 「참조 자산」으로 골라 넣으면 같은 얼굴·같은 장소·같은 물건으로 나옵니다.</p>`
+      : !assetMine.length ? `
+    <p class="why">승인은 됐지만 뽑은 자산이 없습니다.${extractWhy ? ` ${esc(extractWhy)}.` : ' 아래 단추로 뽑습니다.'}</p>` : ''}
+    ${p.status === 'approved' && !extracting ? `
+    <div class="acts">
+      <button class="btn btn--line" data-do="extract" ${extractWhy ? `aria-disabled="true" title="${esc(extractWhy)}"` : ''}>
+        ${assetMine.length ? '자산 다시 뽑기' : '자산으로 뽑기'}
+      </button>
+    </div>` : ''}`
+
   const genBlock = !may('art') ? `
     <h2 class="mono h" style="margin-top:22px">이미지</h2>
     <p class="why">${esc(whyNot('art'))}. 필요한 그림이 있으면 아래 메모로 남겨주세요.</p>` : `
@@ -3419,13 +3672,28 @@ function renderDetail() {
     ${/* 고른 기반 이미지를 눈으로 확인시켜 줍니다. 이름만 있으면 무엇을 물려받는지 모릅니다 */ ''}
     ${pickedRef?.srcs ? `<div class="gen__ref gen__ref--many">${pickedRef.srcs.map((s) => media(s, 'alt="" loading="lazy"')).join('')}</div>`
     : pickedRef?.src ? `<div class="gen__ref">${media(pickedRef.src, 'alt="" loading="lazy"')}</div>` : ''}
+    ${/*
+      * 참조 자산. 여러 장을 고릅니다 — 인물 둘과 배경과 상품이 각각 한 장씩 서버로 갑니다
+      * (klein 은 그림 목록을 조건으로 받습니다). 자산이 하나도 없는 판에는 줄을 내지 않습니다.
+      */ ''}
+    ${assetPool.length ? `
+    <div class="gen__row gen__row--top">
+      <span class="mono gen__lab">참조 자산</span>
+      <div class="alib alib--pick" ${editable ? '' : noEdit}>${assetPool.map((a) => assetCard(a, { pick: assetOn.has(a.id) })).join('')}</div>
+    </div>
+    <p class="why">${assetIds.length
+      ? `자산 ${assetIds.length}장을 참조로 보냅니다. 인물은 그 얼굴로, 배경은 그 장소로, 상품은 그 물건 그대로 새 구도를 그립니다.${
+        refKey === 'none' ? '' : ' 위에서 고른 기반 이미지도 뒤에 한 장 더 붙습니다.'}`
+      : '컷에 붙인 인물의 자산과 같은 씬의 배경은 저절로 들어갑니다. 상품은 그 물건이 나오는 컷에서 직접 고르세요.'}</p>` : ''}
     ${faceNote}
     ${refKey === 'keyvisual' ? `
       <p class="why">${esc(sceneMeta(p.scene).no || '이 씬')}의 키 비주얼을 기반으로 잡아 두었습니다.
         키비주얼 화면에서 그 씬 하나를 보고 그린 그림이라, 장소와 빛이 같은 씬의 다른 컷과 어긋나지 않습니다.</p>` : ''}
     ${modelNote}
-    ${refKey === 'none' ? '' : connPick && picked.init === false ? `
-      <p class="why">${esc(picked.label)}은 기반 이미지를 받지 않습니다. 지시문만 보고 새로 그립니다.</p>`
+    ${refKey === 'none' && !assetIds.length ? '' : picked?.init === false ? `
+      <p class="why">${esc(picked.label)}은 기반 이미지를 받지 않습니다. ${connPick || !keepModelId()
+        ? '지시문만 보고 새로 그립니다.'
+        : `참조를 고른 이 컷은 ${esc(modelOf(keepModelId())?.label || '')}이 그립니다 — 그 모델이 그림을 조건으로 받습니다.`}</p>`
     : connPick && picked.strength !== true ? `
       <p class="why">${esc(picked.label)}은 기반 이미지를 참고해서 그립니다. 변형 정도를 받는 칸은 이 모델에 없습니다.</p>`
       : picked && picked.strength === false ? `
@@ -3440,8 +3708,9 @@ function renderDetail() {
     <div class="acts">
       <button class="btn btn--line" data-do="upload" ${editable ? '' : noEdit}>스케치 올리기</button>
       <button class="btn btn--solid" data-do="generate" ${!editable ? noEdit : busyBy ? 'disabled' : ''}>
-        ${busyBy ? `${esc(busyBy.name)} 생성 중…` : refKey === 'none' ? 'AI로 생성'
-    : pickedRef?.face ? '이 인물로 생성' : '이 이미지를 기반으로 생성'}
+        ${busyBy ? `${esc(busyBy.name)} 생성 중…` : assetIds.length ? `자산 ${assetIds.length}장으로 생성`
+    : refKey === 'none' ? 'AI로 생성'
+      : pickedRef?.face ? '이 인물로 생성' : '이 이미지를 기반으로 생성'}
       </button>
       ${clipBtn}
     </div>
@@ -3566,6 +3835,7 @@ function renderDetail() {
       ${ch ? poseFields : cutFields}
 
       ${genBlock}
+      ${assetBlock}
 
       <h2 class="mono h" style="margin-top:22px">버전 ${live.length ? `<span class="count">${live.length}</span>` : ''}
         <button class="mini" data-do="viewer" ${ver ? '' : 'disabled'}
@@ -3786,6 +4056,10 @@ function navClick(e) {
 }
 byId('charNav').addEventListener('click', navClick)
 byId('boardNav').addEventListener('click', navClick)
+byId('assetNav').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-goto]')
+  if (b) goTo(b.dataset.goto)
+})
 byId('newChar').addEventListener('click', addChar)
 byId('histMine').addEventListener('click', () => { histMine = !histMine; renderHist() })
 
@@ -4083,6 +4357,12 @@ detail.addEventListener('change', (e) => {
    */
   if (e.target.id === 'clipSecs') { clipOpts.secs = Number(e.target.value); renderDetail(); return }
   if (e.target.id === 'clipQuality') { clipOpts.quality = e.target.value; renderDetail(); return }
+  if (e.target.dataset.aname) {
+    const a = state.assets?.[e.target.dataset.aname]
+    const name = e.target.value.trim().slice(0, 40)
+    if (a && name && name !== a.name) emit({ kind: 'asset.patch', assetId: a.id, fields: { name } })
+    return
+  }
   if (e.target.dataset.field !== 'assignee') return
   emit({ kind: 'panel.patch', panelId: p.id, fields: { assignee: e.target.value || null } })
 })
@@ -4107,6 +4387,8 @@ detail.addEventListener('click', async (e) => {
   const verIdx = e.target.closest('[data-ver]')?.dataset.ver
   const castId = e.target.closest('[data-cast]')?.dataset.cast
   const refKey = e.target.closest('[data-ref]')?.dataset.ref
+  const assetId = e.target.closest('[data-asset]')?.dataset.asset
+  const armId = e.target.closest('[data-arm]')?.dataset.arm
 
   const lostBtn = e.target.closest('[data-lost]')
   if (lostBtn) {
@@ -4121,6 +4403,27 @@ detail.addEventListener('click', async (e) => {
   }
 
   if (refKey) { optsFor(p).ref = refKey; renderDetail(); return }
+  /*
+   * 참조 자산을 켜고 끕니다. 처음 누르는 순간 autoAssets 의 값이 실제 값으로 굳습니다 —
+   * 그 뒤로 인물을 붙여도 저절로 늘지 않습니다. 사람이 손댄 목록은 사람의 것입니다.
+   */
+  if (assetId) {
+    if (!mayEdit(p)) { notice(whyNotEdit(p)); return }
+    const cur = assetIdsOf(p)
+    optsFor(p).assets = cur.includes(assetId) ? cur.filter((x) => x !== assetId) : [...cur, assetId]
+    renderDetail()
+    return
+  }
+  if (armId) {
+    const a = state.assets?.[armId]
+    if (!a) return
+    if (!mayExtract()) { notice(denyReason('extract', roleOf(me.id))); return }
+    if (!confirm(`「${a.name || ASSET_TYPES[a.type] || '자산'}」을 지웁니다. 되돌릴 수 없습니다.\n이것을 참조로 고른 컷은 다음 생성부터 받지 못합니다.`)) return
+    emit({ kind: 'asset.remove', assetId: armId })
+    notice('자산을 지웠습니다', 'ok')
+    return
+  }
+  if (doWhat === 'extract') { extractAssets(p); return }
   if (doWhat === 'autofill') { optsFor(p).prompt = null; renderDetail(); return }
   if (doWhat === 'viewer') { openViewer(p.id); return }
   if (memoClick(e, p, 'cmtInput')) return

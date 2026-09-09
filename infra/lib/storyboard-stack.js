@@ -59,10 +59,11 @@ const GPU_AMI = {
   'ap-northeast-2': 'ami-0998eac84900cf563',
 }
 
-// GPU 가 부팅 때 올려 둘 그림 모델(server.py 의 SB_MODEL). 만든 얼굴을 기준으로
-// 받는 계열(flux2)이라 인물 참조와 두 인물 장면이 되는 유일한 기본값이다. 게이트도
-// 없어서 Hugging Face 키 없이 받아진다 — sd35 로 바꾸면 그 키가 있어야 한다
-const MODEL = 'klein'
+// GPU 가 부팅 때 올려 둘 그림 모델(server.py 의 SB_MODEL). Krea 2 Turbo 는 8걸음 증류판이라
+// 빠르고 사실적이지만 그림을 조건으로 받지 않는다 — 참조(인물 얼굴·자산)가 있는 요청은
+// 화면이 klein 으로 돌려 보낸다(board.js 의 modelFor). 게이트 저장소라 Hugging Face 키
+// 계정이 약관에 동의해 두어야 받아진다. 키가 없는 배포는 'klein' 으로 두면 키 없이 뜬다
+const MODEL = 'krea'
 const NEPTUNE_VERSION = '1.3.4.0'
 const NEPTUNE_PORT = 8182
 // 데모용 기본 인스턴스 클래스. --context neptuneInstance=db.r6g.large 로 덮어쓴다

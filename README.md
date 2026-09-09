@@ -61,21 +61,33 @@ every 1.5 s for up to 120 s. `net.plan()` hides all of it, so `story.js` still j
 `{text, usage, stop}`. Only the account that started the job can read its result, and the Lambda
 writes a result on failure too · otherwise the browser would wait out the full 120 s for nothing.
 
-**Three models, one GPU.** Pick per shot. All three are Apache-2.0, so an organization can deploy them.
+**Several models, one GPU.** Pick per shot. Chroma and klein are Apache-2.0; Krea 2 Turbo and
+SD 3.5 are gated repos with their own licenses, so the Hugging Face key's account has to accept
+them before the box can download the weights.
 
 | | Model | Good for | Reference image |
 | --- | --- | --- | --- |
-| `chroma` | [Chroma1-Flash](https://huggingface.co/lodestones/Chroma1-Flash) 8.9B | the default: 12 steps, ~15 s, the best pencil-storyboard texture | img2img · keeps the layout, redraws the face |
-| `klein` | [FLUX.2 klein 4B](https://huggingface.co/black-forest-labs/FLUX.2-klein-4B) | same character in a new shot; 8 steps, ~4 s | condition · keeps the face |
+| `krea` | [Krea 2 Turbo](https://huggingface.co/krea/Krea-2-Turbo) | the default: 8 steps, realistic, text only | none · a shot with references is routed to `klein` |
+| `chroma` | [Chroma1-Flash](https://huggingface.co/lodestones/Chroma1-Flash) 8.9B | 12 steps, ~15 s, the best pencil-storyboard texture | img2img · keeps the layout, redraws the face |
+| `klein` | [FLUX.2 klein 4B](https://huggingface.co/black-forest-labs/FLUX.2-klein-4B) | same character in a new shot; 8 steps, ~4 s | condition · keeps the face, takes several images |
 | `hd` | [Chroma1-HD](https://huggingface.co/lodestones/Chroma1-HD) 8.9B | Flash before distillation: 26 steps, for a final pass | img2img · keeps the layout, redraws the face |
 
-The reference-image column is the reason there are three. `chroma`/`hd` paint over the image with
+The reference-image column is the reason there are several. `chroma`/`hd` paint over the image with
 noise, so the layout survives and the face does not. `klein` takes it as a *condition*, so the face
-survives · that's what makes "one character, many shots" work.
+survives · that's what makes "one character, many shots" work. `krea` takes no image at all, so the
+board sends any shot that has a reference to `klein` instead of silently drawing from text.
+
+**Assets.** When a director approves a cut, the approver's browser asks `klein` to redraw the approved
+image three ways · each cast member alone on a plain background, the location with every person
+removed, and the key product or prop by itself (`server.py`'s `ISOLATE`). They land in the board as
+assets (`asset.add` ops) and show up in the left column and on the cut. The next cut picks them as
+*reference assets*: several images go to `klein` as a list, so the same face, the same room and the
+same product come back in a new composition. A cut's cast assets and the same scene's background are
+preselected; products are picked by hand.
 
 Only one of them fits in the card's 48 GB at a time, so **picking a model swaps it**: the server loads
 the new weights in the background and refuses generation until they're resident (~1 min from disk).
-The picker shows the wait. `chroma` is what a fresh deploy starts with.
+The picker shows the wait. `krea` is what a fresh deploy starts with (`MODEL` in the stack).
 
 **The only truth on the board is the op log.** One edit is one immutable op; on boot the client
 replays the log to build the screen. There is no separate stored state, which is why two people's
@@ -395,8 +407,8 @@ demo environment that only trusted people can reach.
 8. Deploying with `SB_DEMO_PW` set writes the password into a public file (`aws-config.js`). Never set it for a public demo.
 9. Story planning has no rate limit and no spend cap. The resolver checks the role and clips the token count per call, but a planner or director can call Bedrock in a loop. Add a per-user quota, or an AWS Budgets alarm, before letting a wider group in.
 
-**Image generation** · art is produced by open-weight models (Chroma1-Flash, FLUX.2 klein 4B,
-Chroma1-HD) running on our own EC2 instance. You are responsible for checking the license of
+**Image generation** · art is produced by open-weight models (Krea 2 Turbo, Chroma1-Flash,
+FLUX.2 klein 4B, Chroma1-HD, SD 3.5 Large) running on our own EC2 instance. You are responsible for checking the license of
 each model and its weights and what you may do with the output. Bedrock writes the image prompts in
 English, so they reach the GPU untouched. A prompt line someone typed Korean into by hand is
 translated on the way in, and that call goes to Bedrock too (`en()` in `infra/gpu/server.py`, which
