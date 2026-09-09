@@ -476,15 +476,29 @@ const openTab = (name) => {
  * 화면에 이미 대본이 있으면 건드리지 않습니다. 방금 만든 것이 담아 둔 것보다 새롭고,
  * 사람이 보고 있는 것을 뒤에서 갈아 끼우면 안 됩니다.
  */
-let scriptRestored = false
+/*
+ * 한 번만 읽던 것을 「비어 있을 때마다」로 바꿨습니다. 한 번 표시(scriptRestored)는 세 자리에서
+ * 담아 둔 대본을 영영 잃게 했습니다 — ① 상단 [대본화] 로 들어오면 openTab 이 start() 보다
+ * 먼저 돌아 읽어 놓은 것을 start()/build() 가 SCRIPT.text='' 로 덮었고, ② 로그인·연결 전에
+ * 읽기가 실패해도 표시가 서서 다시 읽지 않았고, ③ 회차 칩·pickHist 가 text 를 비운 뒤에도
+ * 돌아오지 않았습니다. 지금은 화면에 대본이 없을 때마다 다시 읽고, 겹쳐 부르면 한 번만 갑니다.
+ */
+let restoring = null
 async function restoreScript() {
-  if (scriptRestored || SCRIPT.text) return
-  scriptRestored = true
-  const kept = await loadAsset(BOARD, 'script')
-  // 그 사이에 사람이 대본을 만들었을 수 있습니다. 그때는 그쪽이 새것입니다
-  if (!kept || SCRIPT.text) return
-  SCRIPT.text = kept
-  renderScriptPanel()
+  if (SCRIPT.text) return
+  if (restoring) return restoring
+  restoring = (async () => {
+    try {
+      const kept = await loadAsset(BOARD, 'script')
+      // 그 사이에 사람이 대본을 만들었을 수 있습니다. 그때는 그쪽이 새것입니다
+      if (!kept || SCRIPT.text) return
+      SCRIPT.text = kept
+      renderScriptPanel()
+    } finally {
+      restoring = null
+    }
+  })()
+  return restoring
 }
 
 /*
@@ -1359,6 +1373,8 @@ async function runScript() {
     SCRIPT.text = await planScript(NET, ep.cuts, {
       format: SCRIPT.format, title: ep.title, chars: ep.chars, model: MODEL(),
     })
+    // 먼저 그립니다. keepScript 의 「담지 못했습니다」가 적히는 #scNote 는 대본이 그려진 뒤에야 있습니다
+    renderScriptPanel()
     mark(`「${ep.title}」를 ${SCRIPT_FORMATS[SCRIPT.format]?.label || SCRIPT.format} 대본으로 옮겼습니다`,
       { step: 'script', ref: String(SCRIPT.ep), refKind: 'ep' })
     /*
@@ -2171,6 +2187,8 @@ if (configured && !session()) {
     actor: session()?.id,
     who: (id) => nameMap(JOURNAL).get(id) || null,
   }).then(() => start()).then(() => {
+    // start() 가 SCRIPT 를 비운 뒤입니다. 대본화 탭으로 들어왔으면 담아 둔 대본을 여기서 다시 겁니다
+    if (navTabFromSearch(location.search, 'develop') === 'script') restoreScript()
     loadHistory()
     /*
      * 챗봇을 여기서 붙인다. 로그인 문이나 프로젝트 고르는 판이 서 있는 동안에는

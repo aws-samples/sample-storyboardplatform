@@ -77,9 +77,10 @@ const S = {
 /* ══ 권한 ═══════════════════════════════════════════════════════════════════ */
 const role = () => S.me?.role || 'reviewer'
 const canGen = () => !!cfg.genUrl
-// 그림 만들기(스틸 · AI로 만들기)는 아티스트·기획. 올리기·이름·지우기는 감독까지(자산 뽑기와 같은 표)
-const mayGen = () => !configured || allowed('gen', role())
-const mayEdit = () => !configured || allowed('extract', role())
+// 그림 만들기(스틸 · AI로 만들기)는 아티스트·기획. 올리기·이름·지우기는 감독까지(자산 뽑기와 같은 표).
+// 로컬 모드도 역할을 봅니다 — ?as=reviewer 로 리뷰어 화면을 확인할 수 있어야 합니다(보드와 같음)
+const mayGen = () => allowed('gen', role())
+const mayEdit = () => allowed('extract', role())
 
 /* ══ 판 ═════════════════════════════════════════════════════════════════════ */
 const list = () => Object.values(S.assets).sort((a, b) => (b.ts || 0) - (a.ts || 0))
@@ -183,11 +184,15 @@ async function pollGpu() {
     const j = await health()
     const draw = (j.models || []).filter((m) => !m.video)
     const resident = draw.some((m) => m.id === j.modelId) ? j.modelId : null
+    // 다른 모델의 실패 사유는 이 화면의 것이 아닙니다. 스틸은 참조 모델(klein)로 가므로
+    // krea 가 못 올라온 사유를 빨간 불로 보이면 되는 일을 안 되는 것으로 읽습니다
+    const mine = draw.find((m) => m.strength === false && m.init !== false)?.id ?? 'klein'
+    const err = j.error && (!j.errorModel || j.errorModel === mine) ? j.error : null
     S.gpu = {
-      state: j.error ? 'error' : j.loading || !j.warm ? 'loading' : j.busy ? 'busy' : 'ready',
-      text: j.error ? `생성 서버: ${j.error}` : j.loading || !j.warm ? `모델을 올리는 중${j.wait ? ` · 약 ${Math.round(j.wait)}초` : ''}`
+      state: err ? 'error' : j.loading || !j.warm ? 'loading' : j.busy ? 'busy' : 'ready',
+      text: err ? `생성 서버: ${err}` : j.loading || !j.warm ? `모델을 올리는 중${j.wait ? ` · 약 ${Math.round(j.wait)}초` : ''}`
         : j.busy ? '다른 그림을 그리는 중' : resident ? `${j.model} 준비됨` : '그림 모델 대기',
-      models: draw, resident, wait: j.wait || 0, err: j.error, default: j.default,
+      models: draw, resident, wait: j.wait || 0, err, default: j.default,
     }
   } catch {
     S.gpu = { state: 'down', text: gpuDownHint(), models: [] }
@@ -352,9 +357,13 @@ function rename(id, name) {
   emit({ kind: 'asset.patch', assetId: id, fields: { name: v } })
 }
 
+const MAX_REFS = 6   // server.py 의 MAX_REFS. 넘는 장은 서버가 말없이 버리므로 여기서 막습니다
+
 function toggle(id) {
   const a = S.assets[id]
   if (!a || !REF_TYPES.includes(a.type)) return
+  if (!S.sel.includes(id) && S.sel.length >= MAX_REFS) { S.err = `참조는 ${MAX_REFS}장까지입니다. 하나를 빼고 고르세요.`; paint(); return }
+  S.err = ''
   S.sel = S.sel.includes(id) ? S.sel.filter((x) => x !== id) : [...S.sel, id]
   // 참조는 인물 → 배경 → 소품 순서로 보냅니다. server.py 의 ASSETS 가 그 순서로 읽습니다
   S.sel.sort((x, y) => REF_TYPES.indexOf(S.assets[x]?.type) - REF_TYPES.indexOf(S.assets[y]?.type))
@@ -378,10 +387,19 @@ function paintCats() {
     <div class="cats__sep"></div>
     ${row('still', '실사 스틸')}
     <div class="cats__sep"></div>
-    <p class="hint">스토리보드에서 컷이 승인되면 그 그림의 인물·배경·소품이 여기로 옵니다. 직접 올리거나 지시문으로 만들 수도 있습니다.</p>`)
+    <p class="hint">승인된 컷에서 뽑힌 것과 직접 올린 것이 모입니다.</p>`)
+}
+
+/* 다시 그릴 때 글을 치던 칸의 초점과 캐럿을 지킵니다. 20초마다(pollGpu) 와 남의 op 마다 다시 그립니다 */
+const keepTyping = (ids) => {
+  const a = document.activeElement
+  if (!a || !ids.includes(a.id)) return () => {}
+  const k = { id: a.id, s: a.selectionStart, e: a.selectionEnd }
+  return () => { const el = $(k.id); if (el) { el.focus(); try { el.setSelectionRange(k.s, k.e) } catch { /* 값이 짧아졌을 때 */ } } }
 }
 
 function paintGrid() {
+  const back = keepTyping(['makeText'])
   const items = shown()
   const catLabel = S.cat === 'all' ? '전체' : typeName(S.cat)
   const canMake = S.cat !== 'all' && S.cat !== 'still'
@@ -394,13 +412,14 @@ function paintGrid() {
         <button class="btn btn--go" id="makeGo" ${S.busy || !S.make.prompt.trim() ? 'disabled' : ''}>${S.busy ? '그리는 중…' : '만들기'}</button>
         <button class="btn" id="makeClose" ${S.busy ? 'disabled' : ''}>닫기</button>
       </div>
-      <p class="note">${esc(typeName(S.cat))}은 ${esc(MAKE_HINT[S.cat])}으로 그립니다. 나온 그림은 이 칸에 자산으로 남고, 스토리보드의 참조로도 쓸 수 있습니다.</p>
+      <p class="note">지시문 뒤에 「${esc(MAKE_HINT[S.cat])}」이 붙어 ${esc(typeName(S.cat))} 한 장으로 나옵니다. 나온 그림은 자산으로 남습니다.</p>
     </div>` : ''
   setHtml($('main'), `
     <div class="tools">
       <h1>${esc(catLabel)}<span class="count">${items.length}</span></h1>
       <span class="spacer"></span>
       ${canMake ? `
+        ${editNo || genNo ? `<span class="note note--no">${esc(editNo || genNo)}</span>` : ''}
         <button class="btn" id="uploadBtn" ${editNo ? `disabled title="${esc(editNo)}"` : ''}>올리기</button>
         <button class="btn" id="makeBtn" ${genNo ? `disabled title="${esc(genNo)}"` : ''} aria-expanded="${!!(S.make && S.make.type === S.cat)}">AI로 만들기</button>`
     : S.cat === 'all' ? '<span class="note">올리거나 만들려면 왼쪽에서 종류를 고르세요.</span>'
@@ -417,12 +436,13 @@ function paintGrid() {
   $('makeClose')?.addEventListener('click', () => { S.make = null; paintGrid() })
   $('makeGo')?.addEventListener('click', makeAsset)
   $('makeText')?.addEventListener('input', (e) => { S.make.prompt = e.target.value; $('makeGo').disabled = !e.target.value.trim() })
+  back()
 }
 
 function tile(a) {
   const refable = REF_TYPES.includes(a.type)
   const on = S.sel.includes(a.id)
-  const meta = [whence(a), a.charId && charName(a.charId) ? charName(a.charId) : '', a.gen?.model || ''].filter(Boolean).join(' · ')
+  const meta = [whence(a), a.charId && charName(a.charId) ? charName(a.charId) : ''].filter(Boolean).join(' · ')
   return `<div class="tile" data-type="${esc(a.type)}" data-id="${a.id}" role="${refable ? 'button' : 'group'}" ${refable ? `tabindex="0" aria-pressed="${on}"` : ''}>
     <img class="tile__im" src="${src(a)}" alt="" loading="lazy">
     ${refable ? '<span class="tile__pick" aria-hidden="true"></span>' : ''}
@@ -435,6 +455,7 @@ function tile(a) {
 }
 
 function paintStill() {
+  const back = keepTyping(['stillText'])
   const refs = picked()
   const led = { ready: 'ready', busy: 'busy', loading: 'busy', down: 'down', error: 'down', none: 'down' }[S.gpu.state] || ''
   const genNo = !canGen() ? '이 배포에는 생성 서버가 없습니다' : mayGen() ? '' : denyReason('gen', role())
@@ -465,10 +486,11 @@ function paintStill() {
         <div class="tile" data-type="still" role="group"><img class="tile__im" src="${src(a)}" alt="" loading="lazy">
           <button class="tile__zoom" data-zoom="${a.id}" type="button">크게</button>
           <div class="tile__cap"><span class="tile__name">${esc(a.name || '스틸')}</span>
-          <span class="tile__meta">${esc([a.gen?.model, a.gen?.size ? a.gen.size.join('×') : '', `참조 ${(a.refs || []).length}장`].filter(Boolean).join(' · '))}</span></div></div>`).join('')}
+          <span class="tile__meta">${esc([Array.isArray(a.gen?.size) ? a.gen.size.join('×') : '', `참조 ${(a.refs || []).length}장`].filter(Boolean).join(' · '))}</span></div></div>`).join('')}
       </div></div>` : ''}`)
   $('stillGo')?.addEventListener('click', makeStill)
   $('stillText')?.addEventListener('input', (e) => { S.prompt = e.target.value })
+  back()
 }
 
 /* ══ 뷰어 ═══════════════════════════════════════════════════════════════════ */
@@ -476,11 +498,18 @@ function paintViewer() {
   const host = $('viewer')
   const a = S.assets[S.view]
   document.body.classList.toggle('viewing', !!a)
-  if (!a || !src(a)) { host.hidden = true; setHtml(host, ''); S.view = null; return }
+  if (!a || !src(a)) {
+    const was = !host.hidden
+    host.hidden = true; setHtml(host, ''); S.view = null
+    if (was && viewFrom?.isConnected) viewFrom.focus()
+    return
+  }
+  const opening = host.hidden
+  if (opening) viewFrom = document.activeElement
   host.hidden = false
   const refs = (a.refs || []).map((id) => S.assets[id]).filter((x) => x && src(x))
   const on = S.sel.includes(a.id)
-  const size = a.gen?.size ? a.gen.size.join(' × ') : ''
+  const size = Array.isArray(a.gen?.size) ? a.gen.size.join(' × ') : ''
   setHtml(host, `
     <div class="vw__bar">
       <span class="vw__type">${esc(typeName(a.type))}</span>
@@ -493,7 +522,7 @@ function paintViewer() {
         <button class="vw__btn" data-z="2" aria-pressed="${S.zoom === '2'}">2×</button>
       </span>
       ${REF_TYPES.includes(a.type) ? `<button class="vw__btn" id="vwPick" aria-pressed="${on}">${on ? '참조에 들어 있음' : '참조로 고르기'}</button>` : ''}
-      <a class="vw__btn" href="${src(a)}" download="${esc((a.name || typeName(a.type)).replace(/[\\/:*?"<>|]/g, '_'))}.png">다운로드</a>
+      <a class="vw__btn" href="${src(a)}" download="${esc((a.name || typeName(a.type)).replace(/[\\/:*?"<>|]/g, '_'))}.${src(a).startsWith('data:image/jpeg') ? 'jpg' : 'png'}">다운로드</a>
       ${mayEdit() ? '<button class="vw__btn vw__btn--no" id="vwRemove">지우기</button>' : ''}
       <button class="vw__btn" id="vwClose" aria-label="닫기">닫기 ⎋</button>
     </div>
@@ -508,6 +537,8 @@ function paintViewer() {
     </div>`)
   const img = $('vwImg')
   const stage = $('vwStage')
+  // 대화상자처럼 초점을 안으로 옮깁니다. 안 그러면 Tab 이 오버레이 뒤의 보이지 않는 타일을 돕니다
+  if (opening) $('vwClose').focus()
   img.onload = () => {
     if (!size) $('vwMeta').textContent = [whence(a), a.gen?.model, `${img.naturalWidth} × ${img.naturalHeight}`].filter(Boolean).join(' · ')
     applyZoom()
@@ -519,7 +550,7 @@ function paintViewer() {
   $('vwName').addEventListener('change', (e) => rename(a.id, e.target.value))
   host.querySelectorAll('[data-z]').forEach((b) => { b.onclick = () => setZoom(b.dataset.z) })
   // 그림을 누르면 맞춤 ↔ 1:1. 휠은 한 단계씩
-  img.onclick = (e) => { if (drag.moved) return; setZoom(S.zoom === 'fit' ? '1' : 'fit', e) }
+  img.onclick = (e) => { if (drag?.moved) return; setZoom(S.zoom === 'fit' ? '1' : 'fit', e) }
   stage.onwheel = (e) => {
     e.preventDefault()
     const order = ['fit', '1', '2']
@@ -546,6 +577,7 @@ function paintViewer() {
 }
 
 let drag = null
+let viewFrom = null   // 뷰어를 열기 전에 초점이 있던 곳. 닫으면 되돌립니다
 
 function setZoom(z, e = null) {
   S.zoom = z
@@ -573,7 +605,8 @@ function applyZoom(e = null) {
 }
 
 function step(dir) {
-  const items = S.cat === 'still' ? list().filter((a) => a.type === 'still' && src(a)) : shown()
+  const cur = S.assets[S.view]
+  const items = cur?.type === 'still' ? list().filter((a) => a.type === 'still' && src(a)) : shown().filter((a) => a.type !== 'still')
   const pool = items.length ? items : list().filter(src)
   const i = pool.findIndex((a) => a.id === S.view)
   const next = pool[(i + dir + pool.length) % pool.length]
@@ -596,8 +629,15 @@ $('main').addEventListener('click', (e) => {
   if (t && t.getAttribute('role') === 'button') toggle(t.dataset.id)
 })
 $('main').addEventListener('keydown', (e) => {
+  // 타일 안의 「크게」 단추는 자기 일(뷰어)을 합니다. 타일 자체에 초점이 있을 때만 고르기입니다
+  if (e.target.closest('button')) return
   const t = e.target.closest('.tile[data-id]')
   if (t && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggle(t.dataset.id) }
+})
+// 더블클릭도 크게 보기. 마우스로는 「크게」가 hover 에서만 보여 이 길이 하나 더 있어야 합니다
+$('main').addEventListener('dblclick', (e) => {
+  const t = e.target.closest('.tile[data-id]')
+  if (t) { S.view = t.dataset.id; S.zoom = 'fit'; paintViewer() }
 })
 $('still').addEventListener('click', (e) => {
   const x = e.target.closest('[data-unpick]')
@@ -624,12 +664,15 @@ async function boot() {
     if (s && !(await idToken())) s = null
     S.me = s || await showLogin($('gate'))
   }
-  S.me = S.me || session() || { id: 'local', name: '로컬', role: 'planner' }
+  // 로컬 모드의 역할은 보드처럼 ?as= 로 고릅니다. 없으면 기획입니다
+  const asked = new URLSearchParams(location.search).get('as')
+  S.me = S.me || session() || { id: 'local', name: '로컬', role: ['planner', 'artist', 'director', 'reviewer', 'admin'].includes(asked) ? asked : 'planner' }
   $('whoami').textContent = `${S.me.name || S.me.id} · ${S.me.role}`
 
   await pickProject({ step: 'assets', actor: S.me?.id, who: (id) => (id === S.me?.id ? S.me : null) })
 
-  loadLocal()
+  // 배포 모드는 서버 로그가 사실입니다. 로컬 판을 섞으면 지운 자산이 되살아납니다
+  if (!configured) loadLocal()
   paint()
 
   try {

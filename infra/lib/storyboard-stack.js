@@ -62,7 +62,10 @@ const GPU_AMI = {
 // GPU 가 부팅 때 올려 둘 그림 모델(server.py 의 SB_MODEL). Krea 2 Turbo 는 8걸음 증류판이라
 // 빠르고 사실적이지만 그림을 조건으로 받지 않는다 — 참조(인물 얼굴·자산)가 있는 요청은
 // 화면이 klein 으로 돌려 보낸다(board.js 의 modelFor). 게이트 저장소라 Hugging Face 키
-// 계정이 약관에 동의해 두어야 받아진다. 키가 없는 배포는 'klein' 으로 두면 키 없이 뜬다
+// 계정이 약관에 동의해 두어야 받아진다. 키가 없는 배포는 'klein' 으로 두면 키 없이 뜬다.
+// 이 값은 첫 부팅의 user-data 에만 들어간다. 돌아가는 인스턴스는 deploy 로 UserData 가 바뀌어도
+// user-data 를 다시 돌리지 않으므로(userDataCausesReplacement:false) systemd 의 SB_MODEL 은 그대로다 —
+// 그때는 /etc/systemd/system/sb.service 의 SB_MODEL 을 손으로 고치고 daemon-reload · restart 한다
 const MODEL = 'krea'
 const NEPTUNE_VERSION = '1.3.4.0'
 const NEPTUNE_PORT = 8182
@@ -155,6 +158,15 @@ class StoryboardStack extends Stack {
     // 에셋(대본·시놉시스·그래프·씬·키비주얼·콘티)은 op 와 같은 pk=BOARD#<id> 에 살고
     // sk 만 'ASSET#<kind>' 다. 프로젝트 하나의 에셋 전부를 Query 한 번에 읽는다.
     // op 처럼 쌓지 않고 kind 마다 덮어쓰며, 카드와 같이 TTL 이 없다
+    /*
+     * 주의(2026-09-09): 실서비스 API 에는 이 두 리졸버가 CLI 로 손수 만들어져 있습니다(스키마도
+     * start-schema-creation 으로 갱신). 대본이 사라지던 것을 cdk deploy 없이 고치려고 그랬습니다 —
+     * deploy 는 GPU 인스턴스의 UserData 를 바꿔 재시작을 부릅니다. 다음 cdk deploy 전에 그 둘을
+     * 먼저 지워야 「Only one resolver is allowed per field」로 스택이 뒤집히지 않습니다:
+     *   aws appsync delete-resolver --api-id <id> --type-name Mutation --field-name putAsset
+     *   aws appsync delete-resolver --api-id <id> --type-name Query --field-name listAssets
+     * publishOp 리졸버는 update-resolver 로 코드만 갈았으므로 그냥 deploy 하면 같은 코드로 덮입니다.
+     */
     js(ops, 'PutAsset', 'Mutation', 'putAsset', 'putAsset.js')
     js(ops, 'ListAssets', 'Query', 'listAssets', 'listAssets.js')
     // plan 결과는 GraphFn 이 Ops 테이블에 적어 둔 것을 읽어 온다

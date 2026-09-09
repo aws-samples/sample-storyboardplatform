@@ -28,14 +28,25 @@ export function request(ctx) {
   }
 }
 
+// 자산(asset.*) op 를 보낼 수 있는 역할. domain/permissions.js 의 extract 와 같습니다 — 리뷰어만 막습니다
+const ASSET_ROLES = ['planner', 'artist', 'director', 'admin']
+
 function guardRole(ctx, body) {
   const op = JSON.parse(body)
-  if (!op || (op.kind !== 'member.role' && op.kind !== 'member.set')) return
-
+  if (!op) return
   const claims = ctx.identity?.claims || {}
   const meId = claims['cognito:username']
   const myRole = claims['custom:role'] || 'reviewer'
   const isAdmin = myRole === 'admin'
+
+  // 자산은 팀의 것이라 화면이 막는 것만으로는 모자랍니다. op 를 직접 보내는 리뷰어를 여기서 막습니다
+  // APPSYNC_JS 에는 String() 이 없다. kind 는 문자열이거나 없다
+  const kind = op.kind || ''
+  if (kind.indexOf && kind.indexOf('asset.') === 0) {
+    if (ASSET_ROLES.indexOf(myRole) < 0) util.unauthorized()
+    return
+  }
+  if (op.kind !== 'member.role' && op.kind !== 'member.set') return
 
   if (op.kind === 'member.role') {
     if (!isAdmin) util.unauthorized()

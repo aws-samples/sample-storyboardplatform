@@ -3547,7 +3547,8 @@ function renderDetail() {
    * (server.py 의 args_for 가 img2img 로 넘깁니다) 얼굴이 그대로 남지 않습니다. 얼굴을
    * 조건으로 받는 모델이 목록에 있으면 그것을 가리킵니다.
    */
-  const noFace = !p.charId && (p.cast || []).length > 0 && !refs.some((r) => r.face)
+  // 참조 자산이 들어가는 컷에는 「얼굴이 없다」를 말하지 않습니다 — 인물 자산이 그 얼굴입니다
+  const noFace = !p.charId && (p.cast || []).length > 0 && !refs.some((r) => r.face) && !assetIds.length
   const keepModel = allModels().find((m) => m.strength === false)
   const faceNote = noFace ? `
     <p class="why">붙여 둔 인물에게 참조할 얼굴이 아직 없습니다. 인물 화면에서 마음에 드는 버전을
