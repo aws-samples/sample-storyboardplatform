@@ -81,6 +81,7 @@ const S = {
   stop: false,        // 「그만」— 다음 장부터 만들지 않습니다
   busy: null,         // 진행 한 줄
   busyKind: null,     // 'make' | 'still' — 어느 칸이 돌고 있는지. 다른 칸은 「그만」을 내지 않습니다
+  startedAt: 0,       // 만들기를 누른 때. 더블클릭의 둘째 클릭이 방금 나타난 「그만」에 떨어지는 것을 걸러냅니다
   err: '',
   view: null,         // 뷰어가 보여주는 자산 id
   zoom: 'fit',
@@ -265,6 +266,7 @@ async function makeStill() {
   const tick = (t) => { S.busy = t; S.err = ''; paint() }
   S.stop = false
   S.busyKind = 'still'
+  S.startedAt = now()
   tick('참조 그림을 읽습니다…')
   const names = refs.map((a) => `${typeName(a.type)} ${a.name}`).join(', ')
   const prompt = S.prompt.trim() || `${names}. 영화 스틸 한 장`
@@ -311,6 +313,7 @@ async function makeAsset() {
   const tick = (t) => { S.busy = t; S.err = ''; paint() }
   S.stop = false
   S.busyKind = 'make'
+  S.startedAt = now()
   let made = 0
   try {
     for (let i = 0; i < n; i += 1) {
@@ -434,6 +437,8 @@ function rename(id, name) {
 }
 
 const STOPPED = '그만두었습니다'
+/* 「그만」. 시작 직후 600ms 는 무시합니다 — 만들기 단추를 더블클릭하면 둘째 클릭이 그 자리에 방금 선 이 단추에 떨어집니다 */
+const stopNow = () => { if (now() - S.startedAt < 600) return; S.stop = true; paint() }
 const MAX_REFS = 6   // server.py 의 MAX_REFS. 넘는 장은 서버가 말없이 버리므로 여기서 막습니다
 
 function toggle(id) {
@@ -532,7 +537,7 @@ function paintGrid() {
   $('makeClose')?.addEventListener('click', () => { S.make = null; paintGrid() })
   $('makeGo')?.addEventListener('click', makeAsset)
   $('makeN')?.addEventListener('change', (e) => { S.make.n = Number(e.target.value); paintGrid() })
-  $('makeStop')?.addEventListener('click', () => { S.stop = true; paint() })
+  $('makeStop')?.addEventListener('click', stopNow)
   $('makeText')?.addEventListener('input', (e) => { S.make.prompt = e.target.value; const g = $('makeGo'); if (g) g.disabled = !e.target.value.trim() })
   back()
 }
@@ -607,7 +612,7 @@ function paintStill() {
       </div></div>` : ''}`)
   $('stillGo')?.addEventListener('click', makeStill)
   $('stillN')?.addEventListener('change', (e) => { S.stillN = Number(e.target.value); paintStill() })
-  $('stillStop')?.addEventListener('click', () => { S.stop = true; paint() })
+  $('stillStop')?.addEventListener('click', stopNow)
   $('stillText')?.addEventListener('input', (e) => { S.prompt = e.target.value })
   back()
 }
