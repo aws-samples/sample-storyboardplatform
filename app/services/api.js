@@ -445,6 +445,8 @@ export function graphClient() {
 
 const Q_CONNECTORS = 'query Connectors { connectors }'
 const M_PUT_CONNECTOR = `mutation PutConnector($spec: AWSJSON!) { putConnector(spec: $spec) }`
+const M_GPU_POWER = `mutation GpuPower($spec: AWSJSON!) { gpuPower(spec: $spec) }`
+const M_PUT_IMAGE = `mutation PutImage($spec: AWSJSON!) { putImage(spec: $spec) }`
 const M_DELETE_CONNECTOR = `mutation DeleteConnector($spec: AWSJSON!) { deleteConnector(spec: $spec) }`
 const M_GEN_CONNECTOR = `mutation GenConnector($spec: AWSJSON!) { genConnector(spec: $spec) { jobId status } }`
 const Q_GEN_RESULT = `query GenResult($jobId: ID!) { genResult(jobId: $jobId) }`
@@ -507,6 +509,10 @@ export function connectorClient() {
     list: () => ask(Q_CONNECTORS, 'connectors', {}),
     put: (payload) => ask(M_PUT_CONNECTOR, 'putConnector', { spec: JSON.stringify(payload) }),
     remove: (provider) => ask(M_DELETE_CONNECTOR, 'deleteConnector', { spec: JSON.stringify({ provider }) }),
+    // GPU 켜고 끄기 · 'on' | 'off' | 'state' → { state }. 커넥터 Lambda 가 EC2 를 부른다(infra/connector 의 power)
+    power: (action) => ask(M_GPU_POWER, 'gpuPower', { spec: JSON.stringify({ action }) }),
+    // 그림 한 장을 S3 에 영구 보관 · data:URL(≤300KB) → { url }
+    upload: (data, name) => ask(M_PUT_IMAGE, 'putImage', { spec: JSON.stringify({ data, name }) }),
     gen: (spec, opts) => runGenJob(post, spec, opts),
   }
 }

@@ -380,6 +380,10 @@ class StoryboardStack extends Stack {
     js(connDs, 'DeleteConnector', 'Mutation', 'deleteConnector', 'deleteConnector.js')
     // plan 과 같다. Event 로 띄우고 jobId 만 돌려준다
     js(connDs, 'GenConnector', 'Mutation', 'genConnector', 'genConnector.js')
+    // GPU 켜고 끄기. 인스턴스 id 와 EC2 권한은 아래 gpu 를 만든 뒤 붙인다
+    js(connDs, 'GpuPower', 'Mutation', 'gpuPower', 'gpuPower.js')
+    // 자산관리 올리기. 그림을 S3(images)에 영구 보관한다 — 자산은 지울 때까지 남는 것이라 op 로그에 담지 않는다
+    js(connDs, 'PutImage', 'Mutation', 'putImage', 'putImage.js')
     // 결과는 커넥터 Lambda 가 Ops 테이블에 적어 둔 것을 읽어 온다
     js(ops, 'GenResult', 'Query', 'genResult', 'genResult.js')
 
@@ -521,11 +525,26 @@ class StoryboardStack extends Stack {
      * 볼륨이 남아 있으므로 아침에 켤 때 67GB 를 다시 받지 않는다. systemd 가
      * sb.service 를 올리고, 가중치는 디스크에 그대로 있어서 몇 분 안에 준비된다.
      */
+    /*
+     * 2026-09-09: 저녁에 끄는 시간표(GpuOff)는 꺼 둔다. 사람이 화면의 「GPU 끄기」로 끈다 —
+     * 저녁 8시에 꺼진 GPU 앞에서 데모가 멈추고 다시 올리는 몇 분이 그대로 기다림이었다.
+     * 아침에 켜는 것(GpuOn)은 그대로 둔다. 켜져 있으면 아무 일도 하지 않는다.
+     * 값: g6e.2xlarge 는 시간당 약 2달러다. 24시간 켜 두면 달에 1,300달러 남짓이다 — 끄기를 누르는 사람이 있어야 한다.
+     */
+    connFn.addEnvironment('GPU_INSTANCE', gpu.instanceId)
+    connFn.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['ec2:StartInstances', 'ec2:StopInstances'],
+      resources: [Stack.of(this).formatArn({ service: 'ec2', resource: 'instance', resourceName: gpu.instanceId })],
+    }))
+    // DescribeInstances 는 리소스 단위 권한이 없다
+    connFn.addToRolePolicy(new iam.PolicyStatement({ actions: ['ec2:DescribeInstances'], resources: ['*'] }))
+
     for (const [name, when, action] of [
       ['GpuOn', GPU_HOURS.up, 'startInstances'],
       ['GpuOff', GPU_HOURS.down, 'stopInstances'],
     ]) {
       new scheduler.Schedule(this, name, {
+        enabled: action === 'startInstances',
         schedule: scheduler.ScheduleExpression.expression(`cron(${when})`),
         target: new schedtargets.Universal({
           service: 'ec2',

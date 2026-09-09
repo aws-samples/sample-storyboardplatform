@@ -88,13 +88,23 @@ log the board reads. Pick several assets ("a swim cap", "a happy family", "a wid
 page makes **photoreal stills** in 1, 2 or 4 versions (1920×1088, `style: real`): the references go
 to `klein` as a list, so the same faces, place and prop come back in one new composition with a film
 look instead of pencil. Versions land in the same candidate tray; a viewer opens them at 1:1 and 2×
-with drag-pan so you can compare before keeping. The storyboard offers the kept assets as *reference
+with drag-pan so you can compare before keeping. Candidates and the queue of pending versions live in
+the browser (`localStorage`), so a planner can walk over to the storyboard and come back to find the
+work still there; a request cut off mid-flight is recovered from the GPU server, which keeps each
+job's result for two hours (`/gen/result/{job}`). Uploaded references go to S3 through the connector
+Lambda (`putImage`) and stay until deleted, like everything else you keep. The storyboard offers the kept assets as *reference
 assets* when generating a cut; a cut's cast and its scene's background are preselected, props are
 picked by hand.
 
 Only one of them fits in the card's 48 GB at a time, so **picking a model swaps it**: the server loads
 the new weights in the background and refuses generation until they're resident (~1 min from disk).
 The picker shows the wait. `krea` is what a fresh deploy starts with (`MODEL` in the stack).
+
+**GPU power.** The box used to be switched off by a schedule at 20:00 KST; that left demos stranded
+in the evening. Now only the morning start (09:00) is scheduled and anyone but a reviewer can press
+**GPU 끄기 / GPU 켜기** in the storyboard's model menu or on the assets page (`gpuPower`, via the
+connector Lambda and EC2). A running g6e.2xlarge costs about $2 an hour, so switch it off when the
+day is done.
 
 **The only truth on the board is the op log.** One edit is one immutable op; on boot the client
 replays the log to build the screen. There is no separate stored state, which is why two people's

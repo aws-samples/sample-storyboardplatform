@@ -78,11 +78,13 @@ export function nextGpuOn(at) {
  * @param {Date|number|string} [at] - 기준 시각. 없으면 지금
  * @returns {string} 화면에 그대로 넣는 한 줄
  */
+/*
+ * 2026-09-09 부터 저녁에 끄는 시간표가 없습니다. 끄는 것은 사람이 「GPU 끄기」로 하고, 켜는 것도
+ * 「GPU 켜기」로 합니다(pages/board.js · pages/assets.js). 아침 9시 켜기만 시간표에 남아 있습니다.
+ * 그래서 이 문구는 「언제 켜진다」가 아니라 「어떻게 켠다」를 말합니다. at 은 문구에 안 쓰지만
+ * 부르는 쪽 서명은 그대로 둡니다.
+ */
 export function gpuDownHint(at) {
-  if (gpuHoursOpen(at)) {
-    return `${GPU_HOURS_TEXT} 에만 생성 서버를 켜는데, 지금은 그 시간인데도 닿지 않습니다.`
-      + ' 켜지는 중이거나 인스턴스가 멈춰 있을 수 있습니다.'
-  }
-  return `${GPU_HOURS_TEXT} 에만 생성 서버를 켭니다. 지금은 그 시간이 아니어서 꺼져 있습니다.`
-    + ` ${nextGpuOn(at)}에 다시 켜집니다.`
+  const morning = gpuHoursOpen(at) ? '' : ` 평일 ${GPU_ON_HOUR}시에는 저절로 켜집니다.`
+  return `생성 서버가 꺼져 있습니다. 「GPU 켜기」를 누르면 약 3~4분 뒤 준비됩니다.${morning}`
 }

@@ -474,6 +474,9 @@ class Req(BaseModel):
     refKind: str | None = None
     # 룩. 기본은 연필 콘티(STYLE), "real" 이면 실사 스틸(STYLE_REAL)
     style: str | None = None
+    # 일감 번호(화면이 만든 uuid). 있으면 결과를 JOB_KEEP 동안 보관해 /gen/result/{job} 으로 다시 내준다.
+    # 화면이 기다리는 동안 다른 탭으로 가면 응답이 끊기는데, 그때 그림이 버려지지 않게 하려는 것이다
+    job: str | None = None
     strength: float = 0.85
     steps: int | None = None
     guidance: float | None = None
@@ -578,6 +581,28 @@ def extracting(req: Req) -> bool:
     """자산 뽑기 요청인가. 이때만 감독도 통과한다(ASSET_ROLES)"""
     return str(req.refKind or "").startswith("asset_")
 
+# 일감 결과 보관. 화면(pages/assets.js 의 큐)이 페이지를 떠났다 돌아와 /gen/result 로 찾아간다.
+# 메모리에만 둔다 — 서버가 다시 뜨면 사라지고, 화면은 그때 그 일감을 처음부터 다시 보낸다.
+JOB_KEEP = 2 * 3600
+jobs: dict[str, dict] = {}
+JOB_ID = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
+
+def job_set(job: str | None, **fields) -> None:
+    if not job or not JOB_ID.match(job):
+        return
+    now = time.time()
+    for k in [k for k, v in jobs.items() if now - v.get("ts", now) > JOB_KEEP]:
+        jobs.pop(k, None)
+    jobs[job] = {"ts": now, **fields}
+
+@app.get("/gen/result/{job}")
+async def gen_result(job: str, authorization: str | None = Header(None)):
+    """보관된 일감 결과. 404 는 「모르는 일감」 — 시작조차 안 했거나 서버가 다시 떠서 잊은 것이다. 화면은 다시 보낸다"""
+    who(authorization)
+    if not JOB_ID.match(job) or job not in jobs:
+        raise HTTPException(404, "모르는 일감입니다")
+    return jobs[job]
+
 @app.post("/gen")
 async def gen(req: Req, authorization: str | None = Header(None)):
     who(authorization, need_art=True, roles=ASSET_ROLES if extracting(req) else ART_ROLES)
@@ -595,23 +620,37 @@ async def gen(req: Req, authorization: str | None = Header(None)):
 
     t = time.time()
     seed = seed_of(req.seed)
-    img = await asyncio.to_thread(run, req, seed)
+    job_set(req.job, status="run")
+    try:
+        img = await asyncio.to_thread(run, req, seed)
 
-    import boto3
+        import boto3
 
-    key = f"img/{uuid.uuid4().hex}.png"
-    buf = io.BytesIO()
-    img.save(buf, "PNG", optimize=True)
-    boto3.client("s3", region_name=REGION).put_object(
-        Bucket=BUCKET, Key=key, Body=buf.getvalue(), ContentType="image/png",
-        CacheControl="public, max-age=31536000, immutable",
-    )
-    return {
+        key = f"img/{uuid.uuid4().hex}.png"
+        buf = io.BytesIO()
+        img.save(buf, "PNG", optimize=True)
+        boto3.client("s3", region_name=REGION).put_object(
+            Bucket=BUCKET, Key=key, Body=buf.getvalue(), ContentType="image/png",
+            CacheControl="public, max-age=31536000, immutable",
+        )
+    except HTTPException as e:
+        # 503(모델 올리는 중·메모리)은 다시 하면 되는 것이다. 보관하지 않고 잊는다 — 화면이 다시 보낸다
+        if e.status_code != 503:
+            job_set(req.job, status="error", detail=str(e.detail))
+        else:
+            jobs.pop(req.job or "", None)
+        raise
+    except Exception as e:
+        job_set(req.job, status="error", detail=f"{type(e).__name__}: {e}")
+        raise
+    out = {
         "url": f"/{key}", "seed": seed,
         "model": MODELS[mid]["label"], "modelId": mid,
         "ms": int((time.time() - t) * 1000),
         "size": SIZE.get(req.kind, SIZE["cut"]),
     }
+    job_set(req.job, status="done", **out)
+    return out
 
 @app.post("/gen/load")
 async def load(req: Req, authorization: str | None = Header(None)):
@@ -833,6 +872,13 @@ if __name__ == "__main__":
     assert set(ISOLATE) == {"asset_char", "asset_bg", "asset_prop"}
     assert ART_ROLES < ASSET_ROLES and {"director", "admin"} < ASSET_ROLES
     assert extracting(Req(refKind="asset_bg")) and not extracting(Req(refKind="face")) and not extracting(Req())
+    # 일감 보관: 모양이 맞는 번호만, 오래된 것은 비운다
+    job_set("job-000001", status="run"); assert jobs["job-000001"]["status"] == "run"
+    job_set("../x", status="run"); assert "../x" not in jobs
+    job_set("short", status="run"); assert "short" not in jobs
+    jobs["old-000001"] = {"ts": time.time() - JOB_KEEP - 1, "status": "done"}
+    job_set("job-000002", status="done", url="/img/a.png"); assert "old-000001" not in jobs and jobs["job-000002"]["url"] == "/img/a.png"
+    jobs.clear()
     # 참조가 있으면 그림을 받지 않는 모델(krea)로 가지 않는다. 없으면 고른 대로
     assert REF_MODEL == "klein"
     assert pick_for(Req(model="krea", refs=["x"])) == "klein" and pick_for(Req(model="krea", init="x")) == "klein"
