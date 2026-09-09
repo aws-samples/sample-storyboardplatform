@@ -32,6 +32,11 @@ import { touch as touchProject } from '../services/projects.js'
 import { saveAsset, loadAsset } from '../services/assets.js'
 import { JOB_ROLES, allowed, denyReason, isDenied } from '../domain/permissions.js'
 import { confirmAsk } from '../components/confirm.js'
+import { askBackground } from '../components/background-ask.js'
+import {
+  questionsPrompt, normalizeQuestions, buildBackground, readBackground,
+  backgroundLines, FALLBACK_QUESTIONS,
+} from '../domain/story-background.js'
 import { wire as wireTour, demoActive, demoAdvance, demoSay, demoTitle } from '../../app-walkthrough/tour.js'
 
 /*
@@ -58,6 +63,16 @@ const S = {
   step: 1,
   script: '',
   scenes: [],           // { id, place, time, weather, blocks, blkIdx[], text, prompt, cast[], beat, framing }
+  /*
+   * 이 이야기의 공통 배경. { text, qa[], note } 이거나 null 입니다.
+   *
+   * 씬마다 다르게 그려지는 것을 막습니다(domain/story-background.js). 프로젝트에 저장해
+   * 두었으면 boot 이 되살리고, 아니면 이번 생성에만 씁니다. bgAsked 는 이번에 이미 물었나
+   * 입니다 — 「다시 생성」을 누를 때마다 같은 창을 세우지 않기 위해서입니다.
+   */
+  bg: null,
+  bgAsked: false,
+  bgKept: false,        // 프로젝트에 저장된 것인가. 서랍에서 지우면 다시 거짓이 됩니다
   size: 'key',
   seed: '',
   seedOn: false,
@@ -149,7 +164,16 @@ const say = (m) => { const r = $('#live'); if (r) r.textContent = m }
 
 const JSON_ONLY = '오직 아래 모양의 JSON 하나만 출력한다. 설명·머리말·코드펜스를 붙이지 않는다.'
 
-export function keyVisualPrompt(scenes) {
+/**
+ * 씬마다 이미지 프롬프트를 쓰라는 프롬프트입니다.
+ *
+ * bg 를 주면 그 배경이 모든 씬에 공통으로 들어갑니다(domain/story-background.js). 배경이
+ * 없으면 예전 그대로 돕니다 — 이 기능이 붙기 전에 만들어 둔 프로젝트가 그렇습니다.
+ *
+ * @param {Array} scenes
+ * @param {{text: string}|null} [bg] - 이 이야기의 공통 배경
+ */
+export function keyVisualPrompt(scenes, bg = null) {
   const lines = scenes.map((s) =>
     `${s.id} | ${s.place}${s.time ? ' · ' + s.time : ''}`
     + `${s.cast?.length ? ` | 등장: ${s.cast.join(', ')}` : ''}`
@@ -157,6 +181,7 @@ export function keyVisualPrompt(scenes) {
   return [
     '아래는 한 대본을 씬으로 나눈 것이다. 씬마다 키 비주얼 한 장의 이미지 프롬프트를 쓴다.',
     '키 비주얼은 그 씬 전체의 화풍과 공간을 정하는 대표 그림이다. 컷보다 넓게 잡는다.',
+    ...backgroundLines(bg),
     '',
     ...lines,
     '',
@@ -170,11 +195,28 @@ export function keyVisualPrompt(scenes) {
     `- visuals 는 ${scenes.length}개. scene 은 위의 id 를 그대로 쓴다.`,
     '- prompt 는 영어로 쓴다. 화풍 지시(연필·수채 등)는 쓰지 않는다. 서버가 붙인다.',
     '- prompt 에 글자·자막·말풍선을 넣으라는 말은 쓰지 않는다.',
-    '- prompt 는 공간·빛·인물의 자세와 프레이밍만 쓴다. 40 단어 안쪽.',
+    /*
+     * 배경이 있으면 길이를 늘려 준다. 40 단어는 「공간·빛·자세·프레이밍」만 쓸 때의
+     * 치수였다. 거기에 인물의 국적·나이·옷까지 매 장 넣으라고 하면서 같은 길이를 두면
+     * 모델이 둘 중 하나를 버린다. 실제로 배경을 넣으면 프레이밍이 먼저 빠진다.
+     */
+    bg?.text
+      ? '- prompt 는 위의 공통 배경 + 그 씬의 공간·빛·인물의 자세와 프레이밍을 쓴다. 65 단어 안쪽.'
+      : '- prompt 는 공간·빛·인물의 자세와 프레이밍만 쓴다. 40 단어 안쪽.',
     '- beat · framing · place · time · weather 는 한국어로 쓴다.',
     '- 대본에 없는 인물을 만들지 않는다. cast 는 대본에 이름이 나온 사람만.',
   ].join('\n')
 }
+
+/*
+ * 프롬프트 한 줄의 상한입니다.
+ *
+ * 40 단어일 때는 400 이면 넉넉했습니다. 공통 배경이 붙어 65 단어가 되면서 영어 한 단어를
+ * 6자로 세어도 400 에 닿습니다. 여기서 자르면 문장 가운데가 끊긴 채로 이미지 모델에
+ * 갑니다. 넉넉히 둡니다 — 이 값은 「모델이 폭주했나」를 막는 자리이고, 65 단어 지시를
+ * 지킨 응답을 자르는 자리가 아닙니다.
+ */
+const PROMPT_CHARS = 700
 
 /** 형식이 어긋난 응답은 씬 상태에 닿기 전에 막는다. */
 export function normalizeVisuals(raw, ids) {
@@ -185,7 +227,7 @@ export function normalizeVisuals(raw, ids) {
   for (const v of list) {
     const id = clip(v?.scene, 8).toUpperCase()
     if (!ok.has(id) || out.has(id)) continue
-    const prompt = clip(v?.prompt, 400)
+    const prompt = clip(v?.prompt, PROMPT_CHARS)
     if (prompt.length < 8) continue
     out.set(id, {
       prompt,
@@ -222,11 +264,22 @@ function parseJson(text) {
 async function restoreAssets() {
   if (demoActive()) return
   const board = boardFromSearch()
-  const [script, scenes] = await Promise.all([
+  const [script, scenes, background] = await Promise.all([
     loadAsset(board, 'script'),
     loadAsset(board, 'scenes'),
+    loadAsset(board, 'background'),
   ])
   if (script && !S.script) S.script = script
+  /*
+   * 저장해 둔 배경을 되살립니다. 이것이 이 기능의 「영속」입니다 — 한 번 정해 두면 다음에
+   * 이 프로젝트를 열 때도 프롬프트에 그대로 들어갑니다. 그래서 묻지 않습니다(bgAsked).
+   *
+   * readBackground 를 지나게 합니다. 저장된 것을 그대로 믿지 않는 이유는 이 판이 사람이
+   * 지울 수 있는 것이고, 모양이 어긋난 것을 넣으면 'undefined' 가 스무 장에 그림 지시로
+   * 붙기 때문입니다(domain/story-background.js).
+   */
+  const bg = readBackground(background)
+  if (bg) { S.bg = bg; S.bgKept = true; S.bgAsked = true }
   const list = Array.isArray(scenes?.scenes) ? scenes.scenes : []
   if (list.length && !S.scenes.length) {
     S.scenes = list
@@ -368,14 +421,171 @@ async function keepScript() {
   }
 }
 
+/* ══ 공통 배경 ═════════════════════════════════════ */
+
+/**
+ * 대본을 읽고 물음을 만듭니다. 못 만들면 준비해 둔 물음으로 내려갑니다.
+ *
+ * 실패해도 던지지 않습니다. 물음을 만드는 것은 배경을 받기 위한 준비이고, 그 준비가
+ * 어긋났다고 배경을 아예 못 넣게 하면 사람은 씬마다 손으로 붙이던 예전으로 돌아갑니다.
+ * 폴백 물음도 국적·시대·나이·화풍을 물으므로 그것만으로도 일관성은 크게 나아집니다.
+ *
+ * @returns {Promise<{questions: Array, byAi: boolean}>}
+ */
+async function makeQuestions() {
+  if (!canPlan() || !mayPlan()) return { questions: FALLBACK_QUESTIONS, byAi: false }
+  S.busy = 'ask'; paint()
+  wire('u', `plan()  씬 ${S.scenes.length}개 → 배경 물음 만들기`)
+  try {
+    const r = await S.net.plan({
+      prompt: questionsPrompt(S.scenes), maxTokens: 1200, think: false,
+    })
+    const qs = normalizeQuestions(parseJson(r.text))
+    const u = r.usage || {}
+    wire('g', `200  물음 ${qs.length}개 · 토큰 ${u.inputTokens || '?'}→${u.outputTokens || '?'}`)
+    if (!qs.length) {
+      wire('r', '물음을 읽지 못했습니다. 준비해 둔 물음으로 갑니다')
+      return { questions: FALLBACK_QUESTIONS, byAi: false }
+    }
+    return { questions: qs, byAi: true }
+  } catch (e) {
+    wire('r', `실패  ${e.message}. 준비해 둔 물음으로 갑니다`)
+    return { questions: FALLBACK_QUESTIONS, byAi: false }
+  } finally {
+    S.busy = null; paint()
+  }
+}
+
+/** 배경을 프로젝트에 담습니다. 실패는 적어만 둡니다 — 배경은 화면에 그대로 있습니다 */
+async function keepBackground() {
+  if (!S.bg) return
+  if (!mayKeep()) { noteKeepDenied(); return }
+  try {
+    await saveAsset({
+      boardId: boardFromSearch(), kind: 'background', body: S.bg, actor: S.me?.id,
+    })
+    S.bgKept = true
+    note('이 이야기의 배경을 프로젝트에 저장했습니다')
+    mark('이 이야기의 공통 배경을 저장했습니다')
+  } catch (err) {
+    console.warn('[key-visual] 배경을 담지 못했습니다', err)
+    S.warn = `배경을 저장하지 못했습니다. ${err.message} 이번 생성에는 그대로 씁니다.`
+  }
+}
+
+/**
+ * 배경을 물어봅니다. 이미 있으면 묻지 않습니다.
+ *
+ * 돌려주는 것은 「생성을 계속할까」입니다. 배경을 받았는지가 아닙니다. 배경 없이
+ * 진행하겠다고 한 사람도 참을 받습니다 — 그 사람이 원한 것은 생성이고, 배경은 그것을
+ * 더 좋게 만드는 것이지 조건이 아닙니다. 그만둔 사람만 거짓입니다.
+ *
+ * @returns {Promise<boolean>} 프롬프트 생성을 계속할까
+ */
+async function ensureBackground() {
+  // 이미 저장돼 있거나 이번에 한 번 물었으면 그것을 씁니다. 「다시 생성」마다 묻지 않습니다
+  if (S.bg || S.bgAsked) return true
+  S.bgAsked = true
+
+  const { questions, byAi } = await makeQuestions()
+  const out = await askBackground({
+    questions, byAi, canKeep: mayKeep(),
+    // 담을 권한이 없는 사람에게는 저장 칸을 세우지 않습니다. 대신 왜 없는지 적어 둡니다
+  })
+  if (!out) return false                 // 그만두기 · Esc · 바깥 누르기
+  if (out.skipped) {
+    note('배경 없이 진행합니다')
+    return true
+  }
+
+  S.bg = buildBackground(out.questions, { note: out.note })
+  if (!S.bg) {
+    // 창은 눌렀지만 한 칸도 안 채웠습니다. 빈 배경을 만들지 않고 그냥 갑니다
+    note('배경을 넣지 않고 진행합니다')
+    return true
+  }
+  note(`이 이야기의 배경을 정했습니다 · ${S.bg.qa.length}개 답`)
+  if (!mayKeep()) noteKeepDenied()
+  else if (out.keep) await keepBackground()
+  return true
+}
+
+/**
+ * 배경을 고칩니다. 이미 있는 것을 다시 물어 봅니다.
+ *
+ * 물음은 저장된 qa 를 그대로 씁니다. 모델을 다시 부르지 않습니다 — 사람이 고치려는 것은
+ * 자기가 넣은 답이고, 물음이 매번 달라지면 지난번 답이 어느 칸의 것인지 알 수 없습니다.
+ * 저장된 qa 가 비어 있으면(옛 모양이거나 덧붙임만 있는 배경) 준비해 둔 물음으로 갑니다.
+ */
+async function editBackground() {
+  const had = S.bg?.qa?.length
+    ? S.bg.qa.map((q) => ({ id: q.id, ask: q.ask, why: '', hint: '', answer: q.answer }))
+    : FALLBACK_QUESTIONS.map((q) => ({ ...q }))
+  const out = await askBackground({
+    questions: had, byAi: !!S.bg?.qa?.length, note: S.bg?.note || '',
+    keep: S.bgKept, canKeep: mayKeep(), canSkip: false, yes: '이 배경으로 고칩니다',
+  })
+  if (!out || out.skipped) return
+  S.bg = buildBackground(out.questions, { note: out.note })
+  if (S.bg && out.keep) await keepBackground()
+  else if (!S.bg && S.bgKept) await dropBackground()
+  paint()
+}
+
+/**
+ * 저장된 배경을 지웁니다. 화면에서도 뺍니다.
+ *
+ * 저장소에 「지우기」가 없어서 빈 본문을 덮어씁니다(services/assets.js 의 saveAsset).
+ * readBackground 가 text 없는 것을 null 로 읽으므로 다음에 열면 배경이 없는 것과 같습니다.
+ * 항목 자체를 지우는 길을 새로 내지 않은 이유는 리졸버와 스키마를 하나씩 늘려야 하고,
+ * 서랍이 그 줄을 「아직 없습니다」로 그리는 결과는 어느 쪽이든 같기 때문입니다.
+ */
+async function dropBackground() {
+  const ok = await confirmAsk({
+    title: '이 이야기의 배경을 지우시겠습니까?',
+    body: '다음 프롬프트 생성부터는 배경이 들어가지 않습니다. 이미 만들어 둔 프롬프트와 '
+      + '그림은 그대로 있습니다.',
+    list: S.bg?.text ? [S.bg.text] : [],
+    yes: '지웁니다',
+    danger: true,
+  })
+  if (!ok) return
+  S.bg = null
+  S.bgAsked = true   // 지운 사람에게 곧바로 다시 묻지 않습니다
+  if (S.bgKept && mayKeep()) {
+    try {
+      await saveAsset({
+        boardId: boardFromSearch(), kind: 'background', body: null, actor: S.me?.id,
+      })
+      S.bgKept = false
+      note('저장해 둔 배경을 지웠습니다')
+      mark('이 이야기의 공통 배경을 지웠습니다')
+    } catch (err) {
+      wire('r', `배경을 지우지 못했습니다. ${err.message}`)
+      S.warn = `저장된 배경을 지우지 못했습니다. ${err.message}`
+    }
+  }
+  paint()
+}
+
+/* ══ 프롬프트 쓰기 ═════════════════════════════════ */
+
 async function writePrompts() {
   if (!canPlan()) { paint(); return }
   // 역할이 막히면 보내지 않고 까닭을 적습니다. 보내 봐야 리졸버가 튕깁니다
   if (!mayPlan()) { notePlanDenied(); paint(); return }
+  /*
+   * 프롬프트를 쓰기 전에 배경을 받습니다. 순서가 중요합니다 — 배경은 프롬프트 안에
+   * 들어가는 것이라, 프롬프트를 먼저 쓰고 배경을 받으면 다시 써야 합니다.
+   * 그만둔 사람은 여기서 멈춥니다.
+   */
+  if (!await ensureBackground()) return
   S.busy = 'prompt'; paint()
-  wire('u', `plan()  씬 ${S.scenes.length}개 → 이미지 프롬프트`)
+  wire('u', `plan()  씬 ${S.scenes.length}개 → 이미지 프롬프트${S.bg ? ' (공통 배경 포함)' : ''}`)
   try {
-    const r = await S.net.plan({ prompt: keyVisualPrompt(S.scenes), maxTokens: 4000, think: false })
+    const r = await S.net.plan({
+      prompt: keyVisualPrompt(S.scenes, S.bg), maxTokens: 4000, think: false,
+    })
     const map = normalizeVisuals(parseJson(r.text), S.scenes.map((s) => s.id))
     let got = 0
     for (const s of S.scenes) {
@@ -1030,9 +1240,77 @@ function step1() {
   return w
 }
 
+/**
+ * 이 이야기의 공통 배경 카드. 프롬프트 목록 위에 섭니다.
+ *
+ * 자리가 위인 이유는 이것이 아래 프롬프트 전부에 들어가 있는 것이기 때문입니다. 아래에
+ * 두면 「이 문장이 어디서 왔나」를 스무 줄 지나서 알게 됩니다.
+ *
+ * 배경이 없을 때도 카드를 세웁니다. 「없다」가 이 화면에서 알아야 하는 사실입니다 —
+ * 그림이 씬마다 다른 사람으로 나오는 까닭이 여기 있기 때문입니다.
+ */
+function bgCard() {
+  const has = !!S.bg?.text
+  const c = card('이 이야기의 공통 배경',
+    has
+      ? '아래 프롬프트 전부에 이 배경이 함께 들어갑니다. 씬이 달라도 같은 인물로 그려집니다.'
+      : '대본에 없는 것(국적·나이·시대·화풍)은 씬마다 다르게 그려집니다. 배경을 정해 두면 그것이 모든 씬에 함께 들어갑니다.',
+    'background')
+
+  if (has) {
+    c.append(el('p', 'bgc__text', S.bg.text))
+    const where = S.bgKept
+      ? '이 프로젝트에 저장돼 있습니다. 다음에 열 때도 그대로 있습니다.'
+      : '저장하지 않았습니다. 새로고침하면 사라집니다.'
+    c.append(el('p', 'note', where))
+  }
+
+  const row = el('div', 'row')
+  const edit = el('button', 'btn btn--line', has ? '배경 고치기' : '배경 정하기')
+  edit.type = 'button'
+  edit.disabled = !!S.busy
+  /*
+   * 없을 때는 물음부터 만들어야 하므로 ensureBackground 로 갑니다. 그 함수는 이미 물었으면
+   * 그냥 참을 주고 돌아서므로, 여기서는 bgAsked 를 먼저 내려 다시 묻게 합니다. 「정하기」를
+   * 눌렀는데 아무 창도 안 뜨는 것이 가장 나쁩니다.
+   */
+  edit.onclick = async () => {
+    if (has) { editBackground(); return }
+    S.bgAsked = false
+    await ensureBackground()
+    paint()
+  }
+  row.append(edit)
+
+  if (has) {
+    const del = el('button', 'btn btn--line', '지우기')
+    del.type = 'button'
+    del.disabled = !!S.busy
+    del.onclick = () => dropBackground()
+    row.append(del)
+  }
+  c.append(row)
+
+  // 고친 배경은 다시 생성해야 프롬프트에 들어갑니다. 그 사실을 버튼 옆에 적어 둡니다
+  if (has && S.scenes.some((s) => s.prompt) && canPlan()) {
+    c.append(el('p', 'note', '배경을 고치신 뒤에는 아래 「다시 생성」을 눌러야 프롬프트에 반영됩니다.'))
+  }
+  return c
+}
+
 /* ── STEP 2 ───────────────────────────────────── */
 function step2() {
   const w = el('div', 'wrap wrap--2')
+
+  /*
+   * 왼쪽 칸입니다. 배경 카드와 프롬프트 목록이 위아래로 섭니다.
+   *
+   * 이 div 가 필요합니다. .wrap--2 는 두 칸 그리드라서(key-visual.html) 카드를 w 에 바로
+   * 붙이면 그것이 칸 하나를 차지하고 오른쪽 옵션이 다음 줄로 밀립니다. .wrap>div 가
+   * 이미 「한 칸 안의 세로 쌓기」 모양을 들고 있어서 오른쪽 칸과 같은 방식입니다.
+   */
+  const left = el('div')
+  left.append(bgCard())
 
   const a = card(`이미지 프롬프트 · 씬 ${S.scenes.length}개`,
     canPlan()
@@ -1061,13 +1339,16 @@ function step2() {
   }
   const row = el('div', 'row')
   if (canPlan()) {
-    const re = el('button', 'btn btn--line', S.busy === 'prompt' ? '생성중…' : '다시 생성')
+    // 'ask' 는 배경 물음을 만드는 중입니다. 그것도 이 버튼이 시작한 일이라 여기서 말합니다
+    const re = el('button', 'btn btn--line',
+      S.busy === 'prompt' ? '생성중…' : S.busy === 'ask' ? '물음을 만드는 중…' : '다시 생성')
     re.type = 'button'; re.disabled = !!S.busy
     re.onclick = () => writePrompts()
     row.append(re)
   }
   a.append(row)
-  w.append(a)
+  left.append(a)
+  w.append(left)
 
   const b = el('div')
   const o = card('공통 옵션')

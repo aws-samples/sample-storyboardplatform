@@ -65,6 +65,11 @@
   const { guide, guiding, guideAt, guideMarks, stop: stopGuide,
   } = await import(`../app-walkthrough/guide.js?t=${Date.now()}`)
   const { emptyHint } = await import(`./components/empty-panel.js?t=${Date.now()}`)
+  const {
+    questionsPrompt, normalizeQuestions, answered, buildBackground, readBackground,
+    summarizeBackground, backgroundLines, FALLBACK_QUESTIONS, MAX_QUESTIONS, MAX_BACKGROUND,
+  } = await import(`./domain/story-background.js?t=${Date.now()}`)
+  const { askBackground } = await import(`./components/background-ask.js?t=${Date.now()}`)
   const coach = await import(`./components/coachmark.js?t=${Date.now()}`)
   const { faceSheet, srcOf } = await import(`./lib/placeholder-art.js?t=${Date.now()}`)
 
@@ -2505,6 +2510,265 @@
     emptyHint({ onExample: () => {}, note: '예시 내용도 서버에 남습니다.' })
       .querySelector('.ehint__note').textContent.includes('서버에 남습니다'))
 
+  /* ══ story-background.js: 씬마다 같이 들어가는 공통 배경 ══════════════════ */
+
+  /*
+   * 이 판이 고치는 것은 「같은 인물이 씬마다 다른 사람으로 그려지는 것」이다. 이미지
+   * 모델은 프롬프트 하나가 그림 하나라서 앞 장을 기억하지 않고, 대본은 국적이나 나이를
+   * 적지 않는다. 그래서 사람에게 물어서 받은 답을 모든 씬의 프롬프트에 다시 넣는다.
+   */
+  const bgScenes = [
+    { id: 'S01', place: '교실', time: '낮', cast: ['소녀', '선생님'], text: '소녀가 창가에 앉아 있다.' },
+    { id: 'S02', place: '복도', time: '밤', cast: ['소녀'], text: '소녀가 혼자 걷는다.' },
+  ]
+
+  ok('물음 프롬프트에 씬과 등장인물이 들어간다', (() => {
+    const p = questionsPrompt(bgScenes)
+    return p.includes('S01') && p.includes('교실') && p.includes('소녀, 선생님')
+      && p.includes('"questions"')
+  })())
+  /*
+   * 대본에 이미 있는 것을 되묻지 않게 규칙으로 못박아 둔다. 장소와 시간대는 씬 머리글에
+   * 있으므로 그것을 물으면 사람이 같은 것을 두 번 적는다.
+   */
+  ok('물음 프롬프트가 대본에 있는 것은 묻지 말라고 한다',
+    questionsPrompt(bgScenes).includes('대본에 이미 있는 것은 묻지 않는다'))
+  ok('씬이 없어도 물음 프롬프트는 만들어진다', (() => {
+    const p = questionsPrompt(null)
+    return typeof p === 'string' && p.includes('"questions"')
+  })())
+
+  ok('모델이 준 물음을 받아 쓴다', (() => {
+    const qs = normalizeQuestions({ questions: [{ id: 'nationality', ask: '국적은?', why: '까닭', hint: '한국인' }] })
+    return qs.length === 1 && qs[0].id === 'nationality' && qs[0].ask === '국적은?'
+      && qs[0].answer === ''
+  })())
+  /*
+   * id 는 답을 담을 열쇠가 된다. 이상한 글자가 섞인 것을 그대로 두면 저장된 배경의 열쇠가
+   * 되어 나중에 그 칸을 찾지 못한다. 그래서 여기서 씻는다.
+   */
+  ok('id 에서 쓸 수 없는 글자를 씻는다', (() => {
+    const qs = normalizeQuestions({ questions: [{ id: 'Nation-Ality!', ask: '국적은?' }] })
+    return qs[0].id === 'nationality'
+  })())
+  ok('id 나 물음이 없는 것과 겹치는 id 는 버린다', (() => {
+    const qs = normalizeQuestions({ questions: [
+      { id: 'a', ask: '하나' }, { id: '', ask: '둘' }, { id: 'c', ask: '' }, { id: 'a', ask: '넷' },
+    ] })
+    return qs.length === 1 && qs[0].ask === '하나'
+  })())
+  ok(`물음은 ${MAX_QUESTIONS}개까지만 받는다`, (() => {
+    const many = Array.from({ length: 20 }, (_, i) => ({ id: `q${i}`, ask: `물음 ${i}` }))
+    return normalizeQuestions({ questions: many }).length === MAX_QUESTIONS
+  })())
+  /*
+   * 하나도 못 건지면 빈 배열이다. 여기서 폴백을 돌려주지 않는 이유는, 그러면 부르는 쪽이
+   * 「모델이 만든 물음」과 「우리가 준비한 물음」을 구분할 수 없어서 사람에게 어느 쪽인지
+   * 말해 줄 수 없기 때문이다. 창이 그것을 한 줄로 적는다.
+   */
+  ok('못 건지면 빈 배열이다. 폴백을 여기서 섞지 않는다', (() => {
+    return normalizeQuestions(null).length === 0
+      && normalizeQuestions({ questions: 'x' }).length === 0
+      && normalizeQuestions({ questions: [{ ask: '아이디가 없다' }] }).length === 0
+  })())
+  ok('준비해 둔 물음은 국적을 먼저 묻는다', (() => (
+    FALLBACK_QUESTIONS.length >= 4 && FALLBACK_QUESTIONS[0].id === 'nationality'
+      && FALLBACK_QUESTIONS.every((q) => q.ask && q.why && q.hint)
+  ))())
+
+  /*
+   * 빈 칸은 「모르겠다」가 아니라 「이건 안 정한다」다. 그것을 배경에 넣으면 모델이 그
+   * 빈 자리도 지시로 읽는다. 사람이 안 정한 것은 모델이 고르는 편이 낫다.
+   */
+  ok('답하지 않은 물음은 배경에 넣지 않는다', (() => {
+    const qa = answered([
+      { id: 'a', ask: '국적은?', answer: '한국인' },
+      { id: 'b', ask: '나이는?', answer: '   ' },
+      { id: 'c', ask: '시대는?', answer: '' },
+    ])
+    return qa.length === 1 && qa[0].answer === '한국인'
+  })())
+
+  ok('답을 한 줄로 이어 배경을 만든다', (() => {
+    const bg = buildBackground([
+      { id: 'a', ask: '국적은?', answer: '소녀와 선생님 모두 한국인' },
+      { id: 'b', ask: '시대는?', answer: '2020년대 한국' },
+    ])
+    return bg.text === '소녀와 선생님 모두 한국인. 2020년대 한국' && bg.qa.length === 2
+  })())
+  /*
+   * 이름표를 붙이지 않는다. 이미지 모델의 프롬프트는 쉼표로 이은 한 덩이라서, 「국적:」
+   * 같은 라벨을 넣으면 그 글자까지 그림의 요소로 읽는다. 실제로 프롬프트의 글자가 그림에
+   * 나타나는 일이 있다.
+   */
+  ok('배경에 「국적:」 같은 이름표를 붙이지 않는다', (() => {
+    const bg = buildBackground([{ id: 'nationality', ask: '국적은?', answer: '한국인' }])
+    return bg.text === '한국인' && !bg.text.includes(':')
+  })())
+  ok('물음에 없던 것을 덧붙일 수 있다', (() => {
+    const bg = buildBackground([{ id: 'a', ask: '국적은?', answer: '한국인' }], { note: '소녀는 노란 우비를 입는다' })
+    return bg.text.includes('한국인') && bg.text.includes('노란 우비') && bg.note === '소녀는 노란 우비를 입는다'
+  })())
+  ok('덧붙임만 있어도 배경이 된다', (() => {
+    const bg = buildBackground([], { note: '전부 흑백으로' })
+    return bg?.text === '전부 흑백으로' && bg.qa.length === 0
+  })())
+  /* 한 칸도 안 채우고 누른 사람에게 빈 배경을 만들어 주지 않는다 */
+  ok('아무 답도 없으면 배경을 만들지 않는다', (() => (
+    buildBackground([]) === null
+      && buildBackground([{ id: 'a', ask: '국적은?', answer: '' }]) === null
+      && buildBackground(null) === null
+  ))())
+  ok(`배경은 ${MAX_BACKGROUND}자를 넘기지 않는다`, (() => {
+    const bg = buildBackground([{ id: 'a', ask: '?', answer: '가'.repeat(200) }], { note: '나'.repeat(400) })
+    return bg.text.length <= MAX_BACKGROUND
+  })())
+
+  /*
+   * 저장된 것을 그대로 믿지 않는다. 이 판은 사람이 지울 수 있고 옛 모양으로 남아 있을 수도
+   * 있다. 모양이 어긋난 것을 프롬프트에 넣으면 'undefined' 가 그림 지시로 들어가고, 그것이
+   * 조용히 스무 장에 붙는 것이 가장 나쁘다.
+   */
+  ok('저장된 배경을 되살린다', (() => {
+    const bg = readBackground({ text: '한국인', qa: [{ id: 'a', ask: '국적은?', answer: '한국인' }], note: '' })
+    return bg.text === '한국인' && bg.qa.length === 1
+  })())
+  ok('모양이 어긋난 배경은 없는 것으로 읽는다', (() => (
+    readBackground(null) === null && readBackground({}) === null
+      && readBackground({ text: '   ' }) === null && readBackground('한국인') === null
+  ))())
+  /* 지우기는 빈 본문을 덮어쓰는 것이다. 그것이 「없음」으로 읽혀야 지운 것이 된다 */
+  ok('빈 본문을 덮어쓴 것은 지운 것으로 읽는다', readBackground({ text: '', qa: [] }) === null)
+  ok('답이 빠진 qa 줄은 되살릴 때 버린다', (() => {
+    const bg = readBackground({ text: '한국인', qa: [{ id: 'a', answer: '한국인' }, { id: 'b', answer: '' }] })
+    return bg.qa.length === 1
+  })())
+
+  ok('서랍 요약에 답의 수와 배경이 보인다', (() => {
+    const s = summarizeBackground({ text: '소녀와 선생님 모두 한국인', qa: [{ id: 'a', answer: '한국인' }] })
+    return s.includes('답 1개') && s.includes('한국인')
+  })())
+  ok('배경이 없으면 서랍 요약은 없다', (() => (
+    summarizeBackground(null) === null && summarizeBackground({ text: '' }) === null
+  ))())
+  /* 서랍의 종류표에도 들어 있어야 그 줄이 서고 지울 수 있다 */
+  ok('공통 배경이 에셋 종류로 들어 있다', (() => {
+    const k = assetKind('background')
+    return isAssetKind('background') && k.step === 'keyvisual' && k.label === '공통 배경'
+      && summarize('background', { text: '한국인' }).includes('한국인')
+  })())
+  /* 씬 뒤 · 키비주얼 앞이다. 만들어지는 순서가 그렇다 */
+  ok('공통 배경은 씬과 키비주얼 사이에 선다', (() => {
+    const ks = KIND_KEYS
+    return ks.indexOf('background') > ks.indexOf('scenes')
+      && ks.indexOf('background') < ks.indexOf('keyvisual')
+  })())
+
+  /*
+   * 프롬프트에 끼우는 줄이다. 「모든 씬에 공통」이라는 말이 반드시 있어야 한다. 배경만
+   * 넣고 그 말을 빼면 모델이 그것을 첫 씬의 설명으로 읽는다.
+   */
+  ok('배경 줄이 모든 씬에 넣으라고 말한다', (() => {
+    const ls = backgroundLines({ text: '한국인' })
+    const t = ls.join('\n')
+    return t.includes('한국인') && t.includes('모든 씬에 공통')
+      && t.includes('영어로 옮겨 반드시')
+  })())
+  ok('배경이 없으면 프롬프트에 아무 줄도 넣지 않는다', (() => (
+    backgroundLines(null).length === 0 && backgroundLines({ text: '' }).length === 0
+      && backgroundLines({}).length === 0
+  ))())
+
+  /* ── 물어보는 창 ── */
+
+  /*
+   * 「그만두기」와 「배경 없이 진행」은 다른 답이다. 앞은 생성 자체를 멈추라는 뜻이고
+   * 뒤는 생성은 하되 배경만 빼라는 뜻이다. 창이 닫히는 애매한 길은 모두 「그만두기」다.
+   */
+  ok('배경 창은 답을 모아 돌려준다', await (async () => {
+    const p = askBackground({ questions: [{ id: 'a', ask: '국적은?', why: '', hint: '한국인' }] })
+    const dlg = document.querySelector('.bga')
+    const inp = dlg.querySelector('.bga__q input')
+    inp.value = '한국인'
+    inp.dispatchEvent(new Event('input'))
+    dlg.querySelector('.bga__yes').click()
+    const res = await p
+    return res.questions[0].answer === '한국인' && res.keep === true
+  })())
+  ok('「배경 없이 진행」은 그만두기와 다른 답이다', await (async () => {
+    const p = askBackground({ questions: [{ id: 'a', ask: '국적은?' }] })
+    document.querySelector('.bga').querySelector('.bga__skip').click()
+    return (await p)?.skipped === true
+  })())
+  ok('그만두면 null 이다', await (async () => {
+    const p = askBackground({ questions: [{ id: 'a', ask: '국적은?' }] })
+    document.querySelector('.bga').querySelector('.bga__no').click()
+    return (await p) === null
+  })())
+  /*
+   * 담을 권한이 없는 사람에게 저장 칸을 세우지 않는다. 세워 두고 눌러도 안 되게 하면
+   * 「눌렀는데 저장이 안 됐다」가 된다. 못 하는 일을 보여주지 않는다.
+   */
+  ok('저장할 수 없으면 저장 칸을 세우지 않는다', await (async () => {
+    const p = askBackground({ questions: [{ id: 'a', ask: '국적은?' }], canKeep: false })
+    const dlg = document.querySelector('.bga')
+    const none = !dlg.querySelector('.bga__keep')
+    dlg.querySelector('.bga__yes').click()
+    return none && (await p).keep === false
+  })())
+  /* 고칠 때는 「배경 없이 진행」이 없다. 이미 있는 것을 고치러 온 사람에게 낼 길이 아니다 */
+  ok('고칠 때는 배경 없이 진행하는 길을 내지 않는다', await (async () => {
+    const p = askBackground({ questions: [{ id: 'a', ask: '국적은?' }], canSkip: false })
+    const dlg = document.querySelector('.bga')
+    const none = !dlg.querySelector('.bga__skip')
+    dlg.querySelector('.bga__no').click()
+    await p
+    return none
+  })())
+  /* 이미 있는 배경을 고칠 때는 그때 넣은 답과 덧붙임이 그대로 서 있어야 한다 */
+  ok('고칠 때는 지난번 답이 칸에 들어 있다', await (async () => {
+    const p = askBackground({
+      questions: [{ id: 'a', ask: '국적은?', answer: '한국인' }],
+      note: '노란 우비', canSkip: false,
+    })
+    const dlg = document.querySelector('.bga')
+    const had = dlg.querySelector('.bga__q input').value === '한국인'
+      && dlg.querySelector('.bga__note textarea').value === '노란 우비'
+    dlg.querySelector('.bga__yes').click()
+    const res = await p
+    return had && res.note === '노란 우비'
+  })())
+  ok('모델이 만든 물음인지 준비해 둔 물음인지 말해 준다', await (async () => {
+    const p1 = askBackground({ questions: [{ id: 'a', ask: '?' }], byAi: true })
+    const ai = document.querySelector('.bga__from').textContent
+    document.querySelector('.bga__no').click()
+    await p1
+    const p2 = askBackground({ questions: [{ id: 'a', ask: '?' }], byAi: false })
+    const no = document.querySelector('.bga__from').textContent
+    document.querySelector('.bga__no').click()
+    await p2
+    return ai.includes('대본을 읽고') && no.includes('문장 모델이 없어서')
+  })())
+  /* 창은 답을 받을 물음 객체를 새로 만든다. 부르는 쪽이 넘긴 것을 고쳐 두면 안 된다 */
+  ok('넘긴 물음을 창이 고쳐 두지 않는다', await (async () => {
+    const mine = [{ id: 'a', ask: '국적은?', answer: '' }]
+    const p = askBackground({ questions: mine })
+    const dlg = document.querySelector('.bga')
+    const inp = dlg.querySelector('.bga__q input')
+    inp.value = '한국인'
+    inp.dispatchEvent(new Event('input'))
+    dlg.querySelector('.bga__yes').click()
+    const res = await p
+    return res.questions[0].answer === '한국인' && mine[0].answer === ''
+  })())
+  /* 창이 닫히면 판에서 사라져야 한다. 남아 있으면 다음에 여는 창을 이것이 가로챈다 */
+  ok('닫힌 창은 판에서 없어진다', await (async () => {
+    const p = askBackground({ questions: [{ id: 'a', ask: '국적은?' }] })
+    document.querySelector('.bga').querySelector('.bga__no').click()
+    await p
+    return document.querySelector('.bga') === null
+  })())
+
   /*
    * 길잡이는 타이머로 넘어가지 않는다. 그래서 검사도 시간을 재지 않고 「눌렀는가」만 본다. * 예전 검사는 ms 를 기다렸다가 넘어갔는지를 봤고, 그건 지금은 있어서는 안 되는 동작이다.
    *
@@ -2520,8 +2784,16 @@
    * 뒤에 그려집니다. onboard.js 의 showStep 이 requestAnimationFrame 을 한 번 지납니다
    * (coach.js 와 같은 이유). 그래서 말풍선 안을 읽는 검사는 한 프레임을 기다립니다.
    * 기다리지 않으면 .onbg 는 있는데 그 속이 비어 있는 상태를 읽습니다.
+   *
+   * 프레임을 세어 기다립니다. 예전에는 40ms 를 셌는데, 그것은 「한 프레임은 16ms 쯤이니
+   * 40ms 면 넉넉하다」는 짐작이었습니다. 짐작이 틀리는 자리가 있습니다 — 앞의 검사가 판을
+   * 무겁게 만들어 두면 프레임이 늦어지고, 그때 이 검사들이 아직 안 그려진 말풍선을 읽어
+   * null 에 점을 찍고 묶음 전체가 그 자리에서 멈춥니다. 300번 돌려 보면 몇 번씩 걸립니다.
+   * 프레임을 실제로 기다리면 판이 얼마나 무겁든 같은 자리를 봅니다. 두 번 기다리는 것은
+   * showStep 이 rAF 안에서 그리므로 「그 프레임」과 「그려진 뒤」가 다르기 때문입니다.
    */
-  const painted = () => new Promise((r) => setTimeout(r, 40))
+  const painted = () => new Promise((r) =>
+    requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 0))))
 
   ok('길잡이는 막을 덮고 첫 단계를 적고 그 자리에 테를 두른다', await (async () => {
     guide({ steps: [
@@ -3471,8 +3743,8 @@
     return KIND_KEYS.every((k) => `ASSET#${k}` < floor && !`ASSET#${k}`.startsWith('OP#'))
   })())
 
-  ok('에셋 종류는 여섯이고 key 가 겹치지 않는다', ASSET_KINDS.length === 6
-    && new Set(KIND_KEYS).size === 6
+  ok('에셋 종류는 일곱이고 key 가 겹치지 않는다', ASSET_KINDS.length === 7
+    && new Set(KIND_KEYS).size === 7
     && ASSET_KINDS.every((k) => k.label && k.step && k.make))
   ok('모르는 종류는 받지 않는다', isAssetKind('script') && !isAssetKind('legacy') && !isAssetKind(''))
 
@@ -3506,9 +3778,9 @@
   })())
 
   /*
-   * 여섯 종류 모두 「담는 자리」가 있어야 합니다.
+   * 일곱 종류 모두 「담는 자리」가 있어야 합니다.
    *
-   * 서랍(project.html)은 ASSET#<kind> 여섯 칸만 읽습니다. 종류를 표에 적어 두고 그 칸에
+   * 서랍(project.html)은 ASSET#<kind> 일곱 칸만 읽습니다. 종류를 표에 적어 두고 그 칸에
    * 쓰는 화면이 없으면, 서랍은 사람이 그 일을 다 해 놓은 뒤에도 「아직 없습니다」라고
    * 말합니다. 실제로 세 칸이 그랬습니다 — 그래프는 Neptune 에만 갔고(story-graph.js),
    * 붙여넣은 시놉시스는 textarea 값으로만 있었고, 콘티는 보드 화면을 한 번 열어야
@@ -3525,7 +3797,7 @@
       [...s.matchAll(/kind:\s*(?:[^,\n]*\?\s*)?'([a-z]+)'(?:\s*:\s*'([a-z]+)')?/g)]
         .flatMap((m) => [m[1], m[2]]).filter((k) => KIND_KEYS.includes(k))))
     const orphan = KIND_KEYS.filter((k) => !written.has(k))
-    ok('여섯 종류 모두 담는 화면이 있다. 없으면 서랍이 늘 「아직 없습니다」다',
+    ok('일곱 종류 모두 담는 화면이 있다. 없으면 서랍이 늘 「아직 없습니다」다',
       !orphan.length, `담는 곳이 없는 종류: ${orphan.join('·')}`)
 
     const [, kv, sg] = srcs
@@ -3536,6 +3808,31 @@
     ok('그래프를 뽑으면 그래프 칸에 사본을 담는다', /kind:\s*'graph'/.test(sg))
     ok('붙여넣은 글이 시놉시스면 시놉시스 칸에 담는다', /'script'\s*:\s*'synopsis'/.test(sg))
     ok('보드에 붙이면 키비주얼 화면도 콘티 칸을 올린다', /kind:\s*'conti'/.test(kv))
+    /* 저장하겠다고 한 배경은 프로젝트에 남아야 합니다. 그래서 담는 곳이 있어야 합니다 */
+    ok('배경을 저장하겠다고 하면 키비주얼 화면이 배경 칸에 담는다', /kind:\s*'background'/.test(kv))
+    /*
+     * 「영속」이 이 판의 요점입니다. 담기만 하고 다음에 열 때 읽지 않으면, 사람은 저장했다는
+     * 말을 듣고 다시 와서 같은 물음을 또 받습니다. 그래서 읽는 자리도 못 박아 둡니다.
+     */
+    ok('다음에 열 때 저장해 둔 배경을 읽어 온다', /loadAsset\([^)]*'background'\)/.test(kv))
+    /* 배경은 프롬프트 안에 들어가는 것이라, 프롬프트를 쓰기 전에 받아야 합니다 */
+    ok('프롬프트를 쓰기 전에 배경을 받는다',
+      /if \(!await ensureBackground\(\)\) return[\s\S]{0,400}keyVisualPrompt\(S\.scenes, S\.bg\)/.test(kv))
+    /* 지우는 길이 있어야 합니다. 영구 저장은 지울 수 있어야 영구 저장입니다 */
+    ok('저장해 둔 배경을 지우는 길이 있다',
+      /kind:\s*'background',\s*body:\s*null/.test(kv))
+    /*
+     * 프롬프트 한 줄의 길이. 40 단어는 「공간·빛·자세·프레이밍」만 쓸 때의 치수였습니다.
+     * 거기에 국적·나이·옷까지 매 장 넣으라고 하면서 같은 길이를 두면 모델이 둘 중 하나를
+     * 버립니다 — 프레이밍이 먼저 빠집니다. 그래서 배경이 있을 때만 늘려 줍니다.
+     */
+    ok('배경이 있을 때만 프롬프트 길이를 늘려 준다',
+      /bg\?\.text\s*\n?\s*\?[^\n]*65 단어[\s\S]{0,120}:\s*'[^\n]*40 단어/.test(kv))
+    /* 65 단어를 지킨 응답이 잘리면 문장 가운데가 끊긴 채로 이미지 모델에 갑니다 */
+    ok('늘린 길이만큼 잘라내는 상한도 늘려 두었다', (() => {
+      const m = kv.match(/const PROMPT_CHARS = (\d+)/)
+      return !!m && Number(m[1]) >= 600
+    })())
   } catch (err) {
     ok(`에셋을 담는 화면을 읽지 못했다 (${err.message})`, false)
   }

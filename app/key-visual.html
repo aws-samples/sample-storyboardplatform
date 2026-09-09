@@ -143,6 +143,15 @@ main{padding:20px;min-width:0}
 .sc__bl{font:400 11px/1 var(--m);color:var(--ink-3)}
 
 /* ── STEP 2 ───────────────────────────── */
+/*
+  이 이야기의 공통 배경. 아래 프롬프트 전부에 들어가 있는 문장이라, 옅은 판에 담아
+  「이건 지시가 아니라 이미 적용된 것」으로 읽히게 둡니다. 사람이 쓴 글이므로 고정폭이
+  아니라 본문 글꼴입니다(.pr__in 은 영어 프롬프트라서 고정폭입니다).
+*/
+.bgc__text{
+  padding:10px 12px;background:var(--fill);border:1px solid var(--line-2);
+  border-radius:var(--r);font-size:12.5px;line-height:1.7;color:var(--ink)
+}
 .pr{padding:11px 0;border-top:1px solid var(--line-2)}
 .pr:first-of-type{border-top:0}
 .pr__top{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
