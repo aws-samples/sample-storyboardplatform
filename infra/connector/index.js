@@ -23,6 +23,7 @@
 
 const { BedrockRuntimeClient, ConverseCommand } = require('@aws-sdk/client-bedrock-runtime')
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb')
+const { DescribeInstancesCommand, EC2Client, StartInstancesCommand, StopInstancesCommand } = require('@aws-sdk/client-ec2')
 const { PutObjectCommand, S3Client } = require('@aws-sdk/client-s3')
 const {
   DeleteParameterCommand, GetParameterCommand, GetParametersByPathCommand,
@@ -499,7 +500,53 @@ async function gen(payload) {
 
 // ── 핸들러 ───────────────────────────────────────────────────────────────────
 
-const OPS = { list, put, remove, gen }
+/*
+ * GPU 켜고 끄기. 화면의 「GPU 켜기」「GPU 끄기」(board.js · assets.js) 가 gpuPower 뮤테이션으로 부른다.
+ *
+ * 아침저녁 시간표(스택의 GpuOn·GpuOff)로 켜고 끄던 것을 사람이 정하게 바꿨다 — 저녁에 꺼진 GPU 앞에서
+ * 데모가 멈추고, 모델을 다시 올리는 몇 분이 그대로 기다림이 됐다. 끄는 것도 사람이 한다. 리뷰어만 못 누른다
+ * (domain/permissions.js 의 power 와 같은 표. test.html 이 두 줄을 맞대어 본다).
+ */
+const POWER_ROLES = ['planner', 'artist', 'director', 'admin']
+let ec2 = null
+const openEc2 = () => (ec2 ||= new EC2Client({}))
+
+async function power(payload) {
+  const role = str(payload?.role) || 'reviewer'
+  if (!POWER_ROLES.includes(role)) throw new Error('GPU 켜고 끄기는 기획·아티스트·감독·관리자만 할 수 있습니다')
+  const id = str(process.env.GPU_INSTANCE)
+  if (!id) throw new Error('GPU 인스턴스가 설정되지 않았습니다')
+  const action = str(payload?.action)
+  const c = openEc2()
+  if (action === 'on') await c.send(new StartInstancesCommand({ InstanceIds: [id] }))
+  else if (action === 'off') await c.send(new StopInstancesCommand({ InstanceIds: [id] }))
+  else if (action !== 'state') throw new Error(`모르는 동작: ${action}`)
+  const d = await c.send(new DescribeInstancesCommand({ InstanceIds: [id] }))
+  return { state: d.Reservations?.[0]?.Instances?.[0]?.State?.Name || 'unknown', action, by: str(payload?.who) }
+}
+
+/*
+ * 자산관리의 「올리기」. 손으로 그린 그림·레퍼런스 사진을 S3 에 영구 보관한다 — 자산은 지울 때까지
+ * 남는 것이라 op 로그에 data:URL 로 담지 않는다(로그가 부팅마다 재생되어 무거워진다). 화면이 300KB 로
+ * 줄여 보내고, 여기서 한 번 더 상한을 본다. 리뷰어만 못 올린다(POWER_ROLES 와 같은 표).
+ */
+async function upload(payload) {
+  const role = str(payload?.role) || 'reviewer'
+  if (!POWER_ROLES.includes(role)) throw new Error('올리기는 기획·아티스트·감독·관리자만 할 수 있습니다')
+  if (!BUCKET) throw new Error('IMAGES_BUCKET 이 비어 있다')
+  const im = dataUrl(payload?.data)
+  const ext = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }[im.type]
+  if (!ext) throw new Error('png · jpeg · webp 만 올릴 수 있습니다')
+  if (!im.bytes.length) throw new Error('빈 그림입니다')
+  if (im.bytes.length > 400 * 1024) throw new Error('400KB 를 넘습니다. 화면이 줄여서 보내야 합니다')
+  const key = `img/${randomUUID().replace(/-/g, '')}.${ext}`
+  await openS3().send(new PutObjectCommand({
+    Bucket: BUCKET, Key: key, Body: im.bytes, ContentType: im.type, CacheControl: 'public, max-age=31536000, immutable',
+  }))
+  return { url: `/${key}`, bytes: im.bytes.length }
+}
+
+const OPS = { list, put, remove, gen, power, upload }
 
 exports.handler = async (event) => {
   const name = str(event?.operation)
@@ -533,6 +580,8 @@ if (require.main === module) {
   ok(!STYLE.includes('watermark') && NEG.includes('watermark'), '네거티브에만 watermark')
 
   ok(tailOf('sk-abcdefgh') === '…efgh', '끝 네 글자만')
+  ok(POWER_ROLES.includes('director') && POWER_ROLES.includes('artist') && !POWER_ROLES.includes('reviewer'), 'GPU 켜고 끄기 역할')
+  ok(Object.hasOwn(OPS, 'power') && Object.hasOwn(OPS, 'upload'), 'power · upload 오퍼레이션')
   ok(nameOf('openai') === '/storyboard/connector/openai', 'SSM 이름')
   ok(clamp(9, 0.2, 0.95) === 0.95 && clamp(0, 0.2, 0.95) === 0.2, '강도 자르기')
   ok(isAscii('hello') && !isAscii('빵집'), '아스키 판정')

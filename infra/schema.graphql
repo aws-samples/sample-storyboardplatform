@@ -156,6 +156,10 @@ type Mutation {
   # 커넥터 모델로 한 장 만든다. plan 과 같은 이유로 Mutation 이고 접수증만 돌려준다.
   # spec: {model:"제공자:모델", prompt, kind, init, strength, seed}
   genConnector(spec: AWSJSON!): PlanJob!
+  # GPU 켜고 끄기 · { action: "on" | "off" | "state" } → { state }. 리뷰어만 못 부른다(gpuPower.js)
+  gpuPower(spec: AWSJSON!): AWSJSON!
+  # 자산관리 올리기 · { data: data:URL(≤300KB), name } → { url }. S3 영구 보관(putImage.js)
+  putImage(spec: AWSJSON!): AWSJSON!
 
   # 프로젝트 하나를 지운다. 카드 · 에셋 · op 로그 · Neptune 그래프 전부다.
   # 감독만 할 수 있다. 다른 일은 다시 만들면 되지만 이것은 되돌릴 자리가 없다.

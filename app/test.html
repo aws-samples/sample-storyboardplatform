@@ -3637,6 +3637,7 @@
       deleteProject: ['../infra/resolvers/deleteProject.js', 'ROLES'],
       gen: ['../infra/gpu/server.py', 'ART_ROLES'],
       extract: ['../infra/gpu/server.py', 'ASSET_ROLES'],
+      power: ['../infra/connector/index.js', 'POWER_ROLES'],
     }
     for (const [job, [file, name]] of Object.entries(SERVER)) {
       const server = rolesIn(await text(file), name)

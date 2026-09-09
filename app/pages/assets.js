@@ -13,11 +13,17 @@
  *
  * ══ 후보 → 자산
  *
- * 지시문으로 만드는 것(자산·스틸)은 바로 자산이 되지 않습니다. 정한 수(1·2·4)만큼 후보(S.drafts)로
- * 나오고, 사람이 그중 저장할 것만 고릅니다. 후보는 이 브라우저에만 있고(그림 파일은 S3 에 이미
- * 있습니다) 저장을 누른 것만 op(asset.add)가 되어 팀에 보입니다. 마음에 안 드는 넷 중 셋을 지우는
- * 일이 없어지고, 스틸은 여러 버전을 나란히 놓고 고릅니다. 지시문으로 만든 자산은 스틸과 같은
- * 사진 룩입니다 — 실사 스틸의 참조가 되는 것이라서입니다.
+ * 지시문으로 만드는 것(자산·스틸)은 바로 자산이 되지 않습니다. 정한 수만큼 후보(S.drafts)로 나오고,
+ * 사람이 그중 저장할 것만 고릅니다. 저장을 누른 것만 op(asset.add)가 되어 팀에 보이고 지울 때까지
+ * 남습니다 — 그림 파일은 S3 에, 올린 그림도 putImage 로 S3 에 갑니다. 마음에 안 드는 넷 중 셋을
+ * 지우는 일이 없어지고, 스틸은 여러 버전을 나란히 놓고 고릅니다. 지시문으로 만든 자산은 스틸과
+ * 같은 사진 룩입니다 — 실사 스틸의 참조가 되는 것이라서입니다.
+ *
+ * ══ 탭을 오가도 일이 남습니다
+ *
+ * 작업자는 만들기를 눌러 두고 스토리보드에 다녀옵니다. 후보와 남은 일감(S.queue)은 이 브라우저의
+ * localStorage(sb.drafts.<board> · sb.queue.<board>)에 있고, 돌아오면 큐가 이어서 돕니다. 페이지를 떠나며
+ * 끊긴 요청은 서버가 일감 번호(job)로 결과를 보관하므로(server.py 의 /gen/result) 돌아와서 찾아갑니다.
  *
  * ══ 자산은 어디에 있나
  *
@@ -36,7 +42,7 @@ import { mountNav } from '../components/nav-tabs.js'
 import { mountBrand } from '../components/brand.js'
 import { configured, idToken, session } from '../services/auth.js'
 import { showLogin } from '../components/login-form.js'
-import { connect } from '../services/api.js'
+import { connect, connectorClient } from '../services/api.js'
 import { pickProject } from '../components/project-picker.js'
 import { ASSET_TYPES, REF_TYPES, mergeField, scrub, isVideoSrc } from '../domain/panels.js'
 import { allowed, denyReason } from '../domain/permissions.js'
@@ -48,6 +54,7 @@ import { confirmAsk } from '../components/confirm.js'
 const $ = (id) => document.getElementById(id)
 const cfg = window.SB_CONFIG || {}
 const BOARD = boardFromSearch()
+const conn = connectorClient()   // 배포 모드에서만. 올리기(S3)와 GPU 켜고 끄기가 이 길로 갑니다
 const now = () => Date.now()
 const uid = () => now().toString(36) + Math.random().toString(36).slice(2, 8)
 
@@ -77,6 +84,8 @@ const S = {
   prompt: '',
   make: null,         // { type, prompt, n } — 「AI로 만들기」 칸이 열려 있으면
   drafts: {},         // 후보. id → { id, type, name, src, prompt, refs?, gen, ts }. 저장한 것만 자산이 됩니다
+  queue: [],          // 일감. { job, kind:'asset'|'still', type, prompt, name, refs, v, of, status:'todo'|'run', at }
+  paused: '',         // 큐가 멈춘 이유(서버에 못 닿음 등). 「이어서 만들기」로 다시 돕니다
   stillN: 2,          // 스틸 버전 수
   stop: false,        // 「그만」— 다음 장부터 만들지 않습니다
   busy: null,         // 진행 한 줄
@@ -164,6 +173,19 @@ function saveLocal() {
     s.assets = S.assets
     localStorage.setItem(localKey(), JSON.stringify(s))
   } catch { /* 저장소가 꽉 찼으면 화면에는 남아 있습니다 */ }
+}
+
+/* 후보와 일감은 이 브라우저에 남습니다. 탭을 오가도, 새로고침해도 그대로입니다 */
+const workKey = (k) => `sb.${k}.${BOARD}`
+function saveWork() {
+  try {
+    localStorage.setItem(workKey('drafts'), JSON.stringify(S.drafts))
+    localStorage.setItem(workKey('queue'), JSON.stringify(S.queue))
+  } catch { /* 저장소가 꽉 찼으면 화면에는 남아 있습니다 */ }
+}
+function loadWork() {
+  try { S.drafts = JSON.parse(localStorage.getItem(workKey('drafts')) || '{}') || {} } catch { S.drafts = {} }
+  try { S.queue = (JSON.parse(localStorage.getItem(workKey('queue')) || '[]') || []).filter((t) => t && t.job) } catch { S.queue = [] }
 }
 
 function emit(op) {
@@ -254,89 +276,175 @@ async function asInit(s) {
   return downscale(await res.blob(), 400_000)
 }
 
+/*
+ * GPU 켜고 끄기. 시간표로 끄지 않고 사람이 정합니다 — 꺼진 GPU 앞에서 데모가 멈추고 다시 올리는 몇 분이
+ * 기다림이었습니다. 켜 둔 GPU 는 시간당 약 2달러라 일이 끝나면 끕니다. 커넥터 Lambda 가 EC2 를 부릅니다.
+ */
+async function gpuPower(action) {
+  if (!conn) return
+  if (action === 'off') {
+    const ok = await confirmAsk({
+      title: 'GPU 를 끕니다', body: '팀 전원의 그림·영상 생성이 멈춥니다. 다시 켜면 모델이 올라오기까지 약 3~4분 걸립니다.',
+      list: ['아침 9시에는 저절로 다시 켜집니다', '남은 일감은 이 브라우저에 남고, 켜지면 「이어서 만들기」로 잇습니다'], yes: 'GPU 를 끕니다', danger: true,
+    })
+    if (!ok) return
+  }
+  S.busy = action === 'on' ? 'GPU 를 켭니다 · 모델까지 약 3~4분…' : 'GPU 를 끕니다…'
+  paintStill()
+  try {
+    const r = await conn.power(action)
+    say(action === 'on' ? `GPU 를 켰습니다 (${r.state}). 약 3~4분 뒤 준비됩니다` : `GPU 를 끕니다 (${r.state})`)
+    S.gpu.text = action === 'on' ? 'GPU 켜는 중 · 약 3~4분' : 'GPU 끄는 중'
+  } catch (err) {
+    S.err = `GPU 를 ${action === 'on' ? '켜지' : '끄지'} 못했습니다 · ${err.message}`
+  }
+  S.busy = null
+  paintStill()
+  setTimeout(pollGpu, 8000)
+}
+
 /* ══ 만들기 ═════════════════════════════════════════════════════════════════ */
 
-/** 고른 자산으로 실사 스틸을 S.stillN 장. 후보로 나오고 고른 것만 저장합니다 */
-async function makeStill() {
+/* ══ 일감 큐 ════════════════════════════════════════════════════════════════
+ *
+ * 만들기는 일감(task)을 큐에 넣는 것이고, pump() 가 한 장씩 차례로 서버에 보냅니다. 큐와 후보는
+ * localStorage 에 있어 탭을 오가도 남고, 돌아오면 이어서 돕니다. 페이지를 떠나며 끊긴 장은 서버가
+ * job 번호로 결과를 보관하므로(/gen/result) 다시 찍지 않고 찾아갑니다.
+ */
+const taskLabel = (t) => `${t.kind === 'still' ? '실사 스틸' : typeName(t.type)}${t.of > 1 ? ` ${t.v}/${t.of}` : ''}`
+
+/** 고른 자산으로 실사 스틸을 S.stillN 장 큐에 넣습니다 */
+function makeStill() {
   const refs = picked()
   if (!refs.length) { S.err = '먼저 인물·배경·소품에서 참조할 자산을 고르세요.'; paintStill(); return }
   if (!mayGen()) { S.err = denyReason('gen', role()); paintStill(); return }
-  if (S.busy) return
   const n = COUNTS.includes(S.stillN) ? S.stillN : 1
-  const tick = (t) => { S.busy = t; S.err = ''; paint() }
-  S.stop = false
-  S.busyKind = 'still'
-  S.startedAt = now()
-  tick('참조 그림을 읽습니다…')
   const names = refs.map((a) => `${typeName(a.type)} ${a.name}`).join(', ')
   const prompt = S.prompt.trim() || `${names}. 영화 스틸 한 장`
-  let made = 0
-  try {
-    const imgs = await Promise.all(refs.map((a) => asInit(src(a))))
-    for (let i = 0; i < n; i += 1) {
-      if (S.stop) break
-      const t0 = performance.now()
-      tick(`실사 스틸 ${i + 1}/${n} 그리는 중 · 약 20초…`)
-      const r = await askPatient({
-        prompt, kind: 'still', model: refModel(), refs: imgs, refKind: 'assets', style: 'real', strength: 0.95,
-      }, tick)
-      const id = uid()
-      S.drafts[id] = {
-        id, type: 'still', name: (S.prompt.trim() || names).slice(0, 40), v: i + 1, of: n, src: r.url,
-        source: 'ai', refs: refs.map((a) => a.id), prompt, author: S.me?.id || 'local', ts: now(),
-        gen: { model: r.model, seed: r.seed ?? null, ms: r.ms ?? Math.round(performance.now() - t0), size: r.size || null },
-      }
-      made += 1
-      // 스틸 후보는 실사 스틸 칸에 섭니다. 첫 장이 나오면 그쪽으로 옮겨 나란히 보게 합니다(한 번만)
-      if (i === 0) S.cat = 'still'
-      paint()
-    }
-    S.busy = null
-    say(`실사 스틸 후보 ${made}장이 나왔습니다. 저장할 것을 고르세요`)
-    paint()
-  } catch (err) {
-    S.busy = null
-    // 「그만」은 오류가 아닙니다. 그때까지 나온 후보 수만 말합니다
-    if (err.message !== STOPPED) S.err = err.message
-    else say(`그만두었습니다. 후보 ${made}장이 남았습니다`)
-    paint()
+  for (let i = 0; i < n; i += 1) {
+    S.queue.push({
+      job: uid(), kind: 'still', type: 'still', prompt, name: (S.prompt.trim() || names).slice(0, 40),
+      refs: refs.map((a) => a.id), v: i + 1, of: n, status: 'todo', at: now(),
+    })
   }
+  S.err = ''
+  saveWork()
+  pump()
 }
 
-/** 지시문으로 자산 후보를 S.make.n 장. 종류의 힌트가 뒤에 붙고 사진 룩입니다 */
-async function makeAsset() {
+/** 지시문으로 자산 후보를 S.make.n 장 큐에 넣습니다 */
+function makeAsset() {
   const m = S.make
   if (!m?.prompt.trim()) return
   if (!mayGen()) { S.err = denyReason('gen', role()); paint(); return }
-  if (S.busy) return
   const n = COUNTS.includes(m.n) ? m.n : 1
-  const tick = (t) => { S.busy = t; S.err = ''; paint() }
+  for (let i = 0; i < n; i += 1) {
+    S.queue.push({ job: uid(), kind: 'asset', type: m.type, prompt: m.prompt.trim(), name: m.prompt.trim().slice(0, 40), refs: [], v: i + 1, of: n, status: 'todo', at: now() })
+  }
+  S.err = ''
+  saveWork()
+  pump()
+}
+
+/** 서버가 보관한 일감 결과. done 이면 결과, error 면 던지고, 모르는 일감(404)이면 null — 다시 보냅니다 */
+async function fetchResult(t, tick) {
+  for (let i = 0; i < 180; i += 1) {
+    const res = await fetch(`${cfg.genUrl}/result/${encodeURIComponent(t.job)}`, {
+      headers: { authorization: `Bearer ${await idToken()}` }, cache: 'no-store',
+    })
+    if (res.status === 404) return null
+    if (!res.ok) { const e = new Error(`생성 서버 오류 (${res.status})`); e.status = res.status; throw e }
+    const j = await res.json()
+    if (j.status === 'done') return j
+    if (j.status === 'error') throw new Error(j.detail || '그리다 실패했습니다')
+    if (S.stop) throw new Error(STOPPED)
+    tick(`${taskLabel(t)} · 떠나 있던 사이 그리던 것을 기다립니다…`)
+    await new Promise((r) => setTimeout(r, 4000))
+  }
+  return null
+}
+
+async function runTask(t, tick) {
+  if (t.kind === 'still') {
+    const refs = t.refs.map((id) => S.assets[id]).filter((a) => a && src(a))
+    if (!refs.length) throw new Error('참조 자산이 없어졌습니다')
+    tick(`${taskLabel(t)} · 참조 그림을 읽습니다…`)
+    const imgs = await Promise.all(refs.map((a) => asInit(src(a))))
+    tick(`${taskLabel(t)} 그리는 중 · 약 20초…`)
+    return askPatient({
+      prompt: t.prompt, kind: 'still', model: refModel(), refs: imgs, refKind: 'assets', style: 'real', strength: 0.95, job: t.job,
+    }, tick)
+  }
+  tick(`${taskLabel(t)} 그리는 중…`)
+  return askPatient({
+    prompt: `${t.prompt}, ${MAKE_HINT[t.type]}`, kind: t.type === 'bg' ? 'cut' : 'asset', model: null, style: 'real', job: t.job,
+  }, tick)
+}
+
+function addDraft(t, r) {
+  S.drafts[t.job] = {
+    id: t.job, type: t.type, name: t.name, v: t.v, of: t.of, src: r.url, source: 'ai', prompt: t.prompt,
+    refs: t.kind === 'still' ? t.refs : undefined, author: S.me?.id || 'local', ts: now(),
+    gen: { model: r.model, seed: r.seed ?? null, ms: r.ms ?? null, size: r.size || null },
+  }
+  // 스틸 후보는 실사 스틸 칸에 섭니다. 첫 장이 나오면 그쪽으로 옮겨 나란히 보게 합니다(한 번만)
+  if (t.kind === 'still' && t.v === 1) S.cat = 'still'
+}
+
+let pumping = false
+async function pump() {
+  if (pumping || !S.queue.length) return
+  if (!canGen()) { S.paused = '이 배포에는 생성 서버가 없습니다'; paint(); return }
+  pumping = true
+  S.paused = ''
   S.stop = false
-  S.busyKind = 'make'
   S.startedAt = now()
+  const tick = (t) => { S.busy = t; paint() }
   let made = 0
   try {
-    for (let i = 0; i < n; i += 1) {
-      if (S.stop) break
-      tick(`${typeName(m.type)} ${i + 1}/${n} 그리는 중…`)
-      const r = await askPatient({
-        prompt: `${m.prompt.trim()}, ${MAKE_HINT[m.type]}`, kind: m.type === 'bg' ? 'cut' : 'asset', model: null, style: 'real',
-      }, tick)
-      const id = uid()
-      S.drafts[id] = {
-        id, type: m.type, name: m.prompt.trim().slice(0, 40), v: i + 1, of: n, src: r.url, source: 'ai',
-        prompt: m.prompt.trim(), author: S.me?.id || 'local', ts: now(), gen: { model: r.model, seed: r.seed ?? null, ms: r.ms ?? null },
+    while (S.queue.length) {
+      const t = S.queue[0]
+      if (S.stop) {
+        // 「그만」: 아직 안 보낸 것만 버립니다. 도는 장은 끝나면 후보로 남습니다
+        S.queue = S.queue.filter((x) => x.status === 'run')
+        S.stop = false
+        saveWork()
+        if (!S.queue.length) break
+        continue
       }
-      made += 1
+      S.busyKind = t.kind === 'still' ? 'still' : 'make'
+      try {
+        let r = null
+        if (t.status === 'run') r = await fetchResult(t, tick)
+        if (!r) {
+          if (!mayGen()) throw new Error(denyReason('gen', role()))
+          t.status = 'run'; t.at = now(); saveWork()
+          r = await runTask(t, tick)
+        }
+        addDraft(t, r)
+        made += 1
+        S.queue.shift()
+      } catch (err) {
+        if (err.message === STOPPED) { S.queue.shift() }
+        else if (err.status === undefined && /fetch|network|닿지|Failed/i.test(err.message || '')) {
+          // 서버에 닿지 않습니다(GPU 꺼짐 등). 일감은 남겨 두고 멈춥니다 — 「이어서 만들기」로 다시
+          S.paused = `생성 서버에 닿지 않습니다. GPU 가 켜지면 「이어서 만들기」를 누르세요 (${err.message})`
+          break
+        } else {
+          S.err = `${taskLabel(t)}: ${err.message}`
+          S.queue.shift()
+        }
+      }
+      saveWork()
       paint()
     }
+  } finally {
+    pumping = false
     S.busy = null
-    say(`${typeName(m.type)} 후보 ${made}장이 나왔습니다. 저장할 것을 고르세요`)
-    paint()
-  } catch (err) {
-    S.busy = null
-    if (err.message !== STOPPED) S.err = err.message
-    else say(`그만두었습니다. 후보 ${made}장이 남았습니다`)
+    S.busyKind = null
+    S.stop = false
+    saveWork()
+    if (made) say(`후보 ${made}장이 나왔습니다. 저장할 것을 고르세요`)
     paint()
   }
 }
@@ -347,6 +455,7 @@ function keep(id) {
   if (!d) return
   if (!mayEdit()) { S.err = denyReason('extract', role()); paint(); return }
   delete S.drafts[id]
+  saveWork()
   const { v, of, ...rest } = d   // 버전 번호는 후보 판의 것입니다. 고른 뒤에는 뜻이 없어 자산에 남기지 않습니다
   // 같은 id 로 자산이 되므로 열려 있던 뷰어는 그대로 그 그림을 봅니다
   emit({ kind: 'asset.add', asset: rest })
@@ -377,6 +486,7 @@ function drop(id) {
   // 뷰어에서 버리면 같은 종류의 다음 후보로 넘어갑니다. 넷을 비교하다 하나를 버릴 때마다 판으로 튕기지 않게
   const next = S.view === id ? drafts().filter((x) => x.type === d.type && x.id !== id)[0] : null
   delete S.drafts[id]
+  saveWork()
   S.sel = S.sel.filter((x) => x !== id)
   if (S.view === id) S.view = next?.id || null
   paint()
@@ -391,19 +501,24 @@ async function upload(files) {
   for (const f of files) {
     try {
       const data = await downscale(f, 300_000)
+      // 배포 모드는 S3 에 영구 보관합니다(커넥터 Lambda 의 upload). 로컬 모드만 data:URL 로 판에 둡니다
+      S.busy = `${f.name} 올리는 중…`; paint()
+      const src = conn ? (await conn.upload(data, f.name)).url : data
+      S.busy = null
       emit({
         kind: 'asset.add',
         asset: {
-          id: uid(), type, name: f.name.replace(/\.[a-z0-9]+$/i, '').slice(0, 40) || typeName(type), src: data,
+          id: uid(), type, name: f.name.replace(/\.[a-z0-9]+$/i, '').slice(0, 40) || typeName(type), src,
           source: 'upload', author: S.me?.id || 'local', ts: now(),
         },
       })
       n += 1
     } catch (err) {
+      S.busy = null
       S.err = `${f.name}: ${err.message}`
     }
   }
-  if (n) say(`${typeName(type)} ${n}장을 올렸습니다`)
+  if (n) say(`${typeName(type)} ${n}장을 올렸습니다. 지울 때까지 남습니다`)
   paint()
 }
 
@@ -438,7 +553,12 @@ function rename(id, name) {
 
 const STOPPED = '그만두었습니다'
 /* 「그만」. 시작 직후 600ms 는 무시합니다 — 만들기 단추를 더블클릭하면 둘째 클릭이 그 자리에 방금 선 이 단추에 떨어집니다 */
-const stopNow = () => { if (now() - S.startedAt < 600) return; S.stop = true; paint() }
+const stopNow = () => {
+  if (now() - S.startedAt < 600) return
+  S.stop = true
+  if (!pumping) { S.queue = S.queue.filter((x) => x.status === 'run'); S.stop = false; saveWork() }
+  paint()
+}
 const MAX_REFS = 6   // server.py 의 MAX_REFS. 넘는 장은 서버가 말없이 버리므로 여기서 막습니다
 
 function toggle(id) {
@@ -505,13 +625,18 @@ function paintGrid() {
    * 스틸 후보는 실사 스틸 칸에 섭니다 — 여러 버전을 나란히 놓고 고르는 자리입니다.
    */
   const dr = draftsIn()
-  const tray = dr.length ? `
+  const qn = S.queue.filter((t) => (S.cat === 'all' ? t.kind !== 'still' : t.type === S.cat)).length
+  const queueLine = qn ? `<p class="note ${S.paused ? 'note--no' : 'note--busy'}">${S.paused
+    ? `${esc(S.paused)} · 남은 일감 ${qn}장 <button class="mini" data-resume="1" type="button">이어서 만들기</button>`
+    : `남은 일감 ${qn}장${S.busy ? ` · ${esc(S.busy)}` : ''}`}</p>` : ''
+  const tray = dr.length || qn ? `
     <section class="tray" aria-label="후보">
-      <div class="tray__h">후보 ${dr.length}장 <span class="note">저장한 것만 자산이 됩니다 · 이 창에만 있어 새로고침하면 사라집니다</span>
+      <div class="tray__h">후보 ${dr.length}장 <span class="note">저장한 것만 자산이 됩니다 — 저장하면 S3 에 지울 때까지 남습니다. 후보는 이 브라우저에 남습니다</span>
         <span class="spacer"></span>
         <button class="mini mini--quiet" data-dropall="1">전부 버리기</button>
         <button class="mini mini--go" data-keepall="1" ${mayEdit() ? '' : 'disabled'}>전부 저장</button></div>
-      <div class="grid ${S.cat === 'still' || S.cat === 'bg' ? 'grid--wide' : ''}">${dr.map(draftTile).join('')}</div>
+      ${queueLine}
+      ${dr.length ? `<div class="grid ${S.cat === 'still' || S.cat === 'bg' ? 'grid--wide' : ''}">${dr.map(draftTile).join('')}</div>` : ''}
     </section>` : ''
   setHtml($('main'), `
     <div class="tools">
@@ -591,7 +716,9 @@ function paintStill() {
     <dl class="kv">
       <dt>모델</dt><dd>${esc(model?.label || 'FLUX.2 klein')} · 참조 ${refs.length}장</dd>
       <dt>크기</dt><dd>1920 × 1088 · 실사</dd>
-      <dt>서버</dt><dd><span class="led led--${led}"></span>${esc(S.gpu.text)}</dd>
+      <dt>서버</dt><dd><span class="led led--${led}"></span>${esc(S.gpu.text)}${conn && allowed('power', role()) ? (S.gpu.state === 'down'
+    ? ' <button class="mini mini--go" id="gpuOn" type="button">GPU 켜기</button>'
+    : ' <button class="mini mini--quiet" id="gpuOff" type="button">끄기</button>') : ''}</dd>
     </dl>
     <div class="nrow">
       <label class="nsel"><span class="mono">버전</span><select id="stillN" ${S.busy ? 'disabled' : ''}>${COUNTS.map((c) => `<option value="${c}"${S.stillN === c ? ' selected' : ''}>${c}</option>`).join('')}</select></label>
@@ -611,6 +738,8 @@ function paintStill() {
           <span class="tile__meta">${esc([Array.isArray(a.gen?.size) ? a.gen.size.join('×') : '', `참조 ${(a.refs || []).length}장`].filter(Boolean).join(' · '))}</span></div></div>`).join('')}
       </div></div>` : ''}`)
   $('stillGo')?.addEventListener('click', makeStill)
+  $('gpuOn')?.addEventListener('click', () => gpuPower('on'))
+  $('gpuOff')?.addEventListener('click', () => gpuPower('off'))
   $('stillN')?.addEventListener('change', (e) => { S.stillN = Number(e.target.value); paintStill() })
   $('stillStop')?.addEventListener('click', stopNow)
   $('stillText')?.addEventListener('input', (e) => { S.prompt = e.target.value })
@@ -769,6 +898,7 @@ $('main').addEventListener('click', (e) => {
   const k = e.target.closest('[data-keep]'); if (k) { keep(k.dataset.keep); return }
   const d = e.target.closest('[data-drop]'); if (d) { drop(d.dataset.drop); return }
   if (e.target.closest('[data-keepall]')) { for (const x of draftsIn()) keep(x.id); return }
+  if (e.target.closest('[data-resume]')) { pump(); return }
   if (e.target.closest('[data-dropall]')) { dropAll(); return }
   const t = e.target.closest('.tile[data-id]')
   if (t && t.getAttribute('role') === 'button') toggle(t.dataset.id)
@@ -791,8 +921,7 @@ $('still').addEventListener('click', (e) => {
   if (z) { S.view = z.dataset.zoom; S.zoom = 'fit'; paintViewer() }
 })
 $('file').addEventListener('change', (e) => { if (e.target.files?.length) upload([...e.target.files]) })
-// 후보는 이 창에만 있습니다. 남아 있는데 떠나려 하면 브라우저가 한 번 묻습니다
-window.addEventListener('beforeunload', (e) => { if (Object.keys(S.drafts).length) { e.preventDefault(); e.returnValue = '' } })
+// 후보와 일감은 localStorage 에 남으므로 떠나도 묻지 않습니다. 돌아오면 boot() 이 이어서 돕니다
 document.addEventListener('keydown', (e) => {
   if (!S.view) return
   if (e.target.tagName === 'INPUT') return
@@ -820,6 +949,7 @@ async function boot() {
 
   // 배포 모드는 서버 로그가 사실입니다. 로컬 판을 섞으면 지운 자산이 되살아납니다
   if (!configured) loadLocal()
+  loadWork()
   paint()
 
   try {
@@ -846,8 +976,10 @@ async function boot() {
     for (const op of past) apply(op)
   }
   paint()
-  pollGpu()
+  await pollGpu()
   setInterval(pollGpu, 20_000)
+  // 떠나 있던 사이 남은 일감을 이어서 합니다
+  if (S.queue.length) pump()
 }
 
 boot()

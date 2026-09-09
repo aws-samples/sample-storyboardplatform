@@ -37,6 +37,8 @@ export const JOB_ROLES = {
    * 누른 사람의 브라우저가 바로 부르므로 감독도 들어 있습니다(ACTIONS.approve 와 짝).
    */
   extract: ['planner', 'artist', 'director', 'admin'],
+  // infra/connector/index.js 의 POWER_ROLES — GPU 켜고 끄기. 리뷰어만 막습니다
+  power: ['planner', 'artist', 'director', 'admin'],
   /*
    * infra/resolvers/deleteProject.js — 프로젝트를 지웁니다. 에셋과 op 로그가 함께 갑니다.
    *
@@ -56,6 +58,7 @@ export const JOB_NAMES = {
   putAsset: '작업물 저장',
   gen: '키 비주얼 생성',
   extract: '자산 다루기',
+  power: 'GPU 켜고 끄기',
   deleteProject: '프로젝트 삭제',
 }
 

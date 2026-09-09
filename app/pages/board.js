@@ -3888,9 +3888,33 @@ function renderGpu() {
   el.dataset.state = isConn(pickedModel) ? 'ok' : gpu.state
   byId('gpuText').textContent = isConn(pickedModel) ? modelOf(pickedModel).label : gpu.text
   const pickable = allModels().length > 1 && may('art')
-  el.disabled = !pickable
-  el.title = pickable ? '생성 모델을 고릅니다' : may('art') ? gpu.hint || '' : whyNot('art')
-  if (!pickable) toggleGpuMenu(false)
+  // 켜고 끄는 사람(기획·아티스트·감독·관리자)도 메뉴를 엽니다. 모델 목록은 그림 만드는 사람에게만 보입니다
+  const powerable = canGen && !!conn && allowed('power', roleOf(me.id))
+  el.disabled = !pickable && !powerable
+  el.title = pickable ? '생성 모델을 고릅니다' : powerable ? 'GPU 를 켜고 끕니다' : may('art') ? gpu.hint || '' : whyNot('art')
+  if (el.disabled) toggleGpuMenu(false)
+  renderGpuMenu()
+}
+
+/*
+ * GPU 켜고 끄기. 저녁 시간표로 꺼지던 것을 사람이 정합니다 — 꺼진 GPU 앞에서 데모가 멈추고 다시 올리는
+ * 몇 분이 기다림이었습니다. 끄는 것도 사람이 합니다(시간당 약 2달러). 커넥터 Lambda 가 EC2 를 부릅니다.
+ */
+let powerBusy = ''
+async function gpuPower(action) {
+  if (!conn || powerBusy) return
+  powerBusy = action === 'on' ? 'GPU 를 켭니다… 모델까지 약 3~4분' : 'GPU 를 끕니다…'
+  renderGpuMenu()
+  try {
+    const r = await conn.power(action)
+    announce(action === 'on'
+      ? `GPU 를 켰습니다 (${r.state}). 모델이 올라오면 이 칩이 초록으로 바뀝니다 — 약 3~4분.`
+      : `GPU 를 끕니다 (${r.state}). 다시 켤 때까지 그림은 만들 수 없습니다.`)
+    pollGpu()
+  } catch (err) {
+    notice(`GPU 를 ${action === 'on' ? '켜지' : '끄지'} 못했습니다 · ${err.message}`)
+  }
+  powerBusy = ''
   renderGpuMenu()
 }
 
@@ -3902,17 +3926,34 @@ function renderGpuMenu() {
       <b>생성 모델</b>
       <span>GPU 한 장에 한 벌만 올라갑니다</span>
     </div>
-    ${allModels().map((m) => `<button data-model="${m.id}" data-on="${(pickedModel || gpu.resident) === m.id ? 1 : 0}"
+    ${!may('art') ? '' : allModels().map((m) => `<button data-model="${m.id}" data-on="${(pickedModel || gpu.resident) === m.id ? 1 : 0}"
       title="${esc(m.note)}">${esc(m.label)}<span class="mono">${
     isConn(m.id) ? (m.kind === 'video' ? '커넥터 · 영상' : '커넥터')
       : m.id === gpu.resident ? '지금 올라옴'
         : m.id === gpu.loading ? '올리는 중…' : `약 ${mins(m.wait)}분`}</span></button>`).join('')}
     <p class="menu__note">${pickError ? esc(pickError)
-    : 'GPU 모델을 바꾸면 팀 전원의 생성이 그동안 멈춥니다. 커넥터 모델은 기다리지 않고 바로 씁니다.'}</p>`)
+    : 'GPU 모델을 바꾸면 팀 전원의 생성이 그동안 멈춥니다. 커넥터 모델은 기다리지 않고 바로 씁니다.'}</p>
+    ${canGen && conn && allowed('power', roleOf(me.id)) ? `
+    <div class="menu__head"><b>GPU</b><span>${esc(gpu.text)}</span></div>
+    ${powerBusy ? `<p class="menu__note">${esc(powerBusy)}</p>`
+    : gpu.state === 'down' ? '<button data-power="on">GPU 켜기 <span class="mono">약 3~4분</span></button>'
+      : '<button data-power="off" data-danger="1">GPU 끄기 <span class="mono">팀 전원의 생성이 멈춥니다</span></button>'}
+    <p class="menu__note">시간표로 끄지 않습니다. 켜 둔 GPU 는 시간당 약 2달러라 일이 끝나면 끕니다. 아침 9시에는 저절로 켜집니다.</p>` : ''}`)
 }
-byId('gpuMenu').addEventListener('click', (e) => {
+byId('gpuMenu').addEventListener('click', async (e) => {
   const id = e.target.closest('[data-model]')?.dataset.model
-  if (id) pickModel(id)
+  if (id) { pickModel(id); return }
+  const power = e.target.closest('[data-power]')?.dataset.power
+  if (power === 'on') gpuPower('on')
+  if (power === 'off') {
+    const ok = await confirmAsk({
+      title: 'GPU 를 끕니다',
+      body: '팀 전원의 그림·영상 생성이 멈춥니다. 다시 켜면 모델이 올라오기까지 약 3~4분 걸립니다.',
+      list: [`지금 올라온 모델: ${gpu.text}`, '아침 9시에는 저절로 다시 켜집니다'],
+      yes: 'GPU 를 끕니다', danger: true,
+    })
+    if (ok) gpuPower('off')
+  }
 })
 
 function toggleGpuMenu(open) {
