@@ -27,6 +27,29 @@ const DEMO_BLOCK = `
   </div>
   <div class="lf__or">직접 입력</div>`
 
+/*
+ * 문이 열려 있는 동안 뒤의 화면은 아예 없는 것으로 둡니다.
+ *
+ * 문은 화면 전체를 덮는데, 덮는 것은 눈으로 볼 때뿐이었습니다. 보조 기술은 뒤의 글을 계속
+ * 읽고, Tab 은 뒤의 단추로 갑니다 — 안 보이는 단추에 초점이 가면 사람은 자기가 어디에
+ * 있는지 모릅니다. 그래서 role/aria-modal 로 「이것이 문이다」를 말하고, 형제 요소를
+ * inert 로 꺼 둡니다. 화면들이 똑같은 빈 <div class="gate"> 하나만 들고 있으므로
+ * (board·index·project·key-visual·story-graph) 이 한 곳에서 붙이고 뗍니다.
+ *
+ * @param {HTMLElement} gate
+ * @param {boolean} on
+ * @param {string} [label] - 보조 기술이 읽을 문의 이름
+ */
+export function gateModal(gate, on, label = '로그인') {
+  gate.hidden = !on
+  if (on) {
+    gate.setAttribute('role', 'dialog')
+    gate.setAttribute('aria-modal', 'true')
+    gate.setAttribute('aria-label', label)
+  }
+  for (const el of document.body.children) if (el !== gate) el.inert = on
+}
+
 export function showLogin(gate) {
   setHtml(gate, `
     <form class="gate__card" id="loginForm" autocomplete="on">
@@ -52,7 +75,7 @@ export function showLogin(gate) {
       <p class="lf__note">${DEMO_PW ? '데모 계정을 누르면 바로 들어갑니다.' : '데모 계정을 누르면 아이디가 채워집니다. 비밀번호는 관리자에게 받은 값을 넣어주세요.'}
         탭마다 다른 사람으로 들어오면 서로의 작업이 실시간으로 오가는 것을 볼 수 있습니다.</p>
     </form>`)
-  gate.hidden = false
+  gateModal(gate, true)
   byId('lgId').focus()
 
   return new Promise((done) => {
@@ -75,7 +98,7 @@ export function showLogin(gate) {
       try {
         const r = await login(id, pw, byId('lgKeep').checked)
         if (r.challenge) return askNewPassword(gate, id, r.need, done)
-        gate.hidden = true
+        gateModal(gate, false)
         done(r.session)
       } catch (err) {
         say(err.message)
@@ -117,7 +140,7 @@ function askNewPassword(gate, username, need, done) {
     try {
       const attrs = byId('pwName') ? { name: byId('pwName').value.trim() } : {}
       const r = await setNewPassword(pw, attrs)
-      gate.hidden = true
+      gateModal(gate, false)
       done(r.session)
     } catch (err) {
       say(err.message)

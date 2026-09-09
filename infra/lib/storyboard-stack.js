@@ -59,7 +59,10 @@ const GPU_AMI = {
   'ap-northeast-2': 'ami-0998eac84900cf563',
 }
 
-const MODEL = 'chroma'
+// GPU 가 부팅 때 올려 둘 그림 모델(server.py 의 SB_MODEL). 만든 얼굴을 기준으로
+// 받는 계열(flux2)이라 인물 참조와 두 인물 장면이 되는 유일한 기본값이다. 게이트도
+// 없어서 Hugging Face 키 없이 받아진다 — sd35 로 바꾸면 그 키가 있어야 한다
+const MODEL = 'klein'
 const NEPTUNE_VERSION = '1.3.4.0'
 const NEPTUNE_PORT = 8182
 // 데모용 기본 인스턴스 클래스. --context neptuneInstance=db.r6g.large 로 덮어쓴다
@@ -376,6 +379,9 @@ class StoryboardStack extends Stack {
       ],
     })
     images.grantPut(gpuRole)
+    // 영상화는 이미 통에 있는 컷 그림을 첫 프레임으로 읽는다(server.py 의 still).
+    // 브라우저가 그림을 다시 올려 보내지 않으므로 읽기가 없으면 AccessDenied 로 죽는다.
+    images.grantRead(gpuRole)
     // 손으로 한국어를 적은 프롬프트를 영어로 옮길 때만 쓴다(server.py 의 en).
     // 예전에는 Amazon Translate 를 불렀다. 부르는 서비스를 Bedrock 하나로 모았다.
     //

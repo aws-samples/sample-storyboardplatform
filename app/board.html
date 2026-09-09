@@ -186,6 +186,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 /* 권한 때문에 막혔다는 알림. 남이 한 일이 아니라 지금 내가 못 하는 것이라 붉은 띠로 가른다 */
 .toast[data-tone="warn"] { border-left-color: var(--stamp-red); }
+/* 내가 한 일이 됐다는 알림. 상태 도장의 파랑과 같은 색으로 「승인됨」과 짝을 맞춘다 */
+.toast[data-tone="ok"] { border-left-color: var(--stamp-blue); }
 .toast__ask { display: block; margin-top: 3px; font-family: var(--mono); font-size: 10px; color: var(--stamp-red); }
 .toast__top { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
 .toast__who { font-weight: 600; }
@@ -291,6 +293,14 @@ dialog#keys::backdrop { background: rgba(17,19,24,.5); }
 }
 .btn:active { transform: translateY(1px); }
 .btn:disabled { opacity: .38; cursor: not-allowed; }
+/*
+ * 잠긴 것처럼 보이지만 초점을 받고 클릭도 올라오는 단추. disabled 를 쓰지 않는 이유가
+ * 여기 있다 — 상태 때문에 막힌 단추를 disabled 로 두면 왜 막혔는지가 마우스 hover 의
+ * title 로만 남고, 키보드·터치·스크린리더에는 아무 말도 못 한다. 눌리게 두고 이유를
+ * 띄운다 (board.js 의 actionBtns · notice).
+ */
+.btn[aria-disabled="true"] { opacity: .38; cursor: not-allowed; }
+.btn[aria-disabled="true"]:active { transform: none; }
 .btn--ghost { background: transparent; border-color: var(--edge); color: var(--pencil); }
 .btn--ghost:hover:not(:disabled) { background: var(--paper-2); color: var(--ink); }
 /* 주 버튼은 이제 잉크 검정이 아니라 파랑이다. 키비주얼의 주 버튼과 같은 색 */
@@ -382,6 +392,13 @@ dialog#keys::backdrop { background: rgba(17,19,24,.5); }
 .nav__n { margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--pencil-2); }
 .nav__item[data-active="1"] .nav__n { color: var(--pencil); }
 .btn--wide { width: 100%; }
+/*
+ * 링크로 만든 넓은 단추(#graphBtn). display 를 인라인 style 로 주면 [hidden] 의
+ * display:none 을 이겨서 로그인 전에도 보인다. 그때 눌리면 주소에 보드가 없어서 — 링크의
+ * href 는 renderMe 가 채운다 — 빈 판으로 새 탭이 열린다. 그래서 여기서 준다.
+ */
+a.btn--wide { display: block; text-align: center; text-decoration: none; }
+a.btn--wide[hidden] { display: none; }
 .brief {
   font-size: 12px; line-height: 1.6; color: var(--pencil);
   border-left: 2px solid var(--edge); padding: 2px 0 2px 9px; margin: 10px 0 0;
@@ -436,7 +453,9 @@ dialog#keys::backdrop { background: rgba(17,19,24,.5); }
   position: relative; overflow: hidden;
   display: grid; place-items: center;
 }
-.cut__frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* 영상 버전도 같은 칸에 들어옵니다(board.js 의 media). video 를 안 적으면 브라우저 기본
+   300x150 으로 서서 칸 가운데 26% 크기로 잘려 보이고, controls 도 칸 밖으로 밀립니다 */
+.cut__frame img, .cut__frame video { width: 100%; height: 100%; object-fit: cover; display: block; }
 .cut__empty {
   font-family: var(--mono); font-size: 10px; color: var(--pencil-2); text-align: center; line-height: 1.7;
 }
@@ -529,7 +548,19 @@ dialog#keys::backdrop { background: rgba(17,19,24,.5); }
   padding: 2px 5px; border-radius: 2px; color: var(--ink);
 }
 
-.detail { padding: 18px 16px 40px; }
+.detail { padding: 18px 16px 0; }
+/*
+ * 상태 이동 단추가 앉는 바닥 띠. 판에 붙여 둔다.
+ *
+ * 예전에는 기록 목록 다음에 그냥 놓여 있었다. 그래서 창 높이 900 에서 「승인」이 y=1088 —
+ * 늘 스크롤 밖이었고, 메모가 늘면 더 내려갔다. 이 판을 여는 이유가 승인인데 그것이 화면에
+ * 없는 셈이다. sticky 로 바닥에 붙이면 스크롤 위치와 무관하게 늘 보인다. 위쪽 여백(.detail
+ * 의 padding-bottom)을 이 띠가 대신 들고 있다 — 그래야 sticky 가 여백만큼 떠 있지 않는다.
+ */
+.detail__foot {
+  position: sticky; bottom: 0; margin-top: 22px; padding: 12px 0 18px;
+  background: var(--paper-2); border-top: 1px solid var(--edge);
+}
 .detail--empty { color: var(--pencil); font-size: 13px; padding: 22px 4px; }
 .detail__head { display: flex; align-items: baseline; gap: 9px; margin-bottom: 4px; }
 .detail__no { font-family: var(--mono); font-size: 13px; font-weight: 600; letter-spacing: .1em; }
@@ -632,6 +663,10 @@ dialog#keys::backdrop { background: rgba(17,19,24,.5); }
   font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em;
   color: var(--stamp-blue); text-decoration: underline;
 }
+/* 눌러도 안 되는 작은 단추. 파란 밑줄 그대로 두면 눌릴 것처럼 읽힌다 */
+.mini:disabled, .mini[aria-disabled="true"] {
+  color: var(--pencil-2); text-decoration: none; cursor: not-allowed;
+}
 .why--bad { color: var(--stamp-red); }
 .ver__meta { font-family: var(--mono); font-size: 9px; color: var(--pencil-2); letter-spacing: .02em; }
 
@@ -714,8 +749,10 @@ dialog#keys::backdrop { background: rgba(17,19,24,.5); }
   position: relative; display: inline-block; margin: 0; line-height: 0; touch-action: none;
   background: var(--paper); box-shadow: 0 20px 50px -20px rgba(0,0,0,.7);
 }
-.vw__frame img { display: block; max-width: 100%; max-height: 74vh; }
-.vw__cmp .vw__frame img { max-height: 60vh; }
+/* 영상 버전을 크게 볼 때도 같은 틀이다. video 를 빼 두면 브라우저 기본 300x150 으로 서서
+   어두운 바닥 가운데 우표만큼 뜨고, 옆에 세운 이전 버전 그림과 크기가 맞지 않는다 */
+.vw__frame img, .vw__frame video { display: block; max-width: 100%; max-height: 74vh; }
+.vw__cmp .vw__frame img, .vw__cmp .vw__frame video { max-height: 60vh; }
 /* 캡션은 그림 아래, 즉 어두운 .vwrap 바닥 위에 놓인다. 그래서 밝은 글씨 */
 .vw__frame figcaption {
   position: absolute; left: 0; bottom: -19px; line-height: 1;
@@ -769,6 +806,12 @@ dialog#keys::backdrop { background: rgba(17,19,24,.5); }
   padding: 4px 7px 3px; cursor: pointer;
 }
 .cut:hover .cut__zoom, .cut__zoom:focus-visible { opacity: 1; }
+/*
+ * 영상이 든 칸에서는 겹쳐 앉은 둘을 컨트롤 띠 위로 올린다. 그대로 두면 「크게 보기」와
+ * 상태 도장이 재생·음소거 단추와 같은 자리에 앉는다. 손을 얹은 순간 — 그때가 바로 컨트롤이
+ * 나타나는 순간이다 — 「크게 보기」가 위로 올라와 그 클릭을 가로챈다.
+ */
+.cut__frame:has(video) .cut__zoom, .cut__frame:has(video) .stamp { bottom: 44px; }
 .notif__kind {
   font-family: var(--mono); font-size: 9px; letter-spacing: .08em;
   border: 1px solid var(--edge); color: var(--pencil); padding: 1px 4px 0; border-radius: 2px;
@@ -1004,10 +1047,45 @@ dialog.plan { width: min(680px, 95vw); }
  * 에서도 열려서, 그 화면들이 이 파일의 CSS 를 베끼지 않아도 되게 옮겼습니다.
  */
 
+/*
+ * 세 기둥이 나란히 설 수 없는 폭.
+ *
+ * ══ 무엇이 고장나 있었나
+ *
+ * 예전에는 grid-template-columns 만 1fr 로 바꿨습니다. 그러면 세 기둥이 세 줄이 되는데,
+ * body 가 height:100% 라 .work 의 높이가 화면에 묶여 있었습니다. 그래서 브라우저는 세
+ * 줄에 화면 높이를 나눠 줬고(1024×768 에서 220px · 228px · 184px), 그 안의 내용은
+ * 2,128px · 1,536px · 994px 였습니다. .pane 이 overflow:visible 이라 넘친 것이 잘리지도
+ * 굴러가지도 않고 아래 줄 위에 겹쳐 그려졌습니다. 390px 에서 컷 위에 편집 기록이 얹혀
+ * 있던 것이 이것입니다.
+ *
+ * ══ 고친 방법
+ *
+ * 높이를 화면에서 풀어 줍니다(body 의 height:auto). 그러면 판마다 내용만큼 높아지고 페이지
+ * 하나가 굴러갑니다. 좁은 화면에서 세 곳을 따로 굴리는 것이 오히려 어렵습니다 — 손가락이
+ * 어느 판에 있는지 모르니까요.
+ *
+ * ══ 순서를 바꿉니다
+ *
+ * 넓을 때 왼쪽이던 시나리오 기둥은 세로로 세우면 2,000px 짜리 머리말이 됩니다. 보드를
+ * 열자마자 컷이 아니라 입력창과 편집 기록을 지나야 했습니다. 컷 · 고른 컷 · 시나리오
+ * 순으로 둡니다. HTML 순서는 그대로입니다(넓은 화면과 탭 순서가 여기 매여 있습니다).
+ */
 @media (max-width: 1180px) {
+  html, body { height: auto; min-height: 100%; }
   body { overflow: auto; }
-  .work { grid-template-columns: 1fr; }
+  /*
+   * 머리 띠를 접습니다. 제목이 nowrap 이고 그 옆에 보드 이름이 붙어서 390px 에서 20px
+   * 만큼 옆으로 넘쳤습니다. 그러면 화면 전체가 옆으로도 굴러갑니다 — 가로로 밀 것이
+   * 20px 뿐인데 세로로 읽는 화면이 통째로 흔들립니다. 탭 바(nav-tabs.js)는 스스로
+   * overflow-x:auto 라 그 안에서만 밀립니다. 건드리지 않습니다.
+   */
+  .slate { flex-wrap: wrap; gap: 10px 14px; padding: 10px 14px; }
+  .work { display: flex; flex-direction: column; flex: none; }
   .pane { overflow: visible; }
+  .pane--board { order: -2; }
+  .pane--detail { order: -1; border-left: 0; border-top: 1px solid var(--edge); }
+  .pane--script { border-right: 0; border-top: 1px solid var(--edge); }
   .vw__body { grid-template-columns: 1fr; }
 }
 
@@ -1114,11 +1192,14 @@ dialog.plan { width: min(680px, 95vw); }
     <button class="btn btn--line btn--wide" id="planBtn" aria-haspopup="dialog" aria-expanded="false" hidden
             title="프롬프트로 이야기·인물·컷을 기획합니다">+ 이야기 기획</button>
     <a class="btn btn--ghost btn--wide" id="graphBtn" href="./story-graph.html" target="_blank" rel="noopener" hidden
-       style="display:block; margin-top:6px; text-align:center; text-decoration:none"
-       title="대본에서 관계 그래프를 뽑고, 씨앗과 분기를 봅니다">관계 그래프로 디벨롭 ↗</a>
+       style="margin-top:6px" title="대본에서 관계 그래프를 뽑고, 씨앗과 분기를 봅니다">관계 그래프로 디벨롭 ↗</a>
     <button class="btn btn--ghost btn--wide" id="scriptBtn" aria-haspopup="dialog" aria-expanded="false" hidden
             style="margin-top:6px" title="지금 회차의 컷을 정식 대본 형식으로 옮깁니다">컷을 대본으로</button>
-
+    <!--
+      컷 다음에 하는 일은 영상입니다. 한때 여기 「컷을 영상으로 ↗」가 있어 video.html 을 새
+      탭으로 열었습니다. 그 화면이 없어져서 링크도 없습니다 — 승인된 컷을 고르면 오른쪽
+      「AI로 생성」 옆에 「영상으로 생성」이 열립니다(pages/board.js 의 animate).
+    -->
     <div id="scriptBlock">
       <h2 class="mono h" style="margin-top:22px">시나리오</h2>
       <textarea id="scenario" spellcheck="false" data-coach="scenario"></textarea>

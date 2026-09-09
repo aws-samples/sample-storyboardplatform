@@ -29,6 +29,7 @@ import { NAV_TABS, navHref, newHref, drawerHref } from '../domain/routes.js'
 import { configured, session, logout } from '../services/auth.js'
 import { showLogin, DEMO_USERS } from '../components/login-form.js'
 import { setHtml } from '../lib/dom.js'
+import { josa } from '../lib/josa.js'
 import { opsClient, connectorClient } from '../services/api.js'
 import { entries, group } from '../services/activity-log.js'
 import { paintTable } from '../components/history-list.js'
@@ -150,7 +151,7 @@ function paintSide() {
 /* ══ 새로 생성 ═════════════════════════════════════ */
 
 /*
- * 단계 넷. 번호는 NAV_TABS 순서에서 나옵니다. 별도로 적어 두면 어긋납니다.
+ * 단계 목록. 번호는 NAV_TABS 순서에서 나옵니다. 별도로 적어 두면 어긋납니다.
  *
  * 주소는 navHref 가 아니라 newHref 입니다(?new=1). 이 목록은 「새로 생성」 안에 있으므로
  * 여기서 여는 단계는 늘 새 프로젝트로 시작합니다. 그 화면 앞의 문이 이름 칸 하나만
@@ -159,8 +160,9 @@ function paintSide() {
 function paintSteps() {
   setHtml(byId('steps'), NAV_TABS.map((t, i) => {
     const n = String(i + 1).padStart(2, '0')
+    const href = newHref(t.id)
     return `<li class="step">
-      <a class="step__go" href="${esc(newHref(t.id))}">
+      <a class="step__go" href="${esc(href)}">
         <span class="step__n" aria-hidden="true">${n}</span>
         <span class="step__body">
           <span class="step__label">${esc(t.label)}</span>
@@ -303,7 +305,7 @@ async function askDelete(p) {
   const logs = acts.filter((e) => e.boardId === p.boardId).length
   const ok = await confirmAsk({
     title: '이 프로젝트를 지우시겠습니까?',
-    body: `「${name}」를 지웁니다. 대본·시놉시스·씬·키비주얼·콘티와 보드의 컷·댓글이 `
+    body: `「${name}」${josa(name, '을', '를')} 지웁니다. 대본·시놉시스·씬·키비주얼·콘티와 보드의 컷·댓글이 `
       + '모두 함께 사라집니다. 되돌릴 수 없습니다.',
     list: [
       `프로젝트 「${name}」`,
@@ -316,7 +318,7 @@ async function askDelete(p) {
   if (!ok) return
 
   const note = byId('pjNote')
-  note.textContent = `「${name}」를 지우는 중입니다.`
+  note.textContent = `「${name}」${josa(name, '을', '를')} 지우는 중입니다.`
   try {
     const r = await removeProject(p.boardId)
     const bits = [
@@ -330,7 +332,7 @@ async function askDelete(p) {
        * 다시 읽습니다 — 카드가 남아 있어야 다시 누를 자리가 있습니다.
        */
       await loadProjects()
-      note.textContent = `${bits ? `${bits}을 지웠지만 ` : ''}`
+      note.textContent = `${bits ? `${bits}${josa(bits, '을', '를')} 지웠지만 ` : ''}`
         + `${r.left.toLocaleString('ko-KR')}줄이 남았습니다. 한 번에 지울 수 있는 양을 넘었습니다. `
         + '카드의 「⋮」에서 다시 지워 주세요. 남은 것부터 이어서 지웁니다.'
       return
@@ -344,7 +346,8 @@ async function askDelete(p) {
     if (actBoard === p.boardId) actBoard = null
     await loadProjects()
     paintActs()
-    byId('pjNote').textContent = `「${name}」를 지웠습니다.${bits ? ` ${bits}이 사라졌습니다.` : ''}`
+    byId('pjNote').textContent = `「${name}」${josa(name, '을', '를')} 지웠습니다.`
+      + `${bits ? ` ${bits}${josa(bits, '이', '가')} 사라졌습니다.` : ''}`
   } catch (err) {
     console.warn('[home] 프로젝트를 지우지 못했습니다', err)
     /*
@@ -354,7 +357,7 @@ async function askDelete(p) {
      */
     note.textContent = isDenied(err)
       ? (denyReason('deleteProject', myRole()) || '프로젝트를 지울 권한이 없습니다.')
-      : `「${name}」를 지우지 못했습니다. ${err.message} 다시 시도해 주세요.`
+      : `「${name}」${josa(name, '을', '를')} 지우지 못했습니다. ${err.message} 다시 시도해 주세요.`
   }
 }
 
@@ -487,7 +490,7 @@ function paintActs() {
 
   setHtml(byId('actNote'), acts.length
     ? '「열기」는 그 일이 있던 자리로 갑니다. 컷이면 보드에서 그 컷이 열립니다. '
-      + '네 화면이 같은 기록을 보므로 여기 없는 일은 어디에도 없습니다.'
+      + `${NAV_TABS.length}개 화면이 같은 기록을 보므로 여기 없는 일은 어디에도 없습니다.`
       + (dropped ? ` 프로젝트 ${dropped}개는 이 표에 넣지 않았습니다. 최근에 손댄 ${FANOUT}개까지만 읽습니다.` : '')
     : '')
 }
@@ -682,15 +685,16 @@ const HOME_CARDS = [
   },
   {
     view: 'new',
-    head: '순서대로 네 단계',
-    body: '시놉시스에서 시작해 대본이 되고, 그림이 나오고, 마지막에 보드에 얹힙니다.\n'
+    head: `순서대로 ${NAV_TABS.length}단계`,
+    body: '시놉시스에서 시작해 대본이 되고, 그림이 나오고, 보드에 얹힙니다.\n'
+      + '마지막 스토리보드에서는 승인된 컷이 몇 초짜리 영상이 됩니다.\n'
       + '순서대로 가도 되고 필요한 단계만 골라도 됩니다.\n각 화면 위쪽 탭으로도 서로 오갈 수 있습니다.',
     spot: ['steps'],
   },
   {
     view: 'new',
     head: '한 번에 다 보시려면',
-    body: '이 버튼이 네 단계를 이어서 짚어 줍니다. 화면을 어둡게 덮고 눌러야 하는 자리만 남깁니다.\n'
+    body: `이 버튼이 ${DEMO_TOTAL}개 화면을 이어서 짚어 줍니다. 화면을 어둡게 덮고 눌러야 하는 자리만 남깁니다.\n`
       + '예시에서는 생성 모델을 부르지 않아 기다리는 시간이 없습니다.\n'
       + '남는 것은 「예시 프로젝트」 한 판에만 들어갑니다.',
     spot: ['demo'],
@@ -709,7 +713,8 @@ const HOME_CARDS = [
   {
     view: 'activity',
     head: '어느 판에서 · 누가 · 무슨 일을',
-    body: '네 화면이 같은 기록을 씁니다.\n줄의 「열기」를 누르면 그 일이 있던 자리로 갑니다. 이어서 하는 곳입니다.\n'
+    body: `${NAV_TABS.length}개 화면이 같은 기록을 씁니다.\n`
+      + '줄의 「열기」를 누르면 그 일이 있던 자리로 갑니다. 이어서 하는 곳입니다.\n'
       + '「내 것만」으로 내가 한 것만 볼 수 있습니다.',
     spot: ['actbox'],
     next: '알겠습니다', skip: '다시 보지 않기',

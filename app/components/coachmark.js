@@ -22,26 +22,39 @@ const $ = (s, r = document) => r.querySelector(s)
  */
 const CSS = `
 body.coaching { overflow: hidden; }
-.coach { position: fixed; inset: 0; z-index: 90; }
-.coach__veil { position: absolute; inset: 0; background: rgba(15, 20, 30, .52); }
-/* 가리킬 것만 막 위로 올린다. 막에 구멍을 겹쳐 뚫으면 겹친 자리가 두 번 어두워진다. */
-.coach-lit {
-  position: relative; z-index: 95; background: var(--sb-panel, #fff);
+/*
+ * 껍데기에는 자리를 주지 않는다. position 이 붙으면 크롬은 여기서 쌓임 문맥을 열고,
+ * 그러면 안의 말풍선(97)이 밖의 것보다 아래로 내려간다. 막·테두리·꼬리표·말풍선이
+ * 각자 fixed 로 서서 한 문맥에서 90 < 96 < 97 순으로 겹친다. 좌표는 다 화면 기준이다.
+ */
+.coach { position: static; }
+/*
+ * 가리킬 것을 막 위로 올리지 않는다. z-index 로 올리는 방식은 앵커의 조상이 쌓임
+ * 문맥을 열면(sticky 머리 띠의 z-index:20, .topbar, #navMount) 그 문맥 째로 막 아래에
+ * 깔려서 가리킨 것이 계속 어둡게 남는다. 앵커에 position 을 씌우는 것도 안 된다 —
+ * 절대배치된 카드가 정적 자리로 튀어 overflow:hidden 에 잘려 사라진다.
+ *
+ * 그래서 막을 앵커 사각형 바깥의 네 조각으로만 그린다. 겹치는 조각이 없으니 두 번
+ * 어두워지지도 않고, 앵커는 손대지 않은 채 밝은 자리에 남는다.
+ */
+.coach__veil { position: fixed; z-index: 90; background: rgba(15, 20, 30, .52); }
+/*
+ * 파란 테두리도 앵커에 씌우지 않고 그 좌표 위에 따로 그린다. 앵커에 box-shadow 를
+ * 주면 조상의 overflow:hidden 이 테두리를 잘라 먹는다.
+ */
+.coach__ring {
+  position: fixed; z-index: 96; pointer-events: none;
   box-shadow: 0 0 0 3px var(--sb-accent, #1a56db), 0 8px 26px rgba(15, 20, 30, .28);
 }
-/*
- * 올린 요소의 모서리를 그림자가 따라가게 둔다. background 를 덮어썼기 때문에 원래
- * 규칙의 border-radius 가 이기지 못하는 경우가 있어 자주 가리키는 것들만 적어 둔다.
- */
-.card.coach-lit, .cut.coach-lit, .pane.coach-lit, .step.coach-lit { border-radius: var(--sb-r-lg, 10px); }
-.tab.coach-lit, .tag.coach-lit, .navtab.coach-lit, .btn.coach-lit { border-radius: var(--sb-r, 6px); }
+/* 화면 쪽에서 걸 수 있는 표시만 남긴다. 보이는 것은 위의 coach__ring 이 맡는다 */
+.coach-lit { }
 .coach__tag {
-  position: absolute; z-index: 96; font: 600 11px/1 var(--sb-sans, sans-serif); color: #fff;
+  position: fixed; z-index: 96; font: 600 11px/1 var(--sb-sans, sans-serif); color: #fff;
   background: var(--sb-accent, #1a56db); padding: 5px 9px; border-radius: 4px;
   white-space: nowrap; pointer-events: none;
 }
 .coach__b {
-  position: absolute; z-index: 97; background: var(--sb-panel, #fff);
+  position: fixed; z-index: 97; background: var(--sb-panel, #fff);
   border-radius: var(--sb-r-lg, 10px); padding: 16px;
   box-shadow: 0 12px 34px rgba(15, 20, 30, .3); display: grid; gap: 9px;
   font-family: var(--sb-sans, sans-serif); color: var(--sb-ink, #111318);
@@ -143,8 +156,25 @@ export function start({ cards, key, title = '스토리보드', host, onDone } = 
   live.root = root
   live.onKey = (e) => {
     if (e.key === 'Escape') { e.preventDefault(); stop(true) }
-    if (e.key === 'ArrowRight' || e.key === 'Enter') { e.preventDefault(); step(1) }
+    /*
+     * 초점이 말풍선 단추에 있으면 Enter 를 가로채지 않는다. 가로채면 「건너뛰기」에
+     * 초점을 두고 Enter 를 눌러도 다음 장으로 넘어가서, 키보드만 쓰는 사람은 안내를
+     * 끝낼 길이 없다. 초점이 다른 데 있을 때의 Enter 는 그대로 다음 장이다.
+     */
+    const onBtn = live.root.querySelector('.coach__b')?.contains(document.activeElement)
+    if (e.key === 'ArrowRight' || (e.key === 'Enter' && !onBtn)) { e.preventDefault(); step(1) }
     if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1) }
+    /*
+     * aria-modal 이라고 적어 두었으니 탭도 안에 머물러야 한다. 막은 눈으로만 가려서,
+     * 두지 않으면 보이지도 않는 뒤쪽 단추 십여 개를 지나며 누를 수 있다.
+     */
+    if (e.key === 'Tab') {
+      const btns = [...(live.root.querySelectorAll('.coach__b button') || [])]
+      if (!btns.length) return
+      e.preventDefault()
+      const i = btns.indexOf(document.activeElement)
+      btns[(i + (e.shiftKey ? -1 : 1) + btns.length) % btns.length].focus()
+    }
   }
   live.onSize = () => draw()
   addEventListener('keydown', live.onKey)
@@ -186,14 +216,29 @@ function show() {
    * 잰 좌표가 화면 밖이면 막 위로 올려도 보이지 않는다. 재기 전에 끌어온다.
    * body 는 coaching 동안 overflow:hidden 이라 창 전체가 흔들리지는 않는다.
    */
-  for (const n of targets(c)) n.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+  /*
+   * 뒤에서 앞으로 끌어온다. 앞에서부터 끌면 마지막(보통 더 큰) 앵커가 기둥 맨 위를
+   * 차지하고 첫 앵커를 밀어내서, 카드가 먼저 말하는 것이 잘려 나간다.
+   */
+  for (const n of targets(c).reverse()) n.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
   // 화면이 다시 그려진 뒤에 좌표를 잰다
   requestAnimationFrame(() => draw())
 }
 
-/** 앵커가 하나도 없으면 그 장은 조용히 넘긴다. 빈 구멍을 가리키지 않는다. */
+/**
+ * 앵커가 하나도 없으면 그 장은 조용히 넘긴다. 빈 구멍을 가리키지 않는다.
+ *
+ * 있기만 한 것으로는 모자라다. 접힌 판·hidden 인 띠도 querySelector 에는 잡히는데,
+ * 그 사각형은 0×0 이라 말풍선이 화면 왼쪽 위의 빈 자리를 가리키며 뜬다. 보이는 것만
+ * 앵커로 센다.
+ */
 function targets(c) {
-  return c.spot.map((k) => $(`[data-coach="${k}"]`)).filter(Boolean)
+  return c.spot.map((k) => $(`[data-coach="${k}"]`)).filter((n) => {
+    if (!n) return false
+    if (n.offsetParent === null && getComputedStyle(n).position !== 'fixed') return false
+    const r = n.getBoundingClientRect()
+    return r.width > 0 && r.height > 0
+  })
 }
 
 function draw() {
@@ -216,10 +261,42 @@ function draw() {
     return { x: r.left, y: r.top, w: r.width, h: r.height }
   })
 
-  const veil = document.createElement('div')
-  veil.className = 'coach__veil'
-  veil.onclick = () => step(1)
-  root.append(veil)
+  /*
+   * 밝게 둘 자리. 앵커가 여러 개면 그것들을 다 감싸는 사각형 하나로 둔다. 조각을 앵커
+   * 마다 따로 뚫으면 조각끼리 겹쳐 그 자리만 두 번 어두워진다. 사이가 같이 밝아지는
+   * 것은 구멍이 조금 커지는 것일 뿐이고, 어느 것을 가리키는지는 테두리가 말한다.
+   */
+  const pad = 4
+  const hole = {
+    t: Math.max(0, Math.min(...boxes.map((x) => x.y)) - pad),
+    b: Math.min(innerHeight, Math.max(...boxes.map((x) => x.y + x.h)) + pad),
+    l: Math.max(0, Math.min(...boxes.map((x) => x.x)) - pad),
+    r: Math.min(innerWidth, Math.max(...boxes.map((x) => x.x + x.w)) + pad),
+  }
+  const midH = Math.max(0, hole.b - hole.t)
+  for (const [x, y, w, h] of [
+    [0, 0, innerWidth, hole.t],
+    [0, hole.b, innerWidth, Math.max(0, innerHeight - hole.b)],
+    [0, hole.t, Math.max(0, hole.l), midH],
+    [hole.r, hole.t, Math.max(0, innerWidth - hole.r), midH],
+  ]) {
+    if (w <= 0 || h <= 0) continue
+    const v = document.createElement('div')
+    v.className = 'coach__veil'
+    v.style.cssText = `left:${x}px;top:${y}px;width:${w}px;height:${h}px`
+    v.onclick = () => step(1)
+    root.append(v)
+  }
+
+  // 앵커마다 테두리를 그 좌표 위에 따로 그린다. 앵커 자체는 손대지 않는다
+  hits.forEach((n, i) => {
+    const ring = document.createElement('div')
+    ring.className = 'coach__ring'
+    ring.style.cssText = `left:${boxes[i].x}px;top:${boxes[i].y}px;`
+      + `width:${boxes[i].w}px;height:${boxes[i].h}px;`
+      + `border-radius:${getComputedStyle(n).borderRadius || '6px'}`
+    root.append(ring)
+  })
 
   for (const t of c.tags || []) {
     const n = $(`[data-coach="${t.on}"]`)
@@ -232,15 +309,23 @@ function draw() {
     root.append(tag)
   }
 
-  root.append(bubble(c, boxes))
+  // 붙인 뒤에 자리를 잡는다. 높이를 재려면 먼저 문서에 있어야 한다
+  const b = bubble(c)
+  root.append(b)
+  place(b, boxes)
 
-  const first = root.querySelector('.coach__b button')
-  first?.focus()
+  /*
+   * 「다음」에 초점을 둔다. 줄에서 먼저 나오는 「건너뛰기」에 두면 Enter 가 위의 onKey
+   * 에서 step(1) 로 가로채여, 초점이 있는 단추와 Enter 가 하는 일이 서로 다르다.
+   */
+  root.querySelector('.coach__next')?.focus()
 }
 
-function bubble(c, boxes) {
+function bubble(c) {
   const b = document.createElement('div')
   b.className = 'coach__b'
+  // 자리는 place() 가 잡는다. 폭만 먼저 줘야 높이를 옳게 잴 수 있다
+  b.style.cssText = `left:0;top:0;width:${W}px`
 
   const top = document.createElement('div')
   top.className = 'coach__crumb'
@@ -272,28 +357,42 @@ function bubble(c, boxes) {
   next.onclick = () => step(1)
   row.append(skip, next)
   b.append(row)
+  return b
+}
 
-  // 뚫린 구멍을 덮지 않는 자리로 보낸다
+const W = 330, GAP = 14
+
+/*
+ * 뚫린 구멍을 덮지 않는 자리로 보낸다.
+ *
+ * 높이는 재서 쓴다. 250px 로 어림잡으면 본문이 네 줄인 카드(실측 323px)가 좁은 화면에서
+ * 단추 줄만큼 화면 밖으로 밀려 나가고, body 가 overflow:hidden 이라 굴려서 볼 수도 없다 —
+ * 키보드로도 마우스로도 안내를 끝낼 수 없게 된다. 화면보다 높으면 안에서 굴린다.
+ */
+function place(b, boxes) {
   const span = boxes.reduce((a, x) => ({
     top: Math.min(a.top, x.y), bottom: Math.max(a.bottom, x.y + x.h),
     left: Math.min(a.left, x.x), right: Math.max(a.right, x.x + x.w),
   }), { top: 1e9, bottom: -1e9, left: 1e9, right: -1e9 })
 
-  const W = 330, H = 250, gap = 14
-  const roomR = innerWidth - span.right - gap
-  const roomL = span.left - gap
-  const roomB = innerHeight - span.bottom - gap
+  const cap = innerHeight - GAP * 2
+  if (b.offsetHeight > cap) {
+    b.style.maxHeight = `${cap}px`
+    b.style.overflowY = 'auto'
+  }
+  const H = Math.min(b.offsetHeight, cap)
+  const roomR = innerWidth - span.right - GAP
+  const roomL = span.left - GAP
+  const roomB = innerHeight - span.bottom - GAP
 
   let x, y
-  if (roomR >= W) { x = span.right + gap; y = span.top }
-  else if (roomL >= W) { x = span.left - gap - W; y = span.top }
-  else if (roomB >= H) { x = span.left; y = span.bottom + gap }
-  else { x = innerWidth - W - gap; y = innerHeight - H - gap }
+  if (roomR >= W) { x = span.right + GAP; y = span.top }
+  else if (roomL >= W) { x = span.left - GAP - W; y = span.top }
+  else if (roomB >= H) { x = span.left; y = span.bottom + GAP }
+  else { x = innerWidth - W - GAP; y = innerHeight - H - GAP }
 
-  b.style.cssText =
-    `left:${Math.max(gap, Math.min(x, innerWidth - W - gap))}px;` +
-    `top:${Math.max(gap, Math.min(y, innerHeight - H - gap))}px;width:${W}px`
-  return b
+  b.style.left = `${Math.max(GAP, Math.min(x, innerWidth - W - GAP))}px`
+  b.style.top = `${Math.max(GAP, Math.min(y, innerHeight - H - GAP))}px`
 }
 
 function mk(t, c, x) {

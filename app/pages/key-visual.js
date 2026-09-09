@@ -437,13 +437,24 @@ async function pollGpu() {
   try {
     const r = await fetch(`${cfg.genUrl}/health`, { cache: 'no-store' })
     const j = await r.json()
+    /*
+     * 같은 GPU 를 영상화가 함께 씁니다. 영상 모델은 그림을 못 그리므로 이 화면에서는 없는
+     * 것으로 봅니다. 걸러내지 않으면 영상 모델이 고를 수 있는 그림 모델로 보이고, 그것이
+     * 올라와 있는 동안에는 사람이 고른 적도 없는데 저절로 골라집니다
+     */
+    const draw = (j.models || []).filter((m) => !m.video)
+    const resident = draw.some((m) => m.id === j.modelId) ? j.modelId : null
     S.gpu = {
       state: j.error ? 'error' : j.loading ? 'loading' : !j.warm ? 'loading' : j.busy ? 'busy' : 'ready',
-      text: j.error ? '생성 서버 오류' : j.loading || !j.warm ? '모델 올리는 중' : j.busy ? '그리는 중' : j.model,
-      models: j.models || [], resident: j.modelId, loading: j.loading, wait: j.wait || 0,
+      text: j.error ? '생성 서버 오류' : j.loading || !j.warm ? '모델 올리는 중' : j.busy ? '그리는 중'
+        : resident ? j.model : '그림 모델 대기',
+      models: draw, resident, loading: j.loading, wait: j.wait || 0,
       gpu: j.gpu, err: j.error,
     }
-    if (!S.model) S.model = j.loading || j.modelId
+    /* 처음 고르는 모델. 올라온 그림 모델이 없으면 서버가 말하는 기본 모델입니다 */
+    if (!S.model) {
+      S.model = [j.loading, resident, j.default].find((id) => draw.some((m) => m.id === id)) || null
+    }
   } catch {
     // 업무 시간 밖이면 꺼져 있는 것이 정상입니다. 시간표와 다음에 켜지는 때를 적습니다
     S.gpu = { state: 'down', text: '생성 서버에 닿지 않음', models: [], hint: gpuDownHint() }
@@ -567,7 +578,12 @@ async function runBatch(ids) {
   for (const s of targets) { const j = job(s.id); j.status = 'queued'; delete j.err }
   paint()
 
-  if (canGen() && S.gpu.state !== 'ready' && S.gpu.state !== 'busy') await preload()
+  /*
+   * 영상 모델이 올라와 있으면 health 는 warm 이라고 답하므로 state 는 'ready' 인데,
+   * 그림 모델은 하나도 올라와 있지 않습니다(resident 가 null). 상태만 보고 넘어가면
+   * 모델을 올리지 않은 채로 넣어 씬마다 503 이 됩니다. 올라온 것이 내가 고른 것인지로 봅니다
+   */
+  if (canGen() && S.gpu.state !== 'busy' && S.gpu.resident !== S.model) await preload()
 
   /*
    * 대기열을 여러 갈래가 나눠 집는다. 갈래마다 자기 장이 끝나면 바로 다음 번호를

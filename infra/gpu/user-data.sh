@@ -10,11 +10,15 @@ install -d -o root -g root /opt/sb /opt/hf
 python3 -m venv /opt/sb/venv
 /opt/sb/venv/bin/pip install -q --upgrade pip==26.2.1 wheel==0.48.0
 
+# 마지막 줄 셋은 영상(Wan2.2)용입니다. imageio 둘은 프레임을 mp4 로 묶고, ftfy 는
+# diffusers 의 Wan 파이프라인이 프롬프트를 다듬을 때 부릅니다 — 없으면 그 자리에서
+# NameError 로 죽습니다(실제로 그랬습니다).
 /opt/sb/venv/bin/pip install -q \
   torch==2.13.0 torchvision==0.28.0 diffusers==0.39.0 transformers==5.15.0 accelerate==1.14.0 \
   safetensors==0.8.0 sentencepiece==0.2.2 protobuf==7.35.1 \
   pillow==12.3.0 boto3==1.43.70 \
-  "pyjwt[crypto]==2.13.0" "uvicorn[standard]==0.52.1" fastapi==0.141.1
+  "pyjwt[crypto]==2.13.0" "uvicorn[standard]==0.52.1" fastapi==0.141.1 \
+  imageio==2.37.0 imageio-ffmpeg==0.6.0 ftfy==6.3.1
 
 aws s3 cp __SERVER_URI__ /opt/sb/server.py
 

@@ -4,8 +4,9 @@ import {
   FEEDBACK_TAGS, NEEDS, canTransition, canEditContent, splitScenario, splitScript,
   scenarioFromScript, mergeField, handBackTo, notifFor, sceneGroups, sceneKey, sceneMeta,
   clock, startTimes, scrub, debounceBy, epLabel, lostEdit, isActionable, changedSince,
-  workload, liveVer, deadVer, tally, actorPace,
+  workload, liveVer, deadVer, tally, actorPace, CUT_MAX,
 } from '../domain/panels.js'
+import { confirmAsk } from '../components/confirm.js'
 import { josa } from '../lib/josa.js'
 import { MODES, GENRES, TONES, LENGTHS, CUTCOUNTS } from '../domain/prompts.js'
 import { planOutline, planCuts, planScript } from '../services/planner.js'
@@ -15,8 +16,10 @@ import { srcOf, downscale, faceSheet } from '../lib/placeholder-art.js'
 import { SEED_ART } from '../lib/seed-art.js'
 import { gpuDownHint } from '../lib/gpu-hours.js'
 import { connect, connectorClient } from '../services/api.js'
+import { canAnimate, videoHealth, runClip, clipHint } from '../services/animate.js'
+import { cutPrompt } from '../domain/mcp.js'
 import { configured, idToken, session, logout } from '../services/auth.js'
-import { showLogin } from '../components/login-form.js'
+import { showLogin, gateModal } from '../components/login-form.js'
 import { NAV_TABS, navHref, boardFromSearch } from '../domain/routes.js'
 import { mountNav } from '../components/nav-tabs.js'
 import { mountBrand } from '../components/brand.js'
@@ -219,9 +222,23 @@ const genBy = (p) =>
  * @param {string} src - srcOf(version)
  * @param {string} [attrs] - 그대로 붙일 속성 문자열
  */
-const media = (src, attrs = '') => (/\.mp4(\?|$)/i.test(src || '')
-  ? `<video src="${src}" ${attrs} controls loop muted playsinline></video>`
+// 우리 GPU 는 mp4 로 줍니다. 옛 판에는 MCP 로 붙인 서버가 준 webm·mov 도 남아 있습니다
+const isVideoSrc = (src) => /\.(mp4|webm|mov|m4v)(\?|$)/i.test(src || '')
+/*
+ * alt 는 video 의 속성이 아닙니다 — 브라우저도 읽어 주는 기계도 그냥 버립니다. 부르는
+ * 쪽은 그림인지 영상인지 모르고 alt 를 넘기므로, 영상일 때 여기서 aria-label 로 옮깁니다
+ */
+const media = (src, attrs = '') => (isVideoSrc(src)
+  ? `<video src="${src}" ${attrs.replace(/\balt=/g, 'aria-label=')} controls loop muted playsinline></video>`
   : `<img src="${src}" ${attrs}>`)
+
+/*
+ * 버전 칩의 글자. 'video' 는 우리 GPU 로 만든 영상이고(animate), 'mcp' 는 없어진 영상화
+ * 화면이 바깥 서버로 만들던 것입니다. 둘 다 「영상」으로 읽습니다 — 어디서 만들었는지는 이 자리에서
+ * 물어보는 것이 아닙니다. 모르는 값과 없는 값은 업로드로 봅니다. 옛 판에는 source 가
+ * 아예 없는 버전이 있고, 그때는 사람이 올린 것이었습니다.
+ */
+const VER_SRC = { ai: 'AI', sketch: 'AI · 스케치', video: '영상', mcp: '영상' }
 
 function refOf(ch) {
   if (!ch?.refPanelId) return null
@@ -248,7 +265,7 @@ function faceOf(ch) {
   const pinned = refOf(ch)
   const hit = pinned || approvedPose(ch)
   // 영상은 기반 이미지가 되지 못합니다(keyVisualOf 와 같은 이유)
-  if (!hit || /\.mp4(\?|$)/i.test(hit.src || '')) return null
+  if (!hit || isVideoSrc(hit.src)) return null
   return { ...hit, id: ch.id, name: ch.name, pinned: !!pinned }
 }
 
@@ -300,7 +317,7 @@ function keyVisualIn(sceneName, exceptId = null) {
   for (const p of hits) {
     const cur = liveVer(p)
     // 영상은 기반 이미지가 되지 못합니다. 커넥터의 영상 모델이 mp4 를 돌려줍니다
-    if (cur && !/\.mp4(\?|$)/i.test(srcOf(cur.ver) || '')) return { panel: p, ver: cur.ver, n: cur.i + 1 }
+    if (cur && !isVideoSrc(srcOf(cur.ver))) return { panel: p, ver: cur.ver, n: cur.i + 1 }
   }
   return null
 }
@@ -1068,6 +1085,17 @@ function transition(panel, action, note) {
     addComment(panel, note, extra)
   }
   emit({ kind: 'panel.status', panelId: panel.id, from: panel.status, to: check.to, assignee })
+  /*
+   * 됐다는 말을 한 줄 띄웁니다. 세 부르는 자리(단추·키보드·메모와 함께)가 다 여기를 지나므로
+   * 이 자리에 두면 한 곳입니다.
+   *
+   * 예전에는 성공에 아무 말이 없었습니다. 카드의 상태 칩 색만 바뀌는데 그 카드가 화면 밖일
+   * 수도 있고, 색만 봐서는 눌린 것인지 원래 그랬던 것인지 모릅니다. 누구에게 넘어갔는지도
+   * 같이 말합니다 — 이 판의 일은 대개 「다음 사람에게 넘기는 것」이라서 그것이 결과입니다.
+   */
+  const to = person(assignee)
+  notice(`${labelOf(panel)} · ${ACTIONS[action].label}${
+    to && to.id !== me.id ? ` · ${to.name}에게 넘어갔습니다` : ''}`, 'ok')
   return check
 }
 
@@ -1182,9 +1210,31 @@ function refChoices(panel) {
   }
   const kv = keyVisualOf(panel)
   if (kv) out.push({ key: 'keyvisual', label: `씬 키 비주얼${kv.n > 1 ? ` v${kv.n}` : ''}`, src: srcOf(kv.ver) })
+  /*
+   * 「영상으로 생성」을 누른 컷은 이 칸의 current 가 mp4 입니다. 그것을 기반 이미지로 내밀면
+   * asInit 이 읽다 죽고 「이미지를 읽을 수 없습니다」만 남습니다 — 그림이 깨진 것처럼
+   * 읽히지만 실은 영상을 고른 것입니다. 위의 faceOf·keyVisualIn 과 같이 걸러 둡니다
+   */
   const cur = liveVer(panel)
-  if (cur) out.push({ key: 'current', label: `현재 v${cur.i + 1}${cur.ver.source === 'upload' ? ' (스케치)' : ''}`, src: srcOf(cur.ver) })
+  if (cur && !isVideoSrc(srcOf(cur.ver))) {
+    out.push({
+      key: 'current', label: `현재 v${cur.i + 1}${cur.ver.source === 'upload' ? ' (스케치)' : ''}`,
+      src: srcOf(cur.ver), sketch: cur.ver.source === 'upload',
+    })
+  }
   return out
+}
+
+/*
+ * 고른 기반 이미지가 무엇인가. 서버는 그림을 init 한 칸으로만 받아서 스케치와 얼굴과
+ * 키비주얼을 구별하지 못합니다(server.py 의 build). 말해 주지 않으면 얼굴에게도
+ * 「같은 구도와 카메라를 유지하라」가 붙어, 컷이 바뀌어도 그 얼굴 사진이 그대로 나옵니다.
+ */
+function refKindOf(choice) {
+  if (choice.key === 'cast') return 'cast'
+  if (choice.face || choice.key === 'anchor') return 'face'
+  if (choice.sketch) return 'sketch'
+  return 'image'
 }
 
 async function asInit(src) {
@@ -1204,11 +1254,68 @@ async function askGpu(body, path = '') {
   })
   const json = await res.json().catch(() => ({}))
   if (!res.ok) {
-    throw new Error(json.detail || (res.status >= 500
-      ? `생성 서버가 꺼져 있습니다 (${res.status}). GPU를 켜면 그림 외의 기능은 그대로 씁니다`
-      : `생성 서버 오류 (${res.status})`))
+    /*
+     * 502 는 CloudFront 가 GPU 를 못 만난 것이니 「꺼져 있습니다」가 맞습니다.
+     * 504 는 만났지만 60초 안에 답을 못 받은 것입니다 — 앞사람 그림이 도는 중이면 이렇게
+     * 됩니다. 이때 「꺼져 있습니다」라고 하면 사람은 켜러 갑니다(이미 켜져 있습니다).
+     * 500 은 서버가 살아서 답한 것입니다.
+     */
+    const err = new Error(json.detail || (res.status === 502
+      ? `생성 서버가 꺼져 있습니다 (502). GPU를 켜면 그림 외의 기능은 그대로 씁니다`
+      : res.status === 504
+        ? '생성 서버가 60초 안에 답하지 못했습니다 (504). 앞사람 그림이 도는 중일 수 있습니다.'
+          + ' 잠시 뒤 다시 눌러주세요'
+        : res.status >= 500
+          ? `그림을 만들다 서버에서 끊겼습니다 (${res.status}). 잠시 뒤 다시 눌러주세요`
+          : `생성 서버 오류 (${res.status})`))
+    // 503 은 「지금은 안 되지만 곧 된다」는 뜻입니다. 부른 쪽이 기다릴지 말지 고르게 합니다
+    err.status = res.status
+    throw err
   }
   return json
+}
+
+/*
+ * 그림 모델과 영상 모델은 GPU 한 대를 나눠 씁니다. 「영상으로 생성」을 쓴 뒤 여기서 그림을
+ * 만들면, 서버가 그림 모델을 다시 올리는 동안 503 을 줍니다(server.py 의 /gen).
+ * 그때 사람이 1~2분 뒤 다시 누르게 하지 않고, 준비되는 것을 보고 우리가 다시 넣습니다.
+ *
+ * 기계가 꺼져 있으면 health 자체가 안 됩니다. 그때는 기다리지 않고 돌아섭니다 —
+ * 부른 쪽이 원래의 503 사유를 그대로 보여줍니다.
+ * @returns {Promise<boolean>} 다시 넣어 볼 만해졌는지
+ */
+async function genHealth() {
+  try {
+    return await (await fetch(`${cfg.genUrl}/health`, { cache: 'no-store' })).json()
+  } catch {
+    return null
+  }
+}
+
+/*
+ * 503 을 받았을 때 기다려 볼 만한지. 기계가 꺼져 있거나(=health 자체가 안 됨), 이 모델의
+ * 사유가 이미 나와 있거나, 영상 일감이 GPU 를 쥐고 있으면 기다려도 오지 않습니다.
+ *
+ * 영상 일감이 있을 때 그림 모델은 올라오기 시작조차 안 합니다(server.py 의 vid_pending 이
+ * /gen 과 /gen/load 를 함께 막습니다). 그래서 「준비되면 자동으로 다시 만듭니다」를 적기
+ * 전에 이것을 먼저 봅니다 — 안 그러면 다른 사람 화면에도 「만드는 중」이 떴다가, 우리는
+ * 기다리지도 않고 바로 사유로 바뀝니다.
+ */
+function worthWait(j, want) {
+  if (!j || j.video?.busy) return false
+  // 사유가 다른 모델의 것이면 이 기다림과 상관이 없습니다(server.py 의 errorModel)
+  if (j.error && (!j.errorModel || j.errorModel === want)) return false
+  return true
+}
+
+async function waitModel(want) {
+  for (let i = 0; i < 36; i++) {
+    const j = await genHealth()
+    if (!worthWait(j, want)) return false
+    if (j.warm && !j.loading && j.modelId === want) return true
+    await new Promise((r) => setTimeout(r, 5000))
+  }
+  return false
 }
 
 /*
@@ -1231,7 +1338,7 @@ async function loadConnModels() {
   renderDetail()
 }
 
-async function generate(panel) {
+async function generate(panel, again = false) {
   if (!canGen && !isConn(pickedModel)) return generateLocal(panel)
   const o = optsFor(panel)
   const ch = charOf(panel)
@@ -1249,6 +1356,7 @@ async function generate(panel) {
       model: pickedModel,
       seed: ch?.seedNo ?? null,
       init,
+      refKind: init ? refKindOf(choice) : null,
       strength: o.strength,
     }
     const r = isConn(pickedModel) ? await conn.gen(body) : await askGpu(body)
@@ -1262,6 +1370,17 @@ async function generate(panel) {
       },
     })
   } catch (err) {
+    // 모델을 올리는 중이라 503 이면, 사유를 적어 두고 준비될 때까지 기다린 뒤 한 번만 다시.
+    // 영상 일감 때문의 503 이면 기다리지 않습니다(worthWait) — 사유를 그대로 보여줍니다
+    if (err.status === 503 && !again && !isConn(pickedModel)
+        && worthWait(await genHealth(), pickedModel)) {
+      emit({
+        kind: 'panel.patch', panelId: panel.id,
+        fields: { generating: me.id, genAt: now(), genError: `${err.message} 준비되면 자동으로 다시 만듭니다.` },
+      })
+      pollGpu()
+      if (await waitModel(pickedModel)) return generate(panel, true)
+    }
     emit({ kind: 'panel.patch', panelId: panel.id, fields: { generating: false, genError: err.message } })
     pollGpu()
   }
@@ -1282,23 +1401,186 @@ async function generateLocal(panel) {
   })
 }
 
+/* ── 컷을 영상으로 ───────────────────────────────────────────────────────────── */
+
+/*
+ * 승인된 컷 한 장을 짧은 영상으로 만듭니다(services/animate.js → server.py 의 /gen/animate).
+ *
+ * 예전에는 이 일이 「영상화」라는 별 화면이었습니다. 그 화면은 보드의 컷을 다시 읽어
+ * 목록으로 늘어놓고, 만든 영상을 다시 op 로 보드에 붙였습니다 — 같은 컷을 두 화면이 각자
+ * 그리는 셈이라, 어느 컷이 승인됐고 누가 담당인지가 그쪽에서는 보이지 않았습니다. 이제
+ * 컷을 보고 있는 자리에서 바로 누릅니다.
+ *
+ * 승인된 컷만입니다. 영상은 그림 한 장을 첫 프레임으로 늘리는 일이라, 아직 고칠 그림으로
+ * 만들면 그 시간(30초~4분)과 GPU 자리를 버립니다. 감독의 승인이 「이 그림으로 간다」는
+ * 표시이므로 그것을 문으로 씁니다.
+ *
+ * 결과는 그 컷의 다음 버전으로 붙습니다(source: 'video'). 판에 새 칸을 만들지 않아서
+ * 히스토리·버전 칩·뷰어가 이미 그것을 압니다(activity-log.js · VER_SRC · media).
+ */
+
+/* 만드는 동안의 진행 한 줄. 판에 남길 것이 아니라 누른 사람 화면만의 것입니다 */
+const clipWork = new Map()
+
+/*
+ * /health 의 영상 칸(server.py 의 VSECS·VQ·EST). 길이·화질은 서버가 실측해서 정해 둔 것만
+ * 고를 수 있습니다 — 서버가 안 받는 값을 화면이 내밀면 400 이 옵니다. 아직 못 물어봤을
+ * 때만 아래 기본값을 씁니다.
+ */
+let vinfo = null
+const clipSecs = () => (vinfo?.secs?.length ? vinfo.secs : [2, 3, 5])
+const clipQual = () => (vinfo?.quality?.length ? vinfo.quality
+  : [{ id: 'fast', label: '빠르게 · 832×480' }, { id: 'fine', label: '곱게 · 1280×704' }])
+/* 고른 길이와 화질. 컷마다 따로 둘 만한 것이 아니라 이 사람의 손버릇입니다 */
+const clipOpts = { secs: 3, quality: 'fast' }
+
+/** 얼마나 걸릴지. 초당 걸리는 시간(est)은 서버만 아는 값입니다 */
+function clipEta() {
+  const q = clipQual().find((x) => x.id === clipOpts.quality)
+  return q?.est ? Math.round(q.est * clipOpts.secs) : 0
+}
+
+/**
+ * 이 컷의 첫 프레임이 될 그림. 이미 영상을 붙인 컷은 그 앞의 그림을 씁니다 — 영상을
+ * 다시 영상으로 넣으면 서버가 읽다 죽습니다.
+ */
+function stillOf(panel) {
+  const cur = liveVer(panel)
+  if (cur && !isVideoSrc(srcOf(cur.ver))) return srcOf(cur.ver)
+  const live = (panel.versions || []).filter((v) => !deadVer(panel, v))
+  for (let i = live.length - 1; i >= 0; i--) {
+    const src = srcOf(live[i])
+    if (src && !isVideoSrc(src)) return src
+  }
+  return null
+}
+
+/** 이 컷을 영상으로 만들 수 있는지. 못 하면 그 이유 한 줄입니다 */
+function whyNotClip(panel) {
+  if (!canAnimate()) return '이 배포에는 생성 서버가 없습니다'
+  if (panel.charId) return '인물 구도는 영상으로 만들지 않습니다. 컷에서 누르세요'
+  if (panel.status !== 'approved') {
+    return `${STATUS[panel.status].label} 상태입니다. 감독이 이미지를 승인하면 영상으로 만들 수 있습니다`
+  }
+  if (!stillOf(panel)) return '먼저 이미지가 있어야 합니다'
+  if (clipWork.has(panel.id)) return '이미 영상을 만들고 있습니다'
+  if (genBy(panel)) return '이 컷을 만들고 있습니다. 끝나면 눌러주세요'
+  return ''
+}
+
+/*
+ * 503 을 받은 뒤 기다립니다. 사유는 둘입니다 — 영상 모델을 올리는 중이거나 다른 컷을
+ * 만드는 중입니다. 둘 다 조금 뒤에는 되므로 사람이 같은 단추를 다시 누르게 하지 않습니다.
+ * 기계가 꺼져 있으면 /health 가 아예 안 되니 그때는 그 자리에서 돌아섭니다 — 부른 쪽이
+ * 원래의 사유를 그대로 보여줍니다(없어진 영상화 화면의 waitWarm 과 같은 규칙입니다).
+ */
+async function waitVideo(tick) {
+  for (let i = 0; i < 60; i++) {
+    const h = await videoHealth().catch(() => null)
+    if (!h) return false
+    if (h.video) vinfo = h.video
+    // 영상 모델을 올리다 엎어졌으면 아무도 다시 올리지 않습니다. 기다려도 오지 않습니다
+    if (h.error && (!h.errorModel || h.errorModel === h.video?.id)) { tick(`생성 서버: ${h.error}`); return false }
+    if (h.video?.id && h.modelId === h.video.id && !h.video.busy) return true
+    tick(h.video?.busy
+      ? '다른 컷을 만들고 있습니다. 자리가 나면 이어서 넣습니다…'
+      : `영상 모델을 올립니다${h.wait ? ` · 약 ${Math.round(h.wait)}초 남음` : ''}…`)
+    await new Promise((r) => setTimeout(r, 5000))
+  }
+  return false
+}
+
+async function animate(panel) {
+  const why = whyNotClip(panel)
+  if (why) { notice(why); return }
+
+  const tick = (t) => { clipWork.set(panel.id, t); renderDetail() }
+  tick('보냅니다…')
+  /*
+   * 그림 생성과 같은 칸(generating)을 씁니다. 영상 모델이 올라오면 그림 모델은 내려가서
+   * (server.py 의 _unload) 그 동안 이 GPU 로는 그림도 못 만듭니다. 같은 칸에 적어 두면
+   * 남의 화면에서도 「○○ 생성 중」으로 보여 두 사람이 같은 GPU 를 동시에 부르지 않습니다.
+   */
+  emit({ kind: 'panel.patch', panelId: panel.id, fields: { generating: me.id, genAt: now(), genError: null } })
+
+  const t0 = performance.now()
+  const prompt = cutPrompt(panel)
+  const body = { still: stillOf(panel), prompt, secs: clipOpts.secs, quality: clipOpts.quality }
+  try {
+    let out
+    try {
+      out = await runClip(body, { onTick: (s) => tick(clipHint(s)) })
+    } catch (err) {
+      if (err.status !== 503) throw err
+      tick(err.message)
+      if (!await waitVideo(tick)) throw err
+      out = await runClip(body, { onTick: (s) => tick(clipHint(s)) })
+    }
+    clipWork.delete(panel.id)
+    emit({
+      kind: 'panel.version', panelId: panel.id,
+      version: {
+        n: (panel.versions?.length || 0) + 1,
+        src: out.url, source: 'video', author: me.id, ts: now(), prompt,
+        gen: {
+          model: vinfo?.id || 'wan', seed: out.seed ?? null,
+          ms: out.ms ?? Math.round(performance.now() - t0), ref: 'gpu', strength: null,
+        },
+      },
+    })
+    announce(`${labelOf(panel)} · 영상이 나왔습니다.`)
+  } catch (err) {
+    clipWork.delete(panel.id)
+    emit({ kind: 'panel.patch', panelId: panel.id, fields: { generating: false, genError: err.message } })
+  }
+}
+
 let fastPoll = null
 async function pollGpu() {
   if (!canGen) return
   try {
     const r = await fetch(`${cfg.genUrl}/health`, { cache: 'no-store' })
     const j = await r.json()
-    gpuModels = j.models || []
-    if (!pickedModel) pickedModel = j.loading || j.modelId
-    gpu = j.error ? { state: 'error', text: '생성 서버 오류', hint: j.error, resident: j.modelId }
+    /*
+     * 영상 모델(wan)은 「영상으로 생성」의 것입니다. 같은 GPU 에 올라오기 때문에 /health
+     * 목록에 섞여 오지만, 그림을 그리는 데 쓸 수는 없습니다 — server.py 의 pick() 도 그림
+     * 모델로 되돌립니다. 걸러 두지 않으면 영상을 한 번 만든 뒤 이 화면이 「지금 그리는
+     * 모델: 컷을 영상으로」라고 말하고, 503 뒤의 자동 대기가 영원히 오지 않는 wan 을
+     * 기다립니다. 대신 그 칸은 vinfo 로 따로 받습니다 — 길이·화질 목록이 거기 있습니다.
+     */
+    gpuModels = (j.models || []).filter((m) => !m.video)
+    vinfo = j.video || null
+    /*
+     * 영상 모델이 올라와 있으면 이 화면에는 「올라온 그림 모델이 없다」와 같습니다. 그대로
+     * 두면 단추가 「Wan2.2 TI2V 5B」라고 말하고, 모델 칩 어디에도 「지금 올라옴」이 없습니다.
+     */
+    const resident = gpuModels.some((m) => m.id === j.modelId) ? j.modelId : null
+    /*
+     * 처음 고르는 모델. 올라온 것이 있으면 그것을 쓰고, 없으면 서버가 말하는 기본 모델
+     * (j.default)입니다. 목록의 첫 줄로 되돌리면 영상화를 다녀온 뒤 기본과 다른 모델이
+     * 올라가고, 사람은 고른 적도 없는 모델을 1분 넘게 기다립니다.
+     */
+    if (!pickedModel) {
+      pickedModel = [j.loading, resident, j.default].find((id) => gpuModels.some((m) => m.id === id))
+        || gpuModels[0]?.id || null
+    }
+    /*
+     * 영상 모델을 올리다 엎어진 사유는 이 화면의 것이 아닙니다. 그대로 읽으면 그림은
+     * 멀쩡한데 「생성 서버 오류」로 보입니다(server.py 의 errorModel)
+     */
+    const err = j.error && (!j.errorModel || gpuModels.some((m) => m.id === j.errorModel)) ? j.error : null
+    gpu = err ? { state: 'error', text: '생성 서버 오류', hint: err, resident }
       : j.loading ? {
-        state: 'warm', text: '모델 올리는 중', resident: j.modelId, loading: j.loading,
+        state: 'warm', text: '모델 올리는 중', resident, loading: j.loading,
         hint: `${modelOf(j.loading)?.label || j.loading} · 약 ${mins(j.wait)}분`,
       }
         : !j.warm ? { state: 'warm', text: '모델 올리는 중', hint: '첫 부팅은 몇 분 걸립니다' }
           : {
-            state: j.busy ? 'busy' : 'ok', text: j.busy ? '생성 중' : j.model,
-            resident: j.modelId, hint: j.gpu || '',
+            state: j.busy ? 'busy' : 'ok',
+            text: j.busy ? '생성 중' : resident ? j.model : modelOf(pickedModel)?.label || j.model,
+            resident,
+            hint: resident ? j.gpu || ''
+              : '지금은 영상 모델이 올라와 있습니다. 만들기를 누르면 그림 모델을 올립니다.',
           }
     clearTimeout(fastPoll)
     if (j.loading) fastPoll = setTimeout(pollGpu, 4000)
@@ -1850,7 +2132,8 @@ function togglePerm(scope, who, cap) {
   emit(op)
   const label = scope === 'user' ? person(who)?.name || who : ROLES[who] || who
   const on = scope === 'user' ? may(cap, who) : mayRole(cap, who)
-  announce(`${label}의 「${CAPS[cap].label}」을 ${on ? '허용' : '막음'}으로 두었습니다.`)
+  announce(`${label}의 「${CAPS[cap].label}」${josa(CAPS[cap].label, '을', '를')} `
+    + `${on ? '허용' : '막음'}으로 두었습니다.`)
 }
 
 const pct = (a, b) => (b > 0 ? Math.round((a / b) * 100) : 0)
@@ -1908,6 +2191,19 @@ function welcomePanel(viewChar) {
 function runExample() {
   return boardExample({
     seedBuild, push, render, pickView,
+    /*
+     * 예시를 마칠 때 화면을 컷 보드로 돌려놓습니다. 예시가 인물 구도를 짚고 지나가므로
+     * 그대로 두면 인물 판에서 끝납니다. 마지막 말은 「이제 컷을 눌러…」입니다.
+     *
+     * 왼쪽 기둥도 되돌립니다. 예시가 아래쪽 자리를 짚으며 굴려 놓아서 「스토리보드」
+     * 목록이 화면 밖에 있습니다. 다시 그린 뒤에 되돌려야 높이가 정해져 있습니다.
+     */
+    showCuts: () => {
+      setView(null)
+      render()
+      const col = byId('boardNav')?.closest('.pane--script')
+      if (col) col.scrollTop = 0
+    },
     // 인물 구도도 같은 panels 에 삽니다(charId 가 붙습니다). 컷만 셉니다
     cuts: () => Object.values(state.panels).filter((p) => !p.charId).length,
     selected: () => selectedId,
@@ -2099,6 +2395,13 @@ function renderBoard() {
     el.dataset.selected = p.id === selectedId ? '1' : '0'
     el.dataset.fresh = freshIds.has(p.id) ? '1' : '0'
     el.setAttribute('aria-label', `${labelOf(p)} · ${st.label}${who ? ` · 담당 ${who.name}` : ''}`)
+    /*
+     * 이 카드에서 영상이 돌고 있으면 속을 다시 만들지 않는다. setHtml 은 <video> 를 새 것으로
+     * 갈아치우고 새 것은 0초에서 멈춘 상태다 — 재생을 누른 사람에게는 눌러도 아무 일도
+     * 일어나지 않는 것으로 보인다. 남이 접속하거나 컷을 하나 고를 때마다 여기를 지난다.
+     * 겉의 표시(선택·변경·이름표)는 바로 위에서 이미 새로 붙였으므로 어긋나지 않는다.
+     */
+    if ([...el.querySelectorAll('video')].some((v) => !v.paused && !v.ended)) return
     setHtml(el, `
       <div class="cut__frame">
         ${ver ? media(srcOf(ver), `alt="${esc(labelOf(p))} 이미지" loading="lazy"`) : '<div class="cut__empty">비어 있음<br>스케치 또는 생성</div>'}
@@ -2520,7 +2823,9 @@ async function runScriptOut() {
     const ctx = planCtx()
     scriptOut = await planScript(net, cuts, { format: scriptFmt, title: ctx.title, chars: ctx.chars })
     scriptMsg = net?.plan ? '' : '로컬 모드 뼈대입니다. 형식만 맞춰 조합한 것입니다.'
-    announce(`컷 ${cuts.length}개를 ${SCRIPT_FORMATS[scriptFmt].label}으로 옮겼습니다.`)
+    // 「웹드라마」는 받침이 없어 「로」입니다. 형식이 셋이라 하나만 어긋나도 늘 보입니다
+    announce(`컷 ${cuts.length}개를 ${SCRIPT_FORMATS[scriptFmt].label}`
+      + `${josa(SCRIPT_FORMATS[scriptFmt].label, '으로', '로')} 옮겼습니다.`)
   } catch (err) {
     console.warn('[board] 대본화 실패', err)
     scriptMsg = err?.message || '대본을 받지 못했습니다. 다시 시도해 주세요.'
@@ -3059,6 +3364,45 @@ function renderDetail() {
     : picked.id === gpu.resident ? ' 위쪽 모델 칩에서 바꿉니다.'
       : ` 아직 올라오지 않았습니다(약 ${mins(picked.wait)}분).`}</p>`
 
+  /*
+   * 영상 단추와 그 옆의 길이·화질. 그림 단추 바로 옆에 둡니다 — 「이 그림으로 간다」가
+   * 정해진 다음에 오는 일이라, 그것을 위해 다른 화면으로 보낼 이유가 없습니다.
+   *
+   * 승인 전에도 단추는 있고 누르면 이유가 뜹니다(위 actionBtns 와 같은 규칙입니다).
+   * 지워 버리면 「영상은 어디서 만드나」가 되고, disabled 로 두면 왜 막혔는지 마우스를
+   * 올려 본 사람만 압니다.
+   *
+   * 인물 구도에는 내지 않습니다. 구도는 얼굴을 정하려고 그리는 그림이고, 영상으로 만들
+   * 것은 컷입니다. 생성 서버가 없는 배포에서도 내지 않습니다 — 누를 곳이 없습니다.
+   */
+  const clipping = clipWork.get(p.id)
+  const clipWhy = whyNotClip(p)
+  const noClip = p.charId || !canAnimate()
+  const clipBtn = noClip ? '' : `
+      <button class="btn btn--line" data-do="animate" ${clipWhy ? `aria-disabled="true" title="${esc(clipWhy)}"` : ''}>
+        ${clipping ? '영상 만드는 중…' : '영상으로 생성'}
+      </button>`
+  const eta = clipEta()
+  /*
+   * 길이·화질은 실제로 누를 수 있을 때만 냅니다. 승인은 됐어도 그림이 없으면 첫 프레임이
+   * 없어서 단추는 막혀 있는데(whyNotClip), 고를 것이 먼저 보이면 「고르면 된다」로 읽힙니다.
+   */
+  const clipRow = noClip ? '' : p.status !== 'approved' ? `
+    <p class="why">영상은 승인된 이미지로만 만듭니다 — 아직 고칠 그림으로 만들면 그 시간과 GPU
+      자리를 버립니다. 감독이 이 컷을 승인하면 「영상으로 생성」이 열립니다.</p>` : !stillOf(p) ? `
+    <p class="why">승인은 됐지만 이 컷에 그림이 없습니다. 영상은 승인된 이미지를 첫 프레임으로
+      씁니다 — 먼저 「AI로 생성」으로 그림을 한 장 만드세요.</p>` : `
+    <div class="gen__row">
+      <span class="mono gen__lab">영상</span>
+      <select id="clipSecs" aria-label="영상 길이">${clipSecs().map((s) => `
+        <option value="${s}"${clipOpts.secs === s ? ' selected' : ''}>${s}초</option>`).join('')}</select>
+      <select id="clipQuality" aria-label="영상 화질">${clipQual().map((q) => `
+        <option value="${esc(q.id)}"${clipOpts.quality === q.id ? ' selected' : ''}>${esc(q.label)}</option>`).join('')}</select>
+      ${eta ? `<span class="mono gen__val">약 ${eta < 60 ? `${eta}초` : `${mins(eta)}분`}</span>` : ''}
+    </div>
+    <p class="why">승인된 이미지가 첫 프레임입니다. 움직임은 이 컷의 작업 지시·대사·카메라에서
+      만들어 보냅니다. 나온 영상은 이 컷의 다음 버전으로 붙습니다.</p>`
+
   const genBlock = !may('art') ? `
     <h2 class="mono h" style="margin-top:22px">이미지</h2>
     <p class="why">${esc(whyNot('art'))}. 필요한 그림이 있으면 아래 메모로 남겨주세요.</p>` : `
@@ -3099,20 +3443,33 @@ function renderDetail() {
         ${busyBy ? `${esc(busyBy.name)} 생성 중…` : refKey === 'none' ? 'AI로 생성'
     : pickedRef?.face ? '이 인물로 생성' : '이 이미지를 기반으로 생성'}
       </button>
+      ${clipBtn}
     </div>
-    ${p.genError ? `<p class="why why--bad">${esc(p.genError)}</p>` : hint ? `<p class="why">${esc(hint)}</p>` : ''}`
+    ${clipping ? `<p class="why">${esc(clipping)}</p>` : ''}
+    ${p.genError ? `<p class="why why--bad">${esc(p.genError)}</p>` : hint ? `<p class="why">${esc(hint)}</p>` : ''}
+    ${clipRow}`
 
   const rmWhy = !ver ? '먼저 이미지가 있어야 합니다'
     : !ver.vid ? '옛 캐시의 버전입니다. 새로고침하면 지울 수 있습니다'
       : !editable ? whyNotEdit(p)
         : ''
 
+  /*
+   * 막힌 단추는 둘 다 눌러 볼 수 있게 둡니다. 누르면 왜 안 되는지 한 줄이 뜹니다.
+   *
+   * 예전에는 권한 막힘만 그랬고(data-nope → watchNope), 상태 막힘은 disabled 였습니다.
+   * disabled 는 초점조차 못 받아서 이유가 마우스 hover 의 title 로만 남습니다. 터치·키보드·
+   * 스크린리더에는 아무 말도 못 하는 셈입니다. 같은 판 안에서 두 규칙이 엇갈릴 이유가 없어
+   * 상태 막힘도 aria-disabled 로 바꿨습니다.
+   *
+   * data-nope 를 달지 않는 이유: 그쪽은 「감독에게 요청하세요」가 따라붙습니다. 상태 때문에
+   * 막힌 것은 부탁할 일이 아니라 앞 단계가 끝나면 저절로 풀리는 것입니다. 그래서 이유만
+   * 싣고, 누르면 아래 data-act 처리가 mayTransition 을 다시 보고 그 이유를 띄웁니다.
+   */
   const actionBtns = Object.keys(ACTIONS).filter((x) => x !== 'assign').map((x) => {
     const c = mayTransition(p.status, x)
     const cls = x === 'approve' ? 'btn--approve' : x === 'request_changes' ? 'btn--reject' : 'btn--line'
-    // 권한이 없어 막힌 단추는 눌러 볼 수 있게 두고(누르면 이유가 뜹니다), 상태 때문에 막힌
-    // 단추는 그냥 잠급니다. 뒤엣것은 앞 단계가 끝나면 저절로 풀립니다
-    const off = may(x) ? `disabled title="${esc(c.reason || '')}"` : nope(whyNot(x))
+    const off = may(x) ? `aria-disabled="true" title="${esc(c.reason || '')}"` : nope(whyNot(x))
     return `<button class="btn ${cls}" data-act="${x}" ${c.ok ? '' : off}>${ACTIONS[x].label}</button>`
   }).join('')
 
@@ -3185,6 +3542,15 @@ function renderDetail() {
       <div class="detail__head">
         <span class="detail__no">${esc(ch ? `${ch.name} · ${p.pose || '구도'}` : `CUT ${pad(cutNo(p))}`)}</span>
         <span class="detail__status" data-tone="${st.tone}">${esc(st.label)}</span>
+        ${/*
+          * 컷을 지우는 자리. 여기 있는 이유는 지우는 것이 이 컷에 대한 일이고, 아래 바닥
+          * 띠는 다음 사람에게 넘기는 일이라서다. 승인 옆에 두면 잘못 누른다.
+          *
+          * 인물 구도에는 달지 않는다. 구도는 정해진 여섯 벌(POSES)이라 하나를 지우면 다시
+          * 만들 자리가 없다. 컷은 분해가 다시 만들어 준다.
+          */''}
+        ${ch ? '' : `<button class="mini" data-do="rmcut"
+          ${editable ? '' : `aria-disabled="true" title="${esc(whyNotEdit(p))}"`}>이 컷 지우기</button>`}
       </div>
       ${editable ? '' : `<p class="why why--why">${esc(whyNotEdit(p))}.${
   p.status === 'approved' ? '' : ' 의견은 아래 메모로 남겨주세요.'}</p>`}
@@ -3211,7 +3577,7 @@ function renderDetail() {
           ${media(srcOf(v), 'class="ver__thumb" alt="" loading="lazy"')}
           <span>v${i + 1} · ${esc(person(v.author)?.name || '알 수 없음')}
             <br><span class="ver__meta">${esc(v.gen ? `${v.gen.model} · seed ${v.gen.seed} · ${(v.gen.ms / 1000).toFixed(1)}초` : v.name || fmtWhen(v.ts))}</span></span>
-          <span class="ver__src">${v.source === 'ai' ? 'AI' : v.source === 'sketch' ? 'AI · 스케치' : '업로드'}</span>
+          <span class="ver__src">${VER_SRC[v.source] || '업로드'}</span>
         </button></li>`).join('')}</ul>`
       : `<p class="why">${p.versions?.length ? '이미지를 모두 지웠습니다. 다시 만들면 v번호는 이어서 붙습니다.' : '아직 이미지가 없습니다.'}</p>`}
 
@@ -3226,10 +3592,11 @@ function renderDetail() {
         · <b>${esc(person(e.actor)?.name || '?')}</b> ${esc(STATUS[e.from]?.label || e.from)} → ${esc(STATUS[e.to]?.label || e.to)}</li>`).join('')}</ul>`
       : '<p class="why">아직 기록이 없습니다.</p>'}
 
-      <div class="acts" style="margin-top:22px; border-top:1px solid var(--edge); padding-top:16px">
-        ${actionBtns}
+      ${/* 바닥에 붙는 띠입니다. 스크롤과 무관하게 늘 보입니다 (board.html 의 .detail__foot) */ ''}
+      <div class="detail__foot">
+        <div class="acts" style="margin-top:0">${actionBtns}</div>
+        <p class="why" id="actWhy"></p>
       </div>
-      <p class="why" id="actWhy"></p>
     </div>`)
 
   if (keep) {
@@ -3329,7 +3696,7 @@ function renderMenu() {
       <span>${esc([ROLES[me.role] || me.role, me.email].filter(Boolean).join(' · '))}</span>
     </div>
     <button data-menu="tab">다른 계정으로 새 탭 열기</button>
-    ${configured ? '' : ROSTER.map((u) => `<button data-who="${u.id}">${esc(u.name)} · ${ROLES[u.role]}로 보기</button>`).join('')}
+    ${configured ? '' : ROSTER.map((u) => `<button data-who="${u.id}">${esc(u.name)} · ${ROLES[u.role]}${josa(ROLES[u.role], '으로', '로')} 보기</button>`).join('')}
     <button data-menu="reset" data-danger="1">보드 처음 상태로</button>
     ${configured ? '<button data-menu="logout" data-danger="1">로그아웃</button>' : ''}`)
 }
@@ -3367,6 +3734,7 @@ byId('meMenu').addEventListener('click', (e) => {
     save()
   } else if (what === 'logout') {
     net?.sendPresence({ ...me, left: true })
+    bye = true
     logout()
     location.reload()
     return
@@ -3457,22 +3825,49 @@ byId('scenario').addEventListener('input', (e) => {
  *
  * 산문 쪽 컷 모양은 건드리지 않는다. scene·secs·origin 은 대본 쪽에만 붙인다. 산문에는
  * 씬이라는 것이 없으니 빈 값을 박아 넣으면 씬 묶음(sceneGroups)에 없던 칸이 생긴다.
+ *
+ * 묻는 창이 세 갈래인 이유. 예전에는 「뒤에 추가합니다. 계속할까요?」 하나였다. 잘못
+ * 나눈 사람이 다시 누르면 컷이 3개에서 6개로 늘기만 하고 되돌릴 자리가 없었다. 그리고
+ * 산문은 12개에서 조용히 잘렸다 — 문단 30개를 붙여도 컷 12개가 나오고 아무 말이 없었다.
+ * 지금은 몇 개가 되고 몇 개가 빠지는지 먼저 보여주고, 덧붙일지 갈아치울지 고르게 한다.
  */
-byId('breakdown').addEventListener('click', () => {
+byId('breakdown').addEventListener('click', async () => {
   if (viewChar) return
   const text = byId('scenario').value
   const script = splitScript(text)
-  const cuts = script ? script.cuts : splitScenario(text)
-  if (!cuts.length) return alert('시나리오를 먼저 넣어주세요.')
+  // 산문도 대본과 같은 상한을 쓴다. 자르기 전의 수를 여기서 세는 이유는 「몇 개 중 몇 개」를
+  // 사람에게 말해 주려면 부르는 쪽이 상한을 들고 있어야 하기 때문이다
+  const all = script ? script.cuts : splitScenario(text, Infinity)
+  const cuts = all.slice(0, CUT_MAX)
+  const dropped = all.length - cuts.length
+  if (!cuts.length) return notice('시나리오를 먼저 넣어주세요.')
 
   // 대본에 있는데 판에 없는 사람. 이 사람들의 인물 카드를 함께 만든다
   const byName = new Map(charList().map((c) => [c.name, c.id]))
   const fresh = (script?.names || []).filter((n) => !byName.has(n))
 
-  if (cutsOf(viewEp).length && !confirm(`컷 ${cuts.length}개${
-    fresh.length ? `와 인물 ${fresh.length}명` : ''}을 뒤에 추가합니다. 계속할까요?`)) return
+  const had = cutsOf(viewEp)
+  let wipe = false
+  if (had.length || dropped) {
+    const ans = await confirmAsk({
+      title: script ? '대본을 컷으로 옮깁니다' : '시나리오를 컷으로 나눕니다',
+      body: had.length ? '이미 있는 컷 뒤에 붙일지, 그것을 지우고 갈아치울지 고릅니다.' : '',
+      list: [
+        `새 컷 ${cuts.length}개${fresh.length ? ` · 새 인물 ${fresh.length}명` : ''}`,
+        ...(dropped ? [`상한 ${CUT_MAX}개를 넘은 ${dropped}개는 컷이 되지 않습니다`] : []),
+        ...(had.length ? [`이 회차에 이미 있는 컷 ${had.length}개`] : []),
+      ],
+      yes: had.length ? '뒤에 덧붙이기' : '컷으로 나누기',
+      alt: had.length ? `있는 컷 ${had.length}개를 지우고 갈아치우기` : '',
+    })
+    if (!ans) return
+    wipe = ans === 'alt'
+  }
 
   const ops = []
+  // 갈아치우기. 컷에 달린 메모도 함께 사라진다(panel.remove 리듀서). 인물 구도는 컷이
+  // 아니라서 건드리지 않는다
+  if (wipe) for (const p of had) ops.push({ kind: 'panel.remove', panelId: p.id })
   let ck = charList().at(-1)?.orderKey ?? null
   for (const name of fresh) {
     const id = uid()
@@ -3499,13 +3894,16 @@ byId('breakdown').addEventListener('click', () => {
     }
   }
 
-  let key = cutsOf(viewEp).at(-1)?.orderKey ?? null
+  let key = wipe ? null : cutsOf(viewEp).at(-1)?.orderKey ?? null
+  let firstNew = null
   for (const cut of cuts) {
     key = orderKeyBetween(key, null)
+    const cutId = uid()
+    firstNew ??= cutId
     ops.push({
       kind: 'panel.add',
       panel: {
-        id: uid(), charId: null, orderKey: key, ...(viewEp ? { epId: viewEp } : {}),
+        id: cutId, charId: null, orderKey: key, ...(viewEp ? { epId: viewEp } : {}),
         ...(script ? { origin: 'script', scene: cut.scene, secs: cut.secs } : {}),
         action: cut.action, dialogue: cut.dialogue, camera: cut.camera,
         cast: script ? (cut.cast || []).map((n) => byName.get(n)).filter(Boolean) : [],
@@ -3513,10 +3911,21 @@ byId('breakdown').addEventListener('click', () => {
       },
     })
   }
+  /*
+   * 만든 첫 컷을 골라 둔다. 예전에는 아무것도 골라지지 않아서, 컷이 쏟아진 뒤에도 오른쪽
+   * 판(폭의 4분의 1)이 「구도나 컷을 선택하면…」 한 줄로 비어 있었다. 다음에 할 일이
+   * 그 판에서 컷을 고치는 것이라 첫 컷을 열어 두는 것이 그 자리의 답이다.
+   *
+   * emitMany 보다 먼저 적는다. 그것이 op 를 판에 넣고 다시 그리므로, 그때 이미 골라져
+   * 있어야 한 번에 그려진다
+   */
+  if (firstNew) selectedId = firstNew
   emitMany(ops)
-  if (script) {
-    announce(`대본을 컷 ${cuts.length}개${fresh.length ? `와 인물 ${fresh.length}명` : ''}으로 옮겼습니다.`)
-  }
+  // 「개」에는 받침이 없고 「명」에는 있다. 붙는 조사가 갈리므로 josa 로 고른다
+  const made = `컷 ${cuts.length}개${fresh.length ? `와 인물 ${fresh.length}명` : ''}`
+  notice(`${script ? '대본을' : '시나리오를'} ${made}${josa(made, '으로', '로')} ${
+    wipe ? '갈아치웠습니다' : '나눴습니다'}${
+    dropped ? ` · ${dropped}개는 상한을 넘어 빠졌습니다` : ''}`, 'ok')
 })
 
 const board = byId('board')
@@ -3525,6 +3934,13 @@ board.addEventListener('click', (e) => {
   if (open) { openViewer(open); return }
   const card = e.target.closest('.cut')
   if (!card) return
+  /*
+   * 영상 위(재생·음소거·진행 띠)를 누른 것은 카드를 고르는 뜻이 아니다. 고르면 renderBoard
+   * 가 카드 속을 다시 만들면서 <video> 를 갈아치워 방금 누른 재생이 그 자리에서 죽는다.
+   * 이미 고른 카드를 또 누르는 것도 마찬가지로 다시 그릴 일이 아니다.
+   */
+  if (e.target.closest('video')) return
+  if (card.dataset.id === selectedId) return
   selectCut(card.dataset.id)
 })
 
@@ -3567,8 +3983,9 @@ board.addEventListener('keydown', (e) => {
     announce('수정 요청에는 이유가 필요합니다. 메모를 적고 수정 요청을 눌러주세요.')
     return
   }
+  // 성공한 말은 transition 이 스스로 띄웁니다(notice → announce). 여기서는 막힌 것만 말합니다
   const r = transition(p, act)
-  announce(r.ok ? `${labelOf(p)} · ${ACTIONS[act].label}` : r.reason)
+  if (!r.ok) notice(r.reason)
 })
 
 byId('peers').addEventListener('click', (e) => {
@@ -3659,7 +4076,14 @@ detail.addEventListener('input', (e) => {
 
 detail.addEventListener('change', (e) => {
   const p = state.panels[selectedId]
-  if (!p || e.target.dataset.field !== 'assignee') return
+  if (!p) return
+  /*
+   * 영상 길이·화질은 판에 남기지 않습니다. 컷의 성질이 아니라 지금 한 번 만들 때의 선택이고,
+   * 다시 그리면 또 고를 것입니다. 걸리는 시간 줄만 다시 그립니다.
+   */
+  if (e.target.id === 'clipSecs') { clipOpts.secs = Number(e.target.value); renderDetail(); return }
+  if (e.target.id === 'clipQuality') { clipOpts.quality = e.target.value; renderDetail(); return }
+  if (e.target.dataset.field !== 'assignee') return
   emit({ kind: 'panel.patch', panelId: p.id, fields: { assignee: e.target.value || null } })
 })
 
@@ -3713,6 +4137,14 @@ detail.addEventListener('click', async (e) => {
   }
 
   if (act) {
+    // 막힌 단추도 눌립니다(위 actionBtns). 왜 안 되는지 먼저 말해 줍니다. 수정 요청의
+    // 「메모를 먼저 적어주세요」보다 이것이 앞입니다 — 메모를 적어도 안 될 자리니까
+    const c = mayTransition(p.status, act)
+    if (!c.ok) {
+      byId('actWhy').textContent = c.reason
+      notice(c.reason)
+      return
+    }
     if (act === 'request_changes') {
       const input = byId('cmtInput')
       if (!input.value.trim()) {
@@ -3725,8 +4157,53 @@ detail.addEventListener('click', async (e) => {
       transition(p, act, note)
       return
     }
-    const r = transition(p, act)
-    if (!r.ok) byId('actWhy').textContent = r.reason
+    transition(p, act)
+    return
+  }
+
+  /*
+   * 컷 하나를 지웁니다.
+   *
+   * 예전에는 지우는 길이 관리 화면의 「보드 비우기」뿐이었습니다. 그래서 분해가 컷을 하나
+   * 더 만들었거나 시나리오를 두 번 넣었을 때, 그 하나를 빼려면 보드를 통째로 버려야
+   * 했습니다. 사람들은 대신 그 컷을 비워 두고 넘어갔고, 빈 컷이 판에 남았습니다.
+   *
+   * 「이 버전 지우기」와 달리 confirmAsk 를 씁니다. 잃는 것이 여러 줄입니다 — 메모와
+   * 이미지가 컷에 딸려 갑니다. 브라우저 confirm 은 그것을 한 줄로만 말합니다.
+   */
+  if (doWhat === 'rmcut') {
+    if (!mayEdit(p)) { notice(whyNotEdit(p)); return }
+    const memos = state.comments.filter((c) => c.panelId === p.id).length
+    const vers = (p.versions || []).filter((v) => !deadVer(p, v)).length
+    const ok = await confirmAsk({
+      title: '이 컷을 보드에서 지웁니다',
+      body: '되돌릴 수 없습니다. 같은 보드를 열고 있는 사람에게서도 사라집니다.',
+      list: [
+        /* 「CUT 03을」이라고 붙이지 않습니다. 숫자 뒤의 조사는 읽는 소리에 따라 갈립니다 */
+        `지울 컷: ${labelOf(p)}`,
+        '뒤 컷들의 번호가 하나씩 당겨집니다',
+        ...(vers ? [`이미지 ${vers}장이 함께 사라집니다`] : []),
+        ...(memos ? [`이 컷에 달린 메모 ${memos}건이 함께 사라집니다`] : []),
+      ],
+      yes: '컷을 지웁니다',
+      danger: true,
+    })
+    if (!ok) return
+    const gone = labelOf(p)
+    /*
+     * 다음 컷으로 옮겨 앉습니다. 없으면 앞 컷입니다.
+     *
+     * 판(reducer)은 지운 컷이 골라져 있었으면 고른 것을 비웁니다 — 없는 것을 가리키고
+     * 있을 수는 없으니 맞습니다. 그런데 그러면 오른쪽 판이 「구도나 컷을 선택하면…」 로
+     * 돌아갑니다. 컷 하나를 지우는 사람은 대개 지우고 다음 컷을 보려는 것이라, 지운 자리
+     * 뒤에 앉혀 둡니다. 마지막 컷을 지웠으면 앞으로 갑니다.
+     */
+    const line = cutsOf(p.epId ?? null)
+    const at = line.findIndex((x) => x.id === p.id)
+    const near = line[at + 1] || line[at - 1] || null
+    emit({ kind: 'panel.remove', panelId: p.id })
+    if (near) { selectedId = near.id; render() }
+    notice(`${gone} · 컷을 지웠습니다`, 'ok')
     return
   }
 
@@ -3772,6 +4249,8 @@ detail.addEventListener('click', async (e) => {
   }
 
   if (doWhat === 'generate') { generate(p); return }
+
+  if (doWhat === 'animate') { animate(p); return }
 
   if (verIdx !== undefined) {
     emit({ kind: 'panel.patch', panelId: p.id, fields: { current: Number(verIdx) } })
@@ -4065,6 +4544,22 @@ watchNope(notice)
 
 let picking = false
 
+/*
+ * 표가 저절로 죽는 경우가 있습니다 — 새로 고침 표 만료, 관리자가 계정을 껐음. 그때
+ * auth.js 가 이 알림을 보냅니다. 듣지 않으면 이름도 단추도 그대로 살아 있는 채 저장만
+ * 조용히 멈추고, 사람은 자기가 그린 컷이 남에게 안 보이는 것을 나중에 압니다.
+ *
+ * 다시 들어오면 새로 고칩니다. 표가 바뀌었으니 소켓도 로그도 다시 받아야 합니다.
+ * 메뉴에서 직접 나가는 길은 바로 그 자리에서 새로 고치므로 여기서 문을 열지 않습니다.
+ */
+let bye = false
+addEventListener('sb:logout', () => {
+  if (bye || !configured) return
+  bye = true
+  notice('로그인이 만료되었습니다. 다시 로그인해 주세요.')
+  showLogin(byId('gate')).then(() => location.reload())
+})
+
 function pickMe() {
   if (claimed) return Promise.resolve()
   picking = true
@@ -4086,7 +4581,8 @@ function pickMe() {
           </button>`).join('')}
       </div>
     </div>`)
-  gate.hidden = false
+  // 이 문도 화면을 덮습니다. 로그인 문과 같은 자리·같은 규칙으로 둡니다(gateModal)
+  gateModal(gate, true, '누구로 볼지 고르기')
   gate.querySelector('[data-who]').focus()
   return new Promise((done) => {
     gate.addEventListener('click', (e) => {
@@ -4096,7 +4592,7 @@ function pickMe() {
       sessionStorage.setItem('sb.me', me.id)
       loadRead()
       renderMe()
-      gate.hidden = true
+      gateModal(gate, false)
       picking = false
       done()
     })
@@ -4207,7 +4703,15 @@ async function boot() {
 
 boot()
 
-window.addEventListener('beforeunload', () => {
+window.addEventListener('beforeunload', (e) => {
   markVisit()
   net?.sendPresence({ ...me, left: true })
+  /*
+   * 아직 못 보낸 op 가 있으면 붙잡습니다. 대기줄은 메모리에만 있어서(services/net.js 의
+   * outbox) 창을 닫으면 방금 그린 컷이 남에게도 다음 접속에도 남지 않고 사라집니다.
+   * 「저장 대기 n건」 띠가 이미 떠 있지만, 그 띠를 못 보고 닫는 사람이 잃는 것이 큽니다.
+   *
+   * 문구는 브라우저가 정합니다. 크롬은 우리 글을 무시하고 자기 문장을 띄웁니다.
+   */
+  if (unsent > 0) { e.preventDefault(); e.returnValue = '' }
 })

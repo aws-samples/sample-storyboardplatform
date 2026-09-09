@@ -62,6 +62,19 @@ function keep(r, fallback) {
   try { store.setItem(KEY, JSON.stringify(tok)) } catch {  }
 }
 
+/*
+ * 새로 고침 표가 정말 죽은 경우. 이때만 나갑니다.
+ *
+ * 끊긴 네트워크·일시적 5xx·TooManyRequestsException 에도 토큰을 지우면, 화면은 로그인된
+ * 척 계속 돌면서(session() 을 다시 보는 곳은 부팅 때뿐입니다) 그 뒤의 모든 호출만
+ * 'Bearer null' 로 죽습니다. 사용자에게는 저장이 조용히 멈춘 것으로 보입니다. 그래서
+ * 다시 시도하면 되는 실패는 토큰을 그대로 두고, 다음 호출에서 한 번 더 해 봅니다.
+ */
+const DEAD = new Set([
+  'NotAuthorizedException', 'UserNotFoundException',
+  'UserNotConfirmedException', 'PasswordResetRequiredException',
+])
+
 let refreshing = null
 function refresh() {
   if (!tok?.refresh) { logout(); return Promise.resolve() }
@@ -70,7 +83,7 @@ function refresh() {
     AuthParameters: { REFRESH_TOKEN: tok.refresh },
   })
     .then((r) => keep(r.AuthenticationResult, tok.refresh))
-    .catch(() => logout())
+    .catch((e) => { if (DEAD.has(e?.code)) logout() })
     .finally(() => { refreshing = null })
   return refreshing
 }
@@ -134,4 +147,10 @@ export function logout() {
   tok = null
   pending = null
   try { sessionStorage.removeItem(KEY); localStorage.removeItem(KEY) } catch {  }
+  /*
+   * 나갔다는 것을 알립니다. 표가 저절로 죽는 경우(새로 고침 표 만료·관리자가 계정을
+   * 껐음)가 있어서, 화면이 이것을 듣지 않으면 이름도 단추도 그대로 살아 있는 채 모든
+   * 호출만 실패합니다. 듣는 화면은 로그인 문을 다시 띄웁니다.
+   */
+  try { dispatchEvent(new CustomEvent('sb:logout')) } catch {  }
 }
