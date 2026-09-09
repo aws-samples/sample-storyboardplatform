@@ -20,6 +20,7 @@
  */
 
 import { navTab } from '../domain/routes.js'
+import { josa } from '../lib/josa.js'
 
 /** step.mark 의 kind. applyOp 가 모르는 값이라 보드의 판에는 영향이 없다 */
 export const MARK = 'step.mark'
@@ -51,6 +52,16 @@ export function markOp({ step, actor, what, ref = null, refKind = null, data = n
 }
 
 /*
+ * 조사를 앞말에 맞춰 붙입니다.
+ *
+ * 예전에는 「상태를 승인 로 옮겼습니다」·「구도 「전신」를 만들었습니다」였습니다. 이름과
+ * 상태 이름이 데이터라서 받침이 그때그때 다른데 조사를 글자로 박아 두었기 때문입니다.
+ * 편집 기록은 이 화면에서 가장 여러 번 읽는 글이라 여기서 어긋나면 계속 눈에 걸립니다.
+ */
+const wa = (s) => `${s}${josa(s, '을', '를')}`
+const ro = (s) => `${s}${josa(s, '으로', '로')}`
+
+/*
  * op 한 건 → 사람이 읽는 한 줄.
  *
  * 여기 없는 kind 는 null 을 돌려주고 목록에서 빠집니다. 일부러입니다. 프레즌스나
@@ -65,13 +76,13 @@ const SAY = {
 
   'board.patch': (op) => {
     const f = op.fields || {}
-    if (f.title) return { step: 'board', what: `보드 제목을 「${f.title}」로 두었습니다` }
+    if (f.title) return { step: 'board', what: `보드 제목을 ${ro(`「${f.title}」`)} 두었습니다` }
     if (f.scenario) return { step: 'board', what: '시나리오를 넣었습니다' }
     return null
   },
 
   'char.add': (op) => ({
-    step: 'board', what: `인물 「${op.char?.name || op.char?.id}」을 만들었습니다`,
+    step: 'board', what: `인물 ${wa(`「${op.char?.name || op.char?.id}」`)} 만들었습니다`,
     ref: op.char?.id, refKind: 'char',
   }),
 
@@ -79,18 +90,33 @@ const SAY = {
     const p = op.panel || {}
     // 키비주얼이 붙인 것은 그 화면에서 한 일이다. 보드에서 만든 컷과 구분한다
     if (p.keyVisual) return { step: 'keyvisual', what: `${p.scene || '씬'} 키 비주얼을 보드에 붙였습니다`, ref: p.id, refKind: 'panel' }
-    if (p.charId) return { step: 'board', what: `구도 「${p.pose || p.id}」를 만들었습니다`, ref: p.id, refKind: 'panel' }
+    if (p.charId) return { step: 'board', what: `구도 ${wa(`「${p.pose || p.id}」`)} 만들었습니다`, ref: p.id, refKind: 'panel' }
     return { step: 'board', what: `컷을 만들었습니다${p.scene ? ` (${p.scene})` : ''}`, ref: p.id, refKind: 'panel' }
   },
 
-  'panel.version': (op) => ({
-    step: op.version?.source === 'ai' ? 'keyvisual' : 'board',
-    what: op.version?.source === 'ai' ? '그림을 생성했습니다' : '그림을 올렸습니다',
-    ref: op.panelId, refKind: 'panel',
-  }),
+  /*
+   * 한 kind 에 세 가지 일이 섞여 있습니다. 키비주얼이 생성한 그림, 사람이 올린 그림,
+   * 그리고 승인된 컷으로 만든 영상입니다(pages/board.js 의 animate). 영상은 우리 GPU 로
+   * 만든 것('video')과 없어진 영상화 화면이 바깥 MCP 서버로 만들던 것('mcp') 둘 다 같은
+   * 한 줄로 읽습니다 — 옛 판에는 그 줄이 남아 있습니다. 히스토리를
+   * 보는 사람에게 중요한 것은 「컷이 영상이 되었다」이고, 어디서 만들었는지는 그 버전을
+   * 열어 보면 적혀 있습니다. 영상은 보드에서 한 일로 셉니다 — 컷이 있어야 만들 수 있고,
+   * 결과가 그 컷의 다음 버전으로 붙기 때문입니다.
+   */
+  'panel.version': (op) => {
+    const src = op.version?.source
+    if (src === 'video' || src === 'mcp') {
+      return { step: 'board', what: '컷을 영상으로 만들었습니다', ref: op.panelId, refKind: 'panel' }
+    }
+    return {
+      step: src === 'ai' ? 'keyvisual' : 'board',
+      what: src === 'ai' ? '그림을 생성했습니다' : '그림을 올렸습니다',
+      ref: op.panelId, refKind: 'panel',
+    }
+  },
 
   'panel.status': (op) => ({
-    step: 'board', what: `상태를 ${STATUS_KO[op.to] || op.to} 로 옮겼습니다`,
+    step: 'board', what: `상태를 ${ro(STATUS_KO[op.to] || op.to)} 옮겼습니다`,
     ref: op.panelId, refKind: 'panel',
   }),
 
@@ -100,7 +126,7 @@ const SAY = {
   }),
 
   'ep.add': (op) => ({
-    step: 'board', what: `회차 「${op.ep?.title || op.ep?.id}」를 만들었습니다`,
+    step: 'board', what: `회차 ${wa(`「${op.ep?.title || op.ep?.id}」`)} 만들었습니다`,
     ref: op.ep?.id, refKind: 'ep',
   }),
 }

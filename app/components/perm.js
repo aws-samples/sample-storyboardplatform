@@ -24,6 +24,7 @@ import {
   canEditContent, ART_ROLES, PLAN_ROLES, ADMIN_VIEW_ROLES,
 } from '../domain/panels.js'
 import { esc, setHtml } from '../lib/dom.js'
+import { josa } from '../lib/josa.js'
 import { opsClient } from '../services/api.js'
 import { session } from '../services/auth.js'
 
@@ -134,12 +135,13 @@ export function permModel({ perms, roleOf, nameOf = (id) => id, meId = null }) {
     const role = roleOf(who)
     if (cell('user', who, cap)) {
       return `${who === self() ? '나에게' : `${nameOf(who) || '이 사람'}에게`}만 따로 `
-        + `「${spec.label}」을 막아 두었습니다. 감독이 권한 관리에서 풉니다`
+        + `「${spec.label}」${josa(spec.label, '을', '를')} 막아 두었습니다. 감독이 권한 관리에서 풉니다`
     }
     if (cell('role', role, cap)) {
-      return `권한 관리에서 ${ROLES[role] || role}의 「${spec.label}」을 꺼 두었습니다. 감독이 다시 켤 수 있습니다`
+      return `권한 관리에서 ${ROLES[role] || role}의 「${spec.label}」${josa(spec.label, '을', '를')} `
+        + '꺼 두었습니다. 감독이 다시 켤 수 있습니다'
     }
-    return `「${spec.label}」은 ${spec.roles.map((r) => ROLES[r] || r).join('·')}의 일입니다. `
+    return `「${spec.label}」${josa(spec.label, '은', '는')} ${spec.roles.map((r) => ROLES[r] || r).join('·')}의 일입니다. `
       + `${ROLES[role] || role}에게는 기본값으로 없습니다`
   }
 
@@ -151,9 +153,9 @@ export function permModel({ perms, roleOf, nameOf = (id) => id, meId = null }) {
     const spec = CAPS[cap]
     if (!spec) return '알 수 없는 권한입니다'
     if (cell('role', role, cap)) {
-      return `권한 관리에서 ${ROLES[role] || role}의 「${spec.label}」을 꺼 두었습니다`
+      return `권한 관리에서 ${ROLES[role] || role}의 「${spec.label}」${josa(spec.label, '을', '를')} 꺼 두었습니다`
     }
-    return `「${spec.label}」은 ${spec.roles.map((r) => ROLES[r] || r).join('·')}의 일입니다. `
+    return `「${spec.label}」${josa(spec.label, '은', '는')} ${spec.roles.map((r) => ROLES[r] || r).join('·')}의 일입니다. `
       + `${ROLES[role] || role}에게는 기본값으로 없습니다`
   }
 
@@ -210,7 +212,7 @@ function userTable(m, edit, who, team) {
     <label class="pm__row"><span class="pm__lab">사람</span>
       <select class="pm__sel" data-puser="1">${team.map((u) =>
     `<option value="${esc(u.id)}" ${u.id === who ? 'selected' : ''}>${esc(u.name)} · ${esc(ROLES[u.role] || u.role)}</option>`).join('')}</select></label>
-    <p class="pm__why">${esc(m.nameOf(who) || who)}는 ${esc(ROLES[role] || role)}입니다.
+    <p class="pm__why">${esc(m.nameOf(who) || who)}${josa(m.nameOf(who) || who, '은', '는')} ${esc(ROLES[role] || role)}입니다.
       아래에서 뒤집은 칸만 이 사람에게 따로 적용되고, 나머지는 역할의 값을 따릅니다.</p>
     <table class="pm__tbl">
       <thead><tr><th>할 수 있는 일</th><th style="width:92px">${esc(ROLES[role] || role)} 기본</th><th style="width:92px">이 사람</th><th>왜</th></tr></thead>
@@ -248,7 +250,8 @@ export function panelHtml(m, { tab = 'role', who = null, edit = false, team = []
     <p class="pm__why">${edit
     ? `역할과 사람마다 무엇을 할 수 있는지 여기서 정합니다. 바꾸면 모두에게 곧 반영됩니다.${
       n ? ` 지금 <b>${n}칸</b>이 기본값과 다릅니다.` : ' 지금은 모두 기본값입니다.'}`
-    : `${esc(ROLES[m.roleOf(m.meId())] || '이 역할')}는 이 표를 고칠 수 없습니다. 바꾸려면 ${ASK}.${
+    : `${esc(ROLES[m.roleOf(m.meId())] || '이 역할')}${
+      josa(ROLES[m.roleOf(m.meId())] || '이 역할', '은', '는')} 이 표를 고칠 수 없습니다. 바꾸려면 ${ASK}.${
       n ? ` 지금 ${n}칸이 기본값과 다릅니다.` : ''}`}</p>
     <h3 class="pm__h">내가 할 수 있는 일</h3>
     <ul class="pm__me">${Object.entries(CAPS).map(([k, c]) =>

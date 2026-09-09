@@ -66,15 +66,17 @@ const CSS = `
 }
 .cfm__list b { font-weight: 600; }
 .cfm__row { display: flex; gap: 8px; justify-content: flex-end; }
-.cfm__no, .cfm__yes {
+.cfm__no, .cfm__yes, .cfm__alt {
   padding: 9px 14px; font: inherit; font-size: 13px; cursor: pointer;
   border-radius: var(--sb-r, 6px);
 }
-.cfm__no {
+.cfm__no, .cfm__alt {
   background: var(--sb-panel, #fff); color: var(--sb-ink-2, #5b6472);
   border: 1px solid var(--sb-line, #e4e7ec);
 }
-.cfm__no:hover { background: var(--sb-fill, #f8f9fb); color: var(--sb-ink, #111318); }
+.cfm__no:hover, .cfm__alt:hover { background: var(--sb-fill, #f8f9fb); color: var(--sb-ink, #111318); }
+/* 세 번째 길. 「예」와 같은 무게로 읽히면 안 되지만 「그만두기」보다는 눈에 들어와야 합니다 */
+.cfm__alt { color: var(--sb-ink, #111318); font-weight: 600; margin-right: auto; }
 .cfm__yes {
   font-weight: 600; background: var(--sb-accent, #1a56db);
   border: 1px solid var(--sb-accent, #1a56db); color: #fff;
@@ -110,12 +112,17 @@ const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => (
  * @param {string[]} [o.list] - 무엇을 하려는지 늘어놓는 줄들. HTML 이 아니라 글자입니다
  * @param {string} [o.yes] - 「예」 쪽 버튼의 말. 기본은 '계속합니다'
  * @param {string} [o.no] - 「아니오」 쪽. 기본은 '그만두기'
+ * @param {string} [o.alt] - 세 번째 길의 말. 주지 않으면 그 버튼을 안 만듭니다.
+ *   길이 둘이 아닌 자리가 있습니다 — 「뒤에 덧붙이기 / 갈아치우기 / 그만두기」가 그렇습니다.
+ *   덧붙이기만 물으면 잘못 나눈 사람은 그만두는 것 말고 할 수 있는 것이 없습니다.
  * @param {boolean} [o.danger] - 되돌릴 수 없는 일이면 참. 「예」가 붉어집니다
  * @param {Document} [o.doc]
- * @returns {Promise<boolean>} 사람이 「예」를 눌렀는지
+ * @returns {Promise<boolean|'yes'|'alt'>} 「예」면 참(alt 를 준 자리에서는 'yes'),
+ *   세 번째 길이면 'alt', 닫힌 모든 길은 거짓입니다. 둘 다 참이라 if 로 갈라도 됩니다
  */
 export function confirmAsk({
-  title, body = '', list = [], yes = '계속합니다', no = '그만두기', danger = false, doc = document,
+  title, body = '', list = [], yes = '계속합니다', no = '그만두기', alt = '',
+  danger = false, doc = document,
 } = {}) {
   injectCss(doc)
   const dlg = doc.createElement('dialog')
@@ -125,6 +132,7 @@ export function confirmAsk({
     ${body ? `<p class="cfm__p">${esc(body)}</p>` : ''}
     ${list.length ? `<div class="cfm__list">${list.map((l) => `<div>${esc(l)}</div>`).join('')}</div>` : ''}
     <div class="cfm__row">
+      ${alt ? `<button class="cfm__alt" type="button">${esc(alt)}</button>` : ''}
       <button class="cfm__no" type="button">${esc(no)}</button>
       <button class="cfm__yes${danger ? ' cfm__yes--no' : ''}" type="button">${esc(yes)}</button>
     </div>
@@ -142,7 +150,8 @@ export function confirmAsk({
       resolve(ok)
     }
     dlg.querySelector('.cfm__no').onclick = () => shut(false)
-    dlg.querySelector('.cfm__yes').onclick = () => shut(true)
+    dlg.querySelector('.cfm__yes').onclick = () => shut(alt ? 'yes' : true)
+    if (alt) dlg.querySelector('.cfm__alt').onclick = () => shut('alt')
     // Esc. dialog 가 스스로 닫는 길이고, 그때도 「아니오」입니다
     dlg.addEventListener('close', () => shut(false))
     /*

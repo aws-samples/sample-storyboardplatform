@@ -580,6 +580,19 @@
   ok('외부 이미지 주소는 버린다', scrub({ src: 'https://evil.example/x.png' }).src === '')
   ok('우리 이미지 경로는 통과', scrub({ src: '/img/a1.png' }).src === '/img/a1.png')
   ok('인라인 이미지는 통과', scrub({ src: 'data:image/jpeg;base64,AAAA' }).src === 'data:image/jpeg;base64,AAAA')
+  /*
+   * 바깥 영상 파일 하나만 더 받는다. 영상 생성 서버가 돌려주는 주소다(우리 GPU 의
+   * /gen/animate, 그리고 없어진 영상화 화면이 MCP 로 붙였던 바깥 서버 — 옛 판에 남아 있다).
+   * 이걸 버리면 컷에 빈 그림이 남는다. 이미지는 여전히 안 받는다 —
+   * 그건 우리가 만들어 data: 로 붙이는 것이고, 바깥 주소일 이유가 없다.
+   */
+  ok('바깥 영상 주소는 통과 (서명 붙은 것도)',
+    scrub({ src: 'https://cdn.higgsfield.ai/a/b.mp4' }).src === 'https://cdn.higgsfield.ai/a/b.mp4'
+    && scrub({ src: 'https://cdn.x/a.webm?sig=abc.123' }).src === 'https://cdn.x/a.webm?sig=abc.123')
+  ok('영상이 아닌 바깥 주소는 그대로 버린다',
+    scrub({ src: 'https://evil.example/x.mp4.png' }).src === ''
+    && scrub({ src: 'http://cdn.x/a.mp4' }).src === ''
+    && scrub({ src: 'https://evil.example/pixel?v=1' }).src === '')
   ok('모르는 상태는 초안으로', scrub({ status: '"><script>' }).status === 'draft')
   ok('아는 상태는 유지', scrub({ status: 'in_review' }).status === 'in_review')
   ok('모르는 역할은 리뷰어로', scrub({ role: 'admin"' }).role === 'reviewer')
@@ -1213,6 +1226,16 @@
   })())
   ok('조사는 받침을 보고 고른다',
     josa('루미', '은', '는') === '는' && josa('한결', '은', '는') === '은' && josa('Rumi', '이', '가') === '이')
+  // 편집 기록은 이름을 「」 로 감싸 넘깁니다. 닫는 기호를 받침으로 읽으면 「루미」를 → 「루미」을
+  ok('조사는 감싼 기호를 벗기고 고른다',
+    josa('「루미」', '을', '를') === '를' && josa('「전신」', '을', '를') === '을'
+    && josa('「구도」', '으로', '로') === '로' && josa('(씬 2)', '을', '를') === '을')
+  // 으로/로 만 예외가 하나 더 있습니다. ㄹ 받침이면 「로」입니다 — 서울로, 서울으로가 아닙니다.
+  // 다른 조사는 ㄹ 받침을 받침으로 그대로 읽습니다 — 서울을, 서울은
+  ok('으로/로 는 ㄹ 받침을 열린 소리로 읽는다',
+    josa('서울', '으로', '로') === '로' && josa('한결', '으로', '로') === '로'
+    && josa('서울', '을', '를') === '을' && josa('서울', '은', '는') === '은'
+    && josa('가온', '으로', '로') === '으로')
 
   // ── 분기 생성: 로컬 폴백과 프롬프트 ────────────────────────────────────────
   const seedStore = createGraphStore(G(
@@ -1380,23 +1403,26 @@
   })())
 
   // ── nav-tabs.js: 상단 기능 탭 ──────────────────────────────────────────────
-  // 네 화면(board.html · story-graph.html · key-visual.html)이 이 한 벌을 나눠 씁니다.
+  // 세 화면(board.html · story-graph.html · key-visual.html)이 이 한 벌을 나눠 씁니다.
   // 탭이 늘거나 이동 주소가 어긋나면 여기서 걸립니다.
   /*
-   * 순서는 이야기가 만들어지는 순서다. 시놉시스에서 시작해 보드에서 끝난다.
+   * 순서는 이야기가 만들어지는 순서다. 시놉시스에서 시작해 스토리보드에서 끝난다.
    * 보드가 가장 오래된 화면이라 처음에는 맨 앞이었는데, 만들어진 순서와 쓰는 순서가
    * 달라 사용자가 거꾸로 읽었다. 홈(app/home.js)이 이 배열을 그대로 번호로 매기므로
    * 여기 순서가 곧 화면에 보이는 순서다.
+   *
+   * 한때 '영상화'가 다섯째였다. 영상은 승인된 컷 옆에서 만드는 일이라(pages/board.js 의
+   * animate) 화면을 따로 두지 않는다. 탭이 되살아나면 여기서 걸린다.
    */
-  ok('탭은 넷이고 이야기 순서대로다. 디벨롭이 처음, 보드가 마지막',
+  ok('탭은 넷이고 이야기 순서대로다. 디벨롭이 처음, 스토리보드가 마지막',
     NAV_TABS.map((t) => t.id).join(',') === 'develop,script,keyvisual,board')
   ok('탭마다 이름과 한 줄 설명이 있다', NAV_TABS.every((t) => t.label && t.desc))
   /*
-   * 네 탭 모두 갈 곳이 있다. 한때 '대본 번역'이 화면 없이 안내만 띄우는 다섯 번째
-   * 탭으로 있었는데, 없는 기능을 목록에 올려 두면 읽는 사람이 그것까지 이 앱의 일부로
+   * 다섯 탭 모두 갈 곳이 있다. 한때 '대본 번역'이 화면 없이 안내만 띄우는 탭으로
+   * 있었는데, 없는 기능을 목록에 올려 두면 읽는 사람이 그것까지 이 앱의 일부로
    * 센다. 그래서 탭과 안내 판을 함께 걷어냈다. 갈 곳 없는 탭이 다시 생기지 않게 본다.
    */
-  ok('네 탭 모두 갈 곳이 있다. 준비 중 자리는 남지 않았다',
+  ok('다섯 탭 모두 갈 곳이 있다. 준비 중 자리는 남지 않았다',
     NAV_TABS.every((t) => t.href && !t.soon))
   ok('대본화는 story-graph 의 안쪽 대본화 탭으로 데려간다',
     navTab('script').href === '/story-graph.html?tab=script')
@@ -5119,6 +5145,316 @@
   })())
   ok('규칙이 늘어도 프롬프트는 상한 안에 있다',
     branchPrompt(koSeed, contextPackPrompt(koSeed, koStore), koStore.toJSON()).length <= 8000)
+  /* ── domain/mcp.js: 컷을 영상으로 만드는 MCP 연동 ─────────────────────────
+   *
+   * 여기서 보는 것은 선(wire)의 규칙이다. 서버마다 도구 이름과 인자가 다르므로 그것을
+   * 골라내고 채우는 일이 이 파일의 절반이고, 틀리면 「서버가 400 을 준다」로만 드러난다.
+   */
+  out.insertAdjacentHTML('beforeend', '\n<b>MCP 영상 연동 (domain/mcp.js)</b>\n')
+  const M = await import(`./domain/mcp.js?t=${Date.now()}`)
+
+  ok('요청에 jsonrpc 와 id 가 붙는다', (() => {
+    const f = M.frame('tools/list', {})
+    return f.jsonrpc === '2.0' && typeof f.id === 'number' && f.method === 'tools/list'
+  })())
+  ok('알림에는 id 가 없다', !('id' in M.note('notifications/initialized')))
+
+  ok('그냥 JSON 응답을 읽는다',
+    M.unwrap(M.readBody('{"jsonrpc":"2.0","id":1,"result":{"ok":1}}')).ok === 1)
+  ok('SSE 응답은 마지막 result 를 고른다', (() => {
+    const sse = 'event: message\ndata: {"jsonrpc":"2.0","method":"notifications/progress"}\n\n'
+      + 'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"a"}]}}\n\n'
+    return M.unwrap(M.readBody(sse, 'text/event-stream')).tools[0].name === 'a'
+  })())
+  ok('error 는 삼키지 않고 던진다', (() => {
+    try { M.unwrap({ jsonrpc: '2.0', id: 1, error: { code: -32602, message: '빠진 인자' } }); return false }
+    catch (e) { return e.message === '빠진 인자' }
+  })())
+  ok('빈 본문은 오류다', (() => {
+    try { M.readBody(''); return false } catch { return true }
+  })())
+
+  const HF_TOOLS = [
+    { name: 'list_models', description: 'List motion presets and models.', inputSchema: { type: 'object', properties: {} } },
+    {
+      name: 'generate_video',
+      description: 'Generate a video from an image.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          image_url: { type: 'string' }, motion_id: { type: 'string' }, prompt: { type: 'string' },
+          quality: { type: 'string', enum: ['lite', 'turbo', 'standard'] }, duration: { type: 'integer' },
+          negative_prompt: { type: 'string' },
+        },
+        required: ['image_url', 'motion_id'],
+      },
+    },
+    { name: 'higgsfield_wait_for_job', description: 'Wait for a job set.', inputSchema: { type: 'object', properties: { job_set_id: { type: 'string' } }, required: ['job_set_id'] } },
+    { name: 'media_upload', description: 'Upload a file.', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+  ]
+
+  ok('영상 도구를 고른다', M.pickTool(HF_TOOLS, 'video').name === 'generate_video')
+  ok('list_models 를 영상 도구로 잘못 고르지 않는다',
+    M.pickTool([HF_TOOLS[0]], 'video') === null)
+  ok('상태 도구와 업로드 도구도 갈라 고른다',
+    M.pickTool(HF_TOOLS, 'status').name === 'higgsfield_wait_for_job'
+    && M.pickTool(HF_TOOLS, 'upload').name === 'media_upload')
+  ok('이름이 낯선 서버도 이름과 설명으로 고른다',
+    M.pickTool([{ name: 'run_i2v', description: 'image to video' }], 'video').name === 'run_i2v')
+
+  const built = M.argsFor(HF_TOOLS[1], {
+    prompt: '지연이 우산을 접는다', imageUrl: 'https://x/y.png', quality: 'turbo', secs: 3, model: 'm1',
+  })
+  ok('서버가 선언한 칸에만 값을 채운다', (() => {
+    const keys = Object.keys(built.args).sort().join(',')
+    return keys === 'duration,image_url,motion_id,prompt,quality'
+  })(), Object.keys(built.args).join(' '))
+  ok('숫자 칸은 숫자로 간다', built.args.duration === 3)
+  ok('그림 칸을 찾았으면 imaged 다', built.imaged === true && built.missing.length === 0)
+  ok('없는 칸(negative_prompt)은 건드리지 않는다', built.args.negative_prompt === undefined)
+  ok('enum 밖의 값은 넣지 않는다',
+    M.argsFor(HF_TOOLS[1], { quality: '초고화질' }).args.quality === undefined)
+  /*
+   * 서버가 「이 중에서 고르라」고 목록을 주고 반드시 필요하다고 했으면 첫 값을 쓴다.
+   * 목록이 없는 required 칸은 지어 넣지 않고 물어본다 — 아무 값이나 보내면 서버가
+   * 거부하고, 사람은 왜 거부됐는지 알 수 없다.
+   */
+  ok('고를 목록이 있는 필수 칸은 첫 값으로 채운다', (() => {
+    const t = {
+      name: 'v',
+      inputSchema: {
+        type: 'object',
+        properties: { motion_id: { type: 'string', enum: ['slow-push-in', 'static'] } },
+        required: ['motion_id'],
+      },
+    }
+    const b = M.argsFor(t, { prompt: 'x' })
+    return b.args.motion_id === 'slow-push-in' && b.missing.length === 0
+  })())
+  ok('required 인데 못 채운 칸은 missing 으로 알린다', (() => {
+    const b = M.argsFor(HF_TOOLS[1], { prompt: 'x', imageUrl: 'https://x/y.png' })
+    return b.missing.join(',') === 'motion_id'
+  })())
+  ok('배열로 받는 서버에는 배열로 넣는다', (() => {
+    const b = M.argsFor({
+      name: 'v', inputSchema: { type: 'object', properties: { input_images: { type: 'array' } } },
+    }, { imageUrl: 'https://x/y.png' })
+    return Array.isArray(b.args.input_images) && b.args.input_images[0] === 'https://x/y.png'
+  })())
+
+  ok('결과의 영상 주소를 찾는다', (() => {
+    const r = { content: [{ type: 'text', text: '{"job_set_id":"7f2c9a10-1","results":[{"url":"https://cdn/x.mp4"}]}' }] }
+    const got = M.videoFrom(r)
+    return got.url === 'https://cdn/x.mp4' && got.job === '7f2c9a10-1'
+  })())
+  // 여섯 자보다 짧은 값은 작업 번호로 보지 않는다. "1" 이나 "ok" 를 번호로 집으면 뒤에서 헛되게 기다린다
+  ok('너무 짧은 값은 작업 번호로 보지 않는다',
+    M.videoFrom({ content: [{ type: 'text', text: '{"job_id":"1"}' }] }).job === null)
+  ok('문장 안에 섞인 주소도 찾는다',
+    M.videoFrom({ content: [{ type: 'text', text: '완료: https://cdn/a/b.webm 를 받으세요' }] }).url === 'https://cdn/a/b.webm')
+  ok('주소가 없으면 null 과 함께 job 을 돌려준다', (() => {
+    const got = M.videoFrom({ content: [{ type: 'text', text: '{"job_set_id":"7f2c9a10-2","status":"queued"}' }] })
+    return got.url === null && got.job === '7f2c9a10-2'
+  })())
+
+  ok('컷의 액션·앵글·대사가 프롬프트가 된다', (() => {
+    const p = M.cutPrompt({ scene: 'S#1', action: '지연이 우산을 접는다', camera: 'TRACKING', dialogue: '늦었네' })
+    return p.includes('S#1') && p.includes('우산') && p.includes('따라') && p.includes('말하는 중')
+      && !p.includes('늦었네')  // 대사를 그대로 넣으면 화면에 글자로 그려진다
+  })())
+  ok('빈 컷도 프롬프트가 나온다', M.cutPrompt({}).length > 5)
+
+  ok('op 로그를 접으면 컷과 마지막 그림이 나온다', (() => {
+    const ops = [
+      { kind: 'panel.add', id: 'o1', ts: 1, panel: { id: 'p1', orderKey: 'B', action: '두 번째' } },
+      { kind: 'panel.add', id: 'o2', ts: 2, panel: { id: 'p2', orderKey: 'A', action: '첫 번째' } },
+      { kind: 'panel.add', id: 'o3', ts: 3, panel: { id: 'c1', orderKey: 'C', charId: 'ch1' } },
+      { kind: 'panel.add', id: 'o4', ts: 4, panel: { id: 'k1', orderKey: 'D', keyVisual: true } },
+      { kind: 'panel.patch', id: 'o5', ts: 5, panelId: 'p1', fields: { camera: 'CU' } },
+      { kind: 'panel.version', id: 'o6', ts: 6, panelId: 'p1', version: { src: 'https://x/1.png' } },
+      { kind: 'step.mark', id: 'o7', ts: 7, step: 'develop', what: '모르는 kind' },
+    ]
+    const cuts = M.foldCuts(ops)
+    return cuts.length === 2 && cuts[0].id === 'p2' && cuts[1].camera === 'CU'
+      && cuts[1].versions.length === 1 && cuts[1].current === 0
+  })())
+  ok('지운 컷은 접힌 뒤에도 없다', M.foldCuts([
+    { kind: 'panel.add', id: 'o1', ts: 1, panel: { id: 'p1', orderKey: 'A' } },
+    { kind: 'panel.remove', id: 'o2', ts: 2, panelId: 'p1' },
+  ]).length === 0)
+  // 보드는 지운 버전을 verId 로 적고 배열에서 빼지 않습니다(dead). 자리번호가 어긋나면
+  // 「고른 버전」이 다른 그림을 가리키므로, 접을 때도 같은 방식이어야 합니다
+  ok('지운 버전은 dead 로 남고 자리번호는 그대로다', (() => {
+    const [cut] = M.foldCuts([
+      { kind: 'panel.add', id: 'o1', ts: 1, panel: { id: 'p1', orderKey: 'A' } },
+      { kind: 'panel.version', id: 'v1', ts: 2, panelId: 'p1', version: { src: 'https://x/1.png' } },
+      { kind: 'panel.version', id: 'v2', ts: 3, panelId: 'p1', version: { src: 'https://x/2.png' } },
+      { kind: 'panel.version.remove', id: 'o4', ts: 4, panelId: 'p1', verId: 'v2' },
+      { kind: 'panel.patch', id: 'o5', ts: 5, panelId: 'p1', fields: { current: 0 } },
+    ])
+    return cut.versions.length === 2 && cut.dead.v2 === 4 && !cut.dead.v1 && cut.current === 0
+  })())
+  ok('판을 비우면 그 전의 컷도 없다', M.foldCuts([
+    { kind: 'panel.add', id: 'o1', ts: 1, panel: { id: 'p1', orderKey: 'A' } },
+    { kind: 'board.reset', id: 'o2', ts: 2 },
+    { kind: 'panel.add', id: 'o3', ts: 3, panel: { id: 'p2', orderKey: 'A' } },
+  ]).map((c) => c.id).join() === 'p2')
+
+  ok('데모 서버와 진짜 클라이언트가 끝까지 말을 맞춘다', await (async () => {
+    const cli = M.mcp({ endpoint: 'https://demo.invalid/mcp', fetchImpl: M.demoFetch({ delayMs: 0 }) })
+    const info = await cli.open()
+    const tools = await cli.tools()
+    const tool = M.pickTool(tools, 'video')
+    const b = M.argsFor(tool, { prompt: 'x', imageUrl: 'https://x/y.png', model: 'm1', quality: 'turbo' })
+    const out2 = await cli.run(tool.name, b.args)
+    return info.serverInfo.name.includes('데모') && tool.name === 'generate_video'
+      && b.missing.length === 0 && M.videoFrom(out2).job.startsWith('demo-')
+  })())
+  ok('닿지 못하면 CORS 를 짚어 말한다', await (async () => {
+    const cli = M.mcp({ endpoint: 'https://mcp.higgsfield.ai/mcp', fetchImpl: async () => { throw new TypeError('Failed to fetch') } })
+    try { await cli.open(); return false } catch (e) { return /CORS/.test(e.message) }
+  })())
+  ok('401 은 인증 문제로 말한다', await (async () => {
+    const cli = M.mcp({
+      endpoint: 'https://mcp.higgsfield.ai/mcp',
+      fetchImpl: async () => ({
+        ok: false, status: 401, headers: { get: (k) => (k === 'www-authenticate' ? 'Bearer scope="openid"' : null) },
+        text: async () => '',
+      }),
+    })
+    try { await cli.open(); return false } catch (e) { return e.message.includes('401') }
+  })())
+  ok('세션 헤더를 받으면 그다음 요청에 돌려준다', await (async () => {
+    const seen = []
+    const cli = M.mcp({
+      endpoint: 'https://demo.invalid/mcp',
+      fetchImpl: async (_u, init) => {
+        seen.push(init.headers['mcp-session-id'] || null)
+        return {
+          ok: true, status: 200,
+          headers: { get: (k) => (k === 'mcp-session-id' ? 'sid-1' : 'application/json') },
+          text: async () => JSON.stringify({ jsonrpc: '2.0', id: 1, result: { tools: [] } }),
+        }
+      },
+    })
+    await cli.open()
+    await cli.tools()
+    return seen[0] === null && cli.session() === 'sid-1' && seen.at(-1) === 'sid-1'
+  })())
+
+  ok('MCP 로 만든 영상은 히스토리에서 보드의 일이다', (() => {
+    const e = toEntry({ kind: 'panel.version', id: 'v9', actor: 'u1', panelId: 'p1', version: { source: 'mcp' } })
+    return e.step === 'board' && e.what.includes('영상')
+  })())
+  ok('우리 GPU 로 만든 영상도 같은 한 줄로 읽는다', (() => {
+    const e = toEntry({ kind: 'panel.version', id: 'v9', actor: 'u1', panelId: 'p1', version: { source: 'video' } })
+    return e.step === 'board' && e.what.includes('영상')
+  })())
+
+  /* ── services/animate.js: 우리 GPU 로 컷을 영상으로 ────────────────────────
+   *
+   * 여기서 보는 것은 「두 걸음」의 규칙이다. CloudFront 가 60초에 끊으므로 POST 는 일감
+   * 번호만 받고 진행은 GET 으로 물어본다. 그 되풀이가 끝나는 조건(done·error·시간초과)이
+   * 틀리면 화면이 영원히 「만듭니다」로 남거나, 다 된 영상을 못 받는다. 브라우저에서
+   * 진짜 GPU 를 부를 수는 없으니 fetch 와 sleep 을 넣어 준다.
+   */
+  out.insertAdjacentHTML('beforeend', '\n<b>영상 만들기 (services/animate.js)</b>\n')
+  const A = await import(`./services/animate.js?t=${Date.now()}`)
+
+  // 응답 하나를 흉내내는 껍데기. animate.js 는 res.ok · res.status · res.json() 만 본다
+  const vres = (body, status = 200) => ({ ok: status < 400, status, json: async () => body })
+  const noAuth = async () => 'Bearer test'
+  const nap = async () => {}
+
+  ok('진행 한 줄은 상태마다 다르게 읽힌다', (() => {
+    const wait = A.clipHint({ status: 'wait', eta: 40 })
+    const run = A.clipHint({ status: 'run', step: 5, steps: 20, eta: 40 })
+    const done = A.clipHint({ status: 'done' })
+    const err = A.clipHint({ status: 'error', error: '터졌습니다' })
+    return wait.includes('40') && run.includes('25%') && run.includes('30초')
+      && done.includes('나왔습니다') && err === '터졌습니다'
+  })())
+  ok('걸음 수가 없으면 퍼센트를 지어내지 않는다', !A.clipHint({ status: 'run', eta: 9 }).includes('%'))
+
+  ok('넣고, 물어보고, 주소를 돌려준다', await (async () => {
+    const seen = []
+    const answers = [
+      vres({ job: 'j1', eta: 36, quality: 'fast', secs: 2, frames: 49, fps: 24 }),
+      vres({ id: 'j1', status: 'run', step: 4, steps: 20, eta: 36 }),
+      vres({ id: 'j1', status: 'done', url: '/img/abc.mp4', ms: 29000, size: [832, 480] }),
+    ]
+    const ticks = []
+    const out2 = await A.runClip(
+      { still: '/img/a.png', prompt: '문을 연다', secs: 2, quality: 'fast' },
+      {
+        onTick: (s) => ticks.push(s.status), every: 10, sleep: nap, auth: noAuth,
+        fetchImpl: async (url, init) => { seen.push(`${init.method || 'GET'} ${url}`); return answers.shift() },
+      },
+    )
+    return out2.url === '/img/abc.mp4' && out2.job === 'j1'
+      && seen[0] === 'POST /gen/animate' && seen[1] === 'GET /gen/animate/j1'
+      && ticks.join(',') === 'wait,run'
+  })())
+
+  /*
+   * 배포된 설정의 genUrl 은 '/gen' 이다(aws-config.js). 그 위에 '/gen' 을 한 번 더 붙이면
+   * /gen/gen/animate 가 되고 서버는 404 를 준다. 실제로 그렇게 올라가 있었고, GPU 가 꺼져
+   * 있어 503 이 먼저 오는 동안은 티가 나지 않았다. 그래서 주소 모양을 여기서 못 박는다.
+   */
+  ok('배포 설정(genUrl=/gen)에서도 주소가 겹치지 않는다', await (async () => {
+    const keep = window.SB_CONFIG
+    window.SB_CONFIG = { genUrl: '/gen' }
+    const A2 = await import(`./services/animate.js?t=${Date.now()}g`)
+    window.SB_CONFIG = keep
+    const seen = []
+    const answers = [vres({ job: 'j3', eta: 8 }), vres({ status: 'done', url: '/img/z.mp4' })]
+    await A2.runClip({ still: 'x' }, {
+      every: 10,
+      sleep: nap,
+      auth: noAuth,
+      fetchImpl: async (url, init) => { seen.push(`${init.method || 'GET'} ${url}`); return answers.shift() },
+    })
+    return seen[0] === 'POST /gen/animate' && seen[1] === 'GET /gen/animate/j3'
+  })())
+
+  ok('서버가 실패라고 하면 그 사유를 던진다', await (async () => {
+    const answers = [vres({ job: 'j2', eta: 36 }), vres({ status: 'error', error: '첫 프레임을 읽을 수 없습니다' })]
+    try {
+      await A.runClip({ still: 'x' }, { every: 10, sleep: nap, auth: noAuth, fetchImpl: async () => answers.shift() })
+      return false
+    } catch (e) { return e.message === '첫 프레임을 읽을 수 없습니다' }
+  })())
+
+  /*
+   * 503 은 「지금은 안 되지만 곧 된다」다(영상 모델을 올리는 중이거나 다른 컷을 만드는 중).
+   * 화면이 그것을 가려내 기다렸다가 다시 넣으므로, status 가 실려 오는 것이 규칙이다.
+   */
+  ok('503 은 사유와 번호를 함께 들고 온다', await (async () => {
+    try {
+      await A.startClip({ still: 'x' }, {
+        auth: noAuth, fetchImpl: async () => vres({ detail: '올리는 중입니다(약 2분)' }, 503),
+      })
+      return false
+    } catch (e) { return e.status === 503 && e.message.includes('2분') }
+  })())
+  ok('사유가 없는 500 은 GPU 가 꺼진 것으로 말한다', await (async () => {
+    try {
+      await A.videoHealth({ auth: noAuth, fetchImpl: async () => vres({}, 500) })
+      return false
+    } catch (e) { return e.message.includes('GPU') }
+  })())
+
+  ok('너무 오래 걸리면 놓아 주고 일감 번호를 알려 준다', await (async () => {
+    try {
+      await A.runClip({ still: 'x' }, {
+        // eta 1초 → 기한 123초. 한 바퀴에 60초를 세므로 세 바퀴면 끝난다
+        every: 60000, sleep: nap, auth: noAuth,
+        fetchImpl: async (_u, init) => vres(init.method === 'POST'
+          ? { job: 'j3', eta: 1 } : { id: 'j3', status: 'run', step: 1, steps: 20 }),
+      })
+      return false
+    } catch (e) { return e.message.includes('j3') && e.message.includes('오래') }
+  })())
 
   out.insertAdjacentHTML('beforeend',
     `\n<span class="${failed ? 'fail' : 'pass'}">${failed ? failed + '개 실패' : '전부 통과'}</span>\n`)

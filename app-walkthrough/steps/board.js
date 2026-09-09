@@ -20,6 +20,7 @@ import { demoActive, demoAdvance, demoSay, demoTitle } from '../tour.js'
  *   push       op 하나를 판에 넣기. 사람이 손으로 할 때와 같은 길입니다
  *   render     다시 그리기
  *   pickView   고른 것이 없을 때 하나 고르기
+ *   showCuts   컷 보드로 돌려놓고 첫 컷을 고르기. 예시를 마칠 때 씁니다
  *   cuts       () => 지금 판의 컷 수. done 의 got 이 셉니다
  *   selected   () => 고른 컷의 id. 예시가 도는 사이에 바뀝니다
  *   afterDone  예시가 끝났습니다. 화면이 다시 그립니다
@@ -28,11 +29,11 @@ import { demoActive, demoAdvance, demoSay, demoTitle } from '../tour.js'
  * 예시가 이미 화면을 다 짚은 뒤라 「여기까지가 예시입니다」 를 읽고 끝났다고 생각한
  * 사람에게 막이 한 번 더 덮였습니다. 예시 하나로 충분해서 그 자리를 없앴습니다.
  */
-let seedBuild, push, render, pickView, cuts, selected, afterDone
+let seedBuild, push, render, pickView, showCuts, cuts, selected, afterDone
 
 /** 예시를 시작합니다. 화면의 「예시 보기」와 코치마크가 부릅니다 */
 export function boardExample(o) {
-  ;({ seedBuild, push, render, pickView, cuts, selected, afterDone } = o)
+  ;({ seedBuild, push, render, pickView, showCuts, cuts, selected, afterDone } = o)
   return runExample()
 }
 
@@ -103,17 +104,49 @@ function runExample() {
       },
     }
   })
+  /*
+   * 영상. 예전에는 '영상화'라는 다섯째 화면이었고 거기서 따로 안내했습니다. 이제 승인된
+   * 컷의 오른쪽 칸에 있는 일이라 여기서 한 걸음으로 말합니다.
+   *
+   * 짚는 자리가 없을 수도 있습니다 — 단추는 컷이 승인된 뒤에 열리고, 생성 서버가 없는
+   * 배포에는 아예 나오지 않습니다. 그때 길잡이는 테 없이 말만 띄웁니다(guide.js 의
+   * showStep). 실제로 누르게 하지는 않습니다. GPU 가 한 컷에 30초~4분을 쓰는데, 기다리는
+   * 것을 안내라고 부를 수 없습니다.
+   */
+  steps.push({
+    say: '승인이 끝나면 영상으로',
+    // 말풍선의 sub 는 글자 그대로 나옵니다. * 로 굵게 되는 곳은 note.body 뿐입니다
+    sub: '컷 하나를 감독이 승인하면 오른쪽 「AI로 생성」 옆에 「영상으로 생성」이 열립니다. '
+      + '승인된 그림이 첫 프레임이 되고, 움직임은 그 컷의 작업 지시·대사·카메라에서 만들어 '
+      + '보냅니다. 나온 영상은 그 컷의 다음 버전으로 붙습니다 — 따로 모아 두는 곳이 없습니다.',
+    spot: '[data-do="animate"]',
+    see: 'board',
+    run: () => showCuts(),
+  })
   // 끝은 말풍선의 버튼으로 냅니다. 나가는 일과 짚은 자리를 누르는 일을 가릅니다
   steps.push({
     say: demoActive() ? '스토리보드까지 다 보셨습니다' : '여기까지가 예시입니다',
     sub: demoActive()
       ? demoSay('board')
       : '이제 컷을 눌러 오른쪽에서 고치거나, 관리 화면에서 보드를 비우고 직접 시작할 수 있습니다',
-    see: 'histbox',
+    /*
+     * 컷 보드를 짚습니다. 「지나간 일」을 짚던 자리입니다.
+     *
+     * 그것은 왼쪽 기둥 맨 아래에 있어서 짚으려고 끌어오면 기둥이 통째로 굴러갔습니다
+     * (guide.js 의 showStep 이 scrollIntoView 를 합니다). 그러면 예시가 끝난 화면에서
+     * 「컷 보드」 항목이 스크롤 밖에 있었습니다. 마지막 말이 「이제 컷을 눌러…」인데
+     * 짚는 자리가 컷이 아닌 것도 어긋났습니다.
+     */
+    see: 'board',
     // 보드가 마지막 걸음이라 여기서는 두 갈래가 같은 곳으로 갑니다. 홈으로 돌아갑니다
     go: demoActive() ? '예시를 마치고 홈으로' : '예시 마치기',
     leaves: demoActive(),
-    run: () => { pickView(); render() },
+    /*
+     * pickView 를 부르던 자리입니다. 그것은 sessionStorage 에 아무것도 없으면 첫 인물을
+     * 골라서(board.js 의 pickView), 예시가 인물 구도 판에서 끝났습니다. 컷이 화면에
+     * 하나도 없는 채로 「이제 컷을 눌러…」를 읽는 셈이었습니다.
+     */
+    run: () => showCuts(),
   })
   exampleRun = guideExample({
     steps, title: demoTitle('board', '스토리보드'),

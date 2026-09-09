@@ -54,7 +54,7 @@ const CSS = `
 .navtab[aria-current="page"] .navtab__desc { color: var(--sb-accent, #1a56db); opacity: .75; }
 
 /*
- * 얇은 모양. 홈이 다섯 단계를 다 보여주므로 각 화면에서는 이 바가 자리를 덜 차지하는
+ * 얇은 모양. 홈이 단계를 다 보여주므로 각 화면에서는 이 바가 자리를 덜 차지하는
  * 편이 낫습니다. 설명 줄을 감추고 높이를 약 46px 에서 약 34px 로 줄입니다. 두 줄짜리
  * 규칙을 그대로 두고 desc 만 감추는 방식이라, 넓은 모양이 필요해지면 이 클래스만
  * 떼면 됩니다.
@@ -67,7 +67,7 @@ const CSS = `
 
 /*
  * 홈으로 돌아가는 길. 탭이 아니라서 aria-current 를 받지 않고, 오른쪽 끝으로 밀어
- * 다섯 단계와 섞이지 않게 둡니다.
+ * 작업 단계와 섞이지 않게 둡니다.
  */
 .navhome {
   display: flex; align-items: center; gap: 5px; margin-left: auto; padding: 0 12px;
@@ -92,7 +92,7 @@ const CSS = `
 
 /*
  * 아키텍처. 오른쪽 묶음의 맨 앞이고 작게 둡니다. 일하는 단추가 아니라 설명이라서,
- * 눈에 먼저 들어오면 다섯 번째 작업 단계로 읽힙니다.
+ * 눈에 먼저 들어오면 하나 더 있는 작업 단계로 읽힙니다.
  */
 .navarch {
   display: flex; align-items: center; gap: 4px; margin-left: auto; padding: 0 10px;
@@ -206,8 +206,8 @@ export function mountNav({
   /*
    * 아키텍처. 「이게 어디서 도는 겁니까」의 답을 화면 안에 둡니다.
    *
-   * 탭이 아니라 오른쪽 끝의 작은 단추입니다. 네 단계와 나란히 두면 다섯 번째 작업
-   * 단계로 읽히는데, 이것은 일이 아니라 설명입니다. arch.js 도 눌렀을 때 불러옵니다.
+   * 탭이 아니라 오른쪽 끝의 작은 단추입니다. 작업 단계(지금 네 개)와 나란히 두면
+   * 그 다음 단계로 읽히는데, 이것은 일이 아니라 설명입니다. arch.js 도 눌렀을 때 불러옵니다.
    */
   if (arch) {
     const a = doc.createElement('button')

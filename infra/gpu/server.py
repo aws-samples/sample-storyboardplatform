@@ -6,6 +6,7 @@ import base64
 import gc
 import io
 import os
+import re
 import sys
 import threading
 import time
@@ -40,10 +41,22 @@ MODELS = {
         repo="stabilityai/stable-diffusion-3.5-large", label="SD 3.5 Large", note="정밀 · SD 계열",
         family="sd3", steps=28, guide=3.5, guide_ref=3.5, gb=28, gated=True,
     ),
+    # 영상 모델. 그림 모델과 같은 자리(GPU 하나)를 쓰므로 올라오면 그림 모델은 내려간다.
+    # Apache-2.0 이고 게이트도 없다. 5B 라 34GB 로 이 디스크에 들어가는 유일한 I2V 모델이다.
+    "wan": dict(
+        repo="Wan-AI/Wan2.2-TI2V-5B-Diffusers", label="Wan2.2 TI2V 5B", note="컷을 영상으로",
+        family="wan", steps=20, guide=5.0, guide_ref=5.0, gb=34, video=True,
+    ),
 }
-_env = os.environ.get("SB_MODEL", "chroma")
+VIDEO = {k for k, v in MODELS.items() if v.get("video")}
+# 기본 그림 모델. 부팅 때 이것을 올리고, 화면이 모델을 고르지 않으면 여기로 돌아온다.
+# klein 인 이유: 기준 이미지를 조건(reference)으로 받는 계열이 이 빌드에서 flux2 하나뿐이다.
+# 만든 얼굴을 그대로 살리는 일과 얼굴 두 장을 붙인 시트로 두 인물 장면을 그리는 일은
+# img2img 로는 안 된다(args_for 참고). 게이트도 없어서 HF 토큰 없이 올라간다.
+FALLBACK = "klein"
+_env = os.environ.get("SB_MODEL", FALLBACK)
 DEFAULT = _env if _env in MODELS else next(
-    (k for k, v in MODELS.items() if v["repo"] == _env), "chroma")
+    (k for k, v in MODELS.items() if v["repo"] == _env), FALLBACK)
 
 STYLE = (
     "cinematic storyboard panel, expressive graphite pencil and ink wash on warm toned paper, "
@@ -62,10 +75,67 @@ KEEP = (
     "Using the reference image, draw the same character: identical face, hairstyle, build and "
     "clothing. Do not change the person. New shot: "
 )
+# 얼굴 여러 장을 한 장으로 붙인 시트(화면의 faceSheet)를 받았을 때. KEEP 은 「the person」
+# 한 사람을 말하므로 그 말로는 둘 중 하나만 그린다
+CAST = (
+    "The reference image is a sheet of separate character portraits placed side by side. Draw all "
+    "of these characters together in one new scene, keeping each face, hairstyle, build and "
+    "clothing as shown. Do not copy the sheet layout. New shot: "
+)
+# 씬 키 비주얼처럼 「같은 룩」만 물려받는 자리. 구도까지 물려받으면 컷이 다 같아진다
+LOOK = (
+    "Match the palette, light and atmosphere of the reference image, but draw a different shot. "
+    "Do not copy its layout or camera. New shot: "
+)
 NOTEXT = "Do not write any text, labels or captions. "
 
 SIZE = {"pose": (896, 1152), "cut": (1216, 688)}
 MAX_STEPS = 40
+
+# 영상. 컷 그림을 첫 프레임으로 두고 몇 초를 움직인다.
+MOTION = (
+    "storyboard animatic, keep the drawing style and composition, subtle believable motion, "
+    "steady camera, no cuts, no new characters entering"
+)
+VNEG = (
+    "text, letters, caption, watermark, logo, sudden cut, scene change, camera shake, "
+    "distorted anatomy, extra limbs, flicker, morphing background"
+)
+FPS = 24
+# 화질 두 칸. 걸음 수는 같고 넓이만 다르다 — 20 걸음이면 충분하고, 시간은 거의 넓이에
+# 비례해서 늘어난다. L40S 실측(49프레임=2초, 121프레임=5초):
+#   832x480   49f 29초 / 121f 88초    (peak 27.0GB)
+#   1280x704  49f 80초 / 121f 226초   (peak 30.5GB)
+VQ = {
+    "fast": dict(area=832 * 480, steps=20, label="빠르게 · 832×480"),
+    "fine": dict(area=1280 * 704, steps=20, label="곱게 · 1280×704"),
+}
+VSECS = (2, 3, 5)
+# 만든 영상 1초당 대략 이만큼 걸린다. 화면이 남은 시간을 보여주는 데만 쓴다. 위 실측보다
+# 조금 넉넉하게 잡는다 — 남은 시간이 0 이 된 뒤에도 도는 편이 더 나쁘게 읽힌다
+EST = {"fast": 18, "fine": 46}
+JOBS: dict[str, dict] = {}
+JOB_KEEP = 24
+# 이만큼 지난 일감은 죽은 것으로 본다. 제일 무거운 조합(5초 · 곱게)도 4분 안에 끝난다
+JOB_MAX_S = 900
+
+def vid_pending() -> bool:
+    """
+    받아 둔 영상 일감이 아직 도는 중인가. 이 동안 모델을 갈면 그 일감이 죽는다.
+
+    이것이 /gen · /gen/load · /gen/animate 를 함께 막으므로, 끝난 표시를 못 받은 일감이
+    하나라도 남으면 이 기계의 그림 생성까지 영원히 503 이 된다. 그래서 너무 오래된 것은
+    여기서 끝난 것으로 적어 준다 — 도는 실이 이미 죽어 아무도 적어 주지 않는 경우다
+    """
+    live = False
+    for x in JOBS.values():
+        if x["status"] not in ("wait", "run"):
+            continue
+        if time.time() - x["ts"] > JOB_MAX_S:
+            x.update(status="error", error="영상을 만들다 너무 오래 걸려 끊긴 것으로 봅니다.")
+            continue
+        live = True
+    return live
 
 app = FastAPI()
 
@@ -73,7 +143,15 @@ gpu = threading.Lock()
 pipes: dict = {}
 cur = None
 loading = None
+# 모델을 올리다 엎어진 마지막 사유와, 그것이 어느 모델의 것인가. 모델 이름을 함께 들고
+# 있지 않으면 영상 모델이 실패한 사유를 그림을 기다리는 화면이 자기 것으로 읽는다 —
+# 「sd35: Hugging Face 키가 없습니다」를 영상 만들다 보게 되면 상관없는 키를 넣으러 간다
 load_error = None
+load_error_mid = None
+
+def err_for(mid: str) -> str | None:
+    """이 모델을 올리다 엎어진 사유. 다른 모델의 사유는 이 자리에서 거짓말이 된다"""
+    return load_error if load_error_mid == mid else None
 
 def _chroma(spec: dict) -> dict:
     import torch
@@ -103,7 +181,21 @@ def _sd3(spec: dict) -> dict:
         x.set_progress_bar_config(disable=True)
     return {"txt": p, "ref": q}
 
-FAMILY = {"chroma": _chroma, "flux2": _flux2, "sd3": _sd3}
+def _wan(spec: dict) -> dict:
+    import torch
+    from diffusers import AutoencoderKLWan, WanImageToVideoPipeline
+
+    # VAE 만 float32 다. bfloat16 으로 두면 프레임에 색 얼룩이 남는다(Wan 문서 권장)
+    vae = AutoencoderKLWan.from_pretrained(spec["repo"], subfolder="vae", torch_dtype=torch.float32)
+    p = WanImageToVideoPipeline.from_pretrained(
+        spec["repo"], vae=vae, torch_dtype=torch.bfloat16).to("cuda")
+    p.set_progress_bar_config(disable=True)
+    # 프레임을 풀 때가 제일 무겁다. 타일로 나눠 풀지 않으면 46GB 카드에서도
+    # 1280x704 는 VAE 에서 OutOfMemory 로 죽는다(실측)
+    p.vae.enable_tiling()
+    return {"vid": p}
+
+FAMILY = {"chroma": _chroma, "flux2": _flux2, "sd3": _sd3, "wan": _wan}
 
 # 커넥터가 SSM SecureString 에 넣어 둔 Hugging Face 키. 게이트된 저장소를 받을 때만 쓴다.
 HF_PARAM = os.environ.get("SB_HF_PARAM", "/storyboard/connector/huggingface")
@@ -127,37 +219,63 @@ def hf_token() -> str:
     return _hf
 
 def _unload() -> None:
+    """
+    올려 둔 모델을 GPU 에서 실제로 내린다.
+
+    pipes 를 비우는 것만으로는 부족하다. 파이프 객체를 잡고 있는 자리가 하나라도 남으면
+    (터진 요청의 traceback, 돌고 있는 영상 일감) 안의 무게(transformer·VAE·텍스트 인코더)가
+    그대로 카드에 남는다. 실제로 그렇게 남아서, 다음 모델을 올린 뒤 44.3GB/44.4GB 로
+    「CUDA out of memory」가 났다. 그러니 파이프가 들고 있는 모듈 참조를 하나씩 끊는다 —
+    파이프가 남아 있어도 무게는 풀린다.
+    """
     global pipes, cur
     import torch
 
-    for p in set(pipes.values()):
+    old, (pipes, cur) = list(pipes.values()), ({}, None)
+    for p in old:
         try:
             p.remove_all_hooks()
         except Exception:
             pass
-    pipes, cur = {}, None
+        for name in list(getattr(p, "components", None) or {}):
+            try:
+                setattr(p, name, None)
+            except Exception:
+                pass
+    old.clear()
     for _ in range(2):
         gc.collect()
     torch.cuda.empty_cache()
+    torch.cuda.ipc_collect()
+    left = torch.cuda.memory_allocated() / 2**30
+    if left > 1:
+        print(f"[unload] GPU 에 {left:.1f}GB 가 남았습니다", flush=True)
 
 def _load(mid: str) -> None:
-    global cur, loading, load_error, pipes
+    global cur, loading, load_error, load_error_mid, pipes
     if cur == mid:
-        loading = None
+        # 내가 세운 표시만 내린다. 그냥 None 으로 두면, 다른 모델을 올리려고 잠금 앞에
+        # 줄 서 있는 _kick 의 표시까지 지워져 health 가 「올리는 중」을 잃는다
+        if loading == mid:
+            loading = None
         return
     global _hf
+    # 새로 올리기 시작하면 지난 실패는 잊는다. 남겨 두면 이번 시도가 도는 중에도 화면이
+    # 지난 사유를 읽고, 503 을 「키가 없다」로 잘못 말한다
+    load_error, load_error_mid = None, None
     try:
         if MODELS[mid].get("gated"):
             tok = hf_token()
             if not tok:
                 load_error = f"{mid}: Hugging Face 키가 없습니다. 커넥터에서 키를 넣어주세요"
+                load_error_mid = mid
                 return
             os.environ["HF_TOKEN"] = tok
         _unload()
         pipes = FAMILY[MODELS[mid]["family"]](MODELS[mid])
-        cur, load_error = mid, None
+        cur, load_error, load_error_mid = mid, None, None
     except Exception as e:
-        load_error = f"{mid}: {type(e).__name__}: {e}"
+        load_error, load_error_mid = f"{mid}: {type(e).__name__}: {e}", mid
         _hf = None  # 키를 갈아 끼웠을 수 있다. 다음 시도에서 SSM 을 다시 읽는다
     finally:
         if loading == mid:
@@ -179,6 +297,10 @@ DISK_MBS = 300
 
 def wait_s(mid: str) -> int:
     return round(MODELS[mid]["gb"] * 1024 / DISK_MBS)
+
+def seed_of(s: int | None) -> int:
+    """씨앗은 32비트 안이어야 한다. 밖에서 온 큰 수를 그대로 넘기면 torch 가 터진다"""
+    return int(s) % 2**32 if s is not None else int.from_bytes(os.urandom(2), "big")
 
 def decode(data: str) -> Image.Image:
     raw = data.split(",", 1)[1] if data.startswith("data:") else data
@@ -270,22 +392,39 @@ class Req(BaseModel):
     model: str | None = None
     seed: int | None = None
     init: str | None = None
+    # 기반 이미지가 무엇인가 — sketch(올린 스케치) · face(인물 얼굴 한 장) · cast(얼굴 시트)
+    # · image(키비주얼 등 그림 한 장). 모양이 같은 한 칸(init)으로 들어오기 때문에 화면이
+    # 말해 주지 않으면 서버가 구별할 수 없고, 그러면 스케치에게 「인물을 그대로 두라」고
+    # 하거나 얼굴에게 「같은 구도를 유지하라」고 하게 된다
+    refKind: str | None = None
     strength: float = 0.85
     steps: int | None = None
     guidance: float | None = None
 
 def pick(mid: str | None) -> str:
-    return mid if mid in MODELS else (cur or DEFAULT)
+    """그림 모델만 고른다. 영상 모델이 올라와 있어도 /gen 은 그림 모델로 되돌아간다"""
+    if mid in MODELS and mid not in VIDEO:
+        return mid
+    return cur if cur and cur not in VIDEO else DEFAULT
 
 def build(spec: dict, req: Req) -> str:
+    """
+    지시문 한 줄. 기반 이미지가 무엇인지(refKind)에 따라 앞에 붙는 말이 달라진다.
+
+    모델 갈래로 갈라서는 안 된다. 갈래는 「어떻게 넣는가」(img2img 인가 조건인가)이고,
+    여기서 필요한 것은 「무엇을 넣었는가」다. 갈래로 갈랐을 때 스케치를 얹은 flux2 는
+    「인물을 바꾸지 마라」를 받았고, 얼굴을 얹은 sd3 는 「같은 구도를 유지하라」를 받았다.
+
+    refKind 를 안 보내는 옛 화면은 예전 그대로 둔다(chroma·sd3 는 스케치, flux2 는 얼굴).
+    """
     body = en(req.prompt)[:400]
     head = SHEET if req.kind == "pose" else ""
     pre = NOTEXT if spec["family"] == "flux2" else ""
     if not req.init:
         return f"{pre}{head}{body}. {STYLE}"
-    if spec["family"] in ("chroma", "sd3"):
-        return f"{head}{FINISH}{body}. {STYLE}"
-    return f"{pre}{KEEP}{head}{body}. {STYLE}"
+    kind = req.refKind or ("sketch" if spec["family"] in ("chroma", "sd3") else "face")
+    lead = {"sketch": FINISH, "face": KEEP, "cast": CAST}.get(kind, LOOK)
+    return f"{pre}{lead}{head}{body}. {STYLE}"
 
 def args_for(spec: dict, prompt: str, w: int, h: int, steps: int, guide: float,
              g, ref: Image.Image | None, strength: float) -> dict:
@@ -308,7 +447,7 @@ def run(req: Req, seed: int) -> Image.Image:
     spec = MODELS[mid]
     w, h = SIZE.get(req.kind, SIZE["cut"])
     ref = decode(req.init).convert("RGB") if req.init else None
-    steps = min(int(req.steps or spec["steps"]), MAX_STEPS)
+    steps = max(1, min(int(req.steps or spec["steps"]), MAX_STEPS))
     guide = float(req.guidance or (spec["guide_ref"] if ref is not None else spec["guide"]))
     # 프롬프트를 잠금 밖에서 먼저 만든다. 한국어면 build 안에서 Bedrock 을 부르는데,
     # 그 네트워크 대기를 잠금 안에서 하면 그 시간만큼 팀 전원의 생성이 밀린다
@@ -318,20 +457,34 @@ def run(req: Req, seed: int) -> Image.Image:
             raise HTTPException(503, f"{spec['label']}을 올리는 중입니다. 잠시 뒤 다시 눌러주세요.")
         g = torch.Generator("cuda").manual_seed(seed)
         a = args_for(spec, prompt, w, h, steps, guide, g, ref, req.strength)
-        return pipes["ref" if ref is not None else "txt"](**a).images[0]
+        try:
+            return pipes["ref" if ref is not None else "txt"](**a).images[0]
+        except torch.OutOfMemoryError:
+            # 카드가 꽉 찼다. 사람에게 「서버가 꺼졌다」고 하지 않는다. 내렸다 다시 올리고,
+            # 503 으로 돌려준다 — 화면은 503 을 보면 기다렸다가 저절로 다시 누른다
+            _unload()
+            _kick(mid)
+            raise HTTPException(
+                503, f"GPU 메모리가 가득 차서 {spec['label']}을 다시 올립니다"
+                     f"(약 {max(1, round(wait_s(mid) / 60))}분). 준비되면 다시 만듭니다.") from None
 
 @app.post("/gen")
 async def gen(req: Req, authorization: str | None = Header(None)):
     who(authorization, need_art=True)
     mid = pick(req.model)
     if cur != mid:
+        # 영상 일감을 받아 둔 채로 그림 모델을 올리면 영상 모델이 내려가고, 이미 「만듭니다」로
+        # 보이던 그 일감이 엎어진다. 그림 쪽을 기다리게 한다 — 이쪽은 다시 눌러도 되지만
+        # 저쪽은 다시 되돌릴 수 없다
+        if vid_pending():
+            raise HTTPException(503, "지금 영상을 만들고 있습니다. 끝나면 이어서 눌러주세요.")
         _kick(mid)
-        raise HTTPException(503, load_error or
+        raise HTTPException(503, err_for(mid) or
                             f"{MODELS[mid]['label']}을 올리는 중입니다"
                             f"(약 {max(1, round(wait_s(mid) / 60))}분). 준비되면 다시 눌러주세요.")
 
     t = time.time()
-    seed = req.seed if req.seed is not None else int.from_bytes(os.urandom(2), "big")
+    seed = seed_of(req.seed)
     img = await asyncio.to_thread(run, req, seed)
 
     import boto3
@@ -354,8 +507,164 @@ async def gen(req: Req, authorization: str | None = Header(None)):
 async def load(req: Req, authorization: str | None = Header(None)):
     who(authorization, need_art=True)
     mid = pick(req.model)
+    # /gen 과 같은 이유로, 도는 영상 일감이 있으면 갈지 않는다
+    if cur != mid and vid_pending():
+        raise HTTPException(503, "지금 영상을 만들고 있습니다. 끝나면 이어서 눌러주세요.")
     _kick(mid)
     return {"ok": True, "modelId": mid, "resident": cur, "loading": loading, "wait": wait_s(mid)}
+
+VID_MODEL = "wan"
+
+class Vid(BaseModel):
+    still: str = ""
+    prompt: str = ""
+    secs: float = 2
+    quality: str = "fast"
+    seed: int | None = None
+
+def frames_for(secs: float) -> int:
+    """Wan 은 4의 배수 + 1 프레임만 받는다. 초를 가장 가까운 그 수로 맞춘다"""
+    n = max(1, round(float(secs) * FPS))
+    return max(17, round((n - 1) / 4) * 4 + 1)
+
+def vid_size(im: Image.Image, area: int) -> tuple[int, int]:
+    """컷의 비율을 지키고 넓이만 화질 칸에 맞춘다. Wan 은 32 의 배수만 받는다"""
+    mod = 32
+    ar = im.height / max(1, im.width)
+    return (max(mod, int((area / ar) ** 0.5) // mod * mod),
+            max(mod, int((area * ar) ** 0.5) // mod * mod))
+
+def eta(quality: str, secs: float) -> int:
+    return round(EST[quality] * secs)
+
+# 첫 프레임은 우리 이미지 통에 있는 그림만 받는다. 아무 주소나 받으면 이 서버가
+# 남의 주소를 대신 부르는 통로가 된다
+KEY_OK = re.compile(r"^img/(?!.*\.\.)[\w./-]+\.(png|jpg|jpeg|webp)$")
+
+def key_of(src: str) -> str:
+    body = (src or "").strip().split("?", 1)[0]
+    i = body.find("img/")
+    return body[i:] if i >= 0 else body.lstrip("/")
+
+def still(src: str) -> Image.Image:
+    if (src or "").startswith("data:"):
+        return decode(src).convert("RGB")
+    key = key_of(src)
+    if not KEY_OK.match(key):
+        raise HTTPException(400, "컷 그림 주소를 읽을 수 없습니다")
+    import boto3
+
+    raw = boto3.client("s3", region_name=REGION).get_object(Bucket=BUCKET, Key=key)["Body"].read()
+    return Image.open(io.BytesIO(raw)).convert("RGB")
+
+def put_mp4(frames) -> str:
+    import boto3
+    from diffusers.utils import export_to_video
+
+    key = f"img/{uuid.uuid4().hex}.mp4"
+    path = f"/tmp/{key[4:]}"
+    # 파일 만들기도 try 안에 둔다. 여기서 엎어지면 쓰다 만 파일이 /tmp 에 그대로 남고,
+    # 이 상자의 /tmp 는 모델 캐시와 같은 200GB 를 나눠 쓴다
+    try:
+        export_to_video(frames, path, fps=FPS)
+        with open(path, "rb") as f:
+            boto3.client("s3", region_name=REGION).put_object(
+                Bucket=BUCKET, Key=key, Body=f.read(), ContentType="video/mp4",
+                CacheControl="public, max-age=31536000, immutable",
+            )
+    finally:
+        os.path.exists(path) and os.remove(path)
+    return f"/{key}"
+
+def _animate(jid: str) -> None:
+    import torch
+
+    j = JOBS[jid]
+    try:
+        im = still(j["still"])
+        q = VQ[j["quality"]]
+        w, h = vid_size(im, q["area"])
+        # 움직임 지시는 컷 내용 뒤에 붙인다. 한국어면 en() 이 영어로 옮긴다
+        prompt = f"{en(j['prompt'])[:300]}. {MOTION}".lstrip(". ")
+        t = time.time()
+        with gpu:
+            if cur != VID_MODEL:
+                raise HTTPException(503, "영상 모델이 아직 안 올라왔습니다")
+            j.update(status="run", size=[w, h])
+
+            def tick(pipe, step, ts, kw):
+                j["step"] = step + 1
+                return kw
+
+            out = pipes["vid"](
+                image=im.resize((w, h), Image.LANCZOS), prompt=prompt, negative_prompt=VNEG,
+                height=h, width=w, num_frames=j["frames"], num_inference_steps=q["steps"],
+                guidance_scale=MODELS[VID_MODEL]["guide"],
+                generator=torch.Generator("cuda").manual_seed(j["seed"]),
+                callback_on_step_end=tick,
+            ).frames[0]
+        # 파일 만들기와 올리기는 잠금 밖에서 한다. 다음 컷이 그만큼 먼저 시작한다
+        j.update(url=put_mp4(out), ms=int((time.time() - t) * 1000), status="done")
+    except torch.OutOfMemoryError:
+        # 영상은 프레임을 풀 때가 제일 무겁다. 여기서 터지면 카드를 비워 둔다.
+        # 그대로 두면 다음 사람의 그림까지 같이 죽는다
+        with gpu:
+            _unload()
+        _kick(VID_MODEL)
+        j.update(status="error", error="GPU 메모리가 가득 찼습니다. 영상 모델을 다시 올립니다."
+                                      " 잠시 뒤 다시 눌러주세요.")
+    except Exception as e:
+        j.update(status="error", error=getattr(e, "detail", None) or f"{type(e).__name__}: {e}")
+    finally:
+        # 어느 길로 나가든 끝난 표시를 남긴다. 위의 메모리 처리 안에서 또 터지면 status 가
+        # run 으로 남고, 그러면 vid_pending 이 계속 True 라서 이 기계의 그림 생성까지 멈춘다
+        if j["status"] not in ("done", "error"):
+            j.update(status="error", error="영상을 만들다 알 수 없는 이유로 끊겼습니다.")
+
+@app.post("/gen/animate")
+async def animate(req: Vid, authorization: str | None = Header(None)):
+    """일감만 만들고 바로 답한다. CloudFront 가 60초에 끊으므로 기다릴 수 없다"""
+    user = who(authorization, need_art=True)
+    if cur != VID_MODEL:
+        # 그림 모델을 올리는 중이면 끼어들지 않는다. _kick 이 loading 을 영상 모델로 덮어써
+        # 그림을 기다리던 화면이 자기 사유를 잃고, 잠금이 풀리는 대로 그 그림 모델을 다시
+        # 내려 둘이 번갈아 올리기만 한다. loading 은 다른 실이 바꾸므로 한 번만 읽는다
+        now_load = loading
+        if now_load and now_load != VID_MODEL:
+            raise HTTPException(503, f"{MODELS[now_load]['label']}을 올리는 중입니다."
+                                     " 그림이 먼저 준비된 뒤에 영상을 눌러주세요.")
+        _kick(VID_MODEL)
+        raise HTTPException(503, err_for(VID_MODEL) or
+                            f"{MODELS[VID_MODEL]['label']}을 올리는 중입니다"
+                            f"(약 {max(1, round(wait_s(VID_MODEL) / 60))}분). 준비되면 다시 눌러주세요.")
+    if vid_pending():
+        raise HTTPException(503, "다른 컷을 만들고 있습니다. 끝나면 이어서 눌러주세요.")
+
+    q = req.quality if req.quality in VQ else "fast"
+    secs = float(req.secs) if float(req.secs) in VSECS else 2.0
+    jid = uuid.uuid4().hex[:12]
+    JOBS[jid] = dict(
+        id=jid, status="wait", user=user, still=req.still, prompt=req.prompt,
+        secs=secs, quality=q, frames=frames_for(secs), step=0, steps=VQ[q]["steps"],
+        seed=seed_of(req.seed),
+        ts=time.time(),
+    )
+    for old in sorted(JOBS.values(), key=lambda x: x["ts"])[:-JOB_KEEP]:
+        if old["status"] not in ("wait", "run"):
+            JOBS.pop(old["id"], None)
+    threading.Thread(target=lambda: _animate(jid), daemon=True).start()
+    return {"job": jid, "eta": eta(q, secs), "quality": q, "secs": secs,
+            "frames": frames_for(secs), "fps": FPS}
+
+@app.get("/gen/animate/{jid}")
+def animate_state(jid: str, authorization: str | None = Header(None)):
+    who(authorization)
+    j = JOBS.get(jid)
+    if not j:
+        raise HTTPException(404, "그 일감이 없습니다. 다시 눌러주세요.")
+    keep = ("id", "status", "step", "steps", "url", "ms", "error", "quality", "secs",
+            "size", "frames", "seed")
+    return {k: j[k] for k in keep if k in j} | {"eta": eta(j["quality"], j["secs"]), "fps": FPS}
 
 @app.get("/gen/health")
 def health():
@@ -366,13 +675,25 @@ def health():
         name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else None
     except Exception:
         pass
+    # cur 은 다른 실에서 바뀝니다. 한 번만 읽어 두고 그 사본으로 답을 짭니다 — 두 번
+    # 읽으면 그 사이에 None 이 되어 MODELS[None] 로 500 이 납니다
+    now_cur = cur
     return {
-        "ok": True, "warm": cur is not None, "busy": gpu.locked(),
-        "model": MODELS[cur]["label"] if cur else None, "modelId": cur,
+        "ok": True, "warm": now_cur is not None, "busy": gpu.locked(),
+        "model": MODELS[now_cur]["label"] if now_cur else None, "modelId": now_cur,
+        # 화면이 모델을 안 고르면 이것으로 그린다(pick 의 되돌아갈 곳). 화면이 같은 이름을
+        # 따로 적어 두면 여기를 바꿀 때 어긋나므로, 물어보게 한다
+        "default": DEFAULT,
         "loading": loading, "wait": wait_s(loading) if loading else 0,
         "models": [{"id": k, "label": v["label"], "note": v["note"], "wait": wait_s(k),
-                    "strength": v["family"] in ("chroma", "sd3")} for k, v in MODELS.items()],
-        "gpu": name, "error": load_error,
+                    "strength": v["family"] in ("chroma", "sd3"),
+                    "video": k in VIDEO} for k, v in MODELS.items()],
+        # 사유와 그 사유의 주인. 화면은 자기가 기다리는 모델의 것일 때만 읽어야 한다
+        "gpu": name, "error": load_error, "errorModel": load_error_mid,
+        # 영상 칸이 물어보는 것들. 몇 초짜리를 만들 수 있고 얼마나 걸리는지
+        "video": {"id": VID_MODEL, "secs": list(VSECS), "fps": FPS,
+                  "quality": [{"id": k, "label": v["label"], "est": EST[k]} for k, v in VQ.items()],
+                  "busy": vid_pending()},
     }
 
 if __name__ != "__main__":
@@ -395,16 +716,39 @@ if __name__ == "__main__":
     assert lit.getpixel((2, 16))[0] < lit.getpixel((61, 16))[0] < 256
     assert sum(lit.getpixel((2, 16))) < 3 * 255 * 0.4
 
-    assert set(MODELS) == {"chroma", "klein", "hd", "sd35"}
+    assert set(MODELS) == {"chroma", "klein", "hd", "sd35", "wan"}
     assert MODELS["sd35"]["gated"] and not any(v.get("gated") for k, v in MODELS.items() if k != "sd35")
     for k, v in MODELS.items():
         assert v["family"] in FAMILY, k
         assert all(v.get(f) for f in ("repo", "label", "note", "steps", "guide", "guide_ref", "gb"))
+    assert FALLBACK in MODELS and FALLBACK not in VIDEO
     assert pick(None) == DEFAULT and pick("없는모델") == DEFAULT and pick("hd") == "hd"
     cur = "klein"
     assert pick(None) == "klein" and pick("hd") == "hd"
+    # 영상 모델이 올라와 있어도 그림은 그림 모델로 간다. 아니면 pipes["txt"] 가 없어 터진다
+    cur = "wan"
+    assert pick(None) == DEFAULT and pick("wan") == DEFAULT and pick("hd") == "hd"
     cur = None
-    assert wait_s("klein") < wait_s("hd")
+    assert wait_s("klein") < wait_s("hd") < wait_s("wan")
+
+    assert VIDEO == {VID_MODEL} and MODELS[VID_MODEL]["family"] == "wan"
+    # 프레임 수는 4의 배수 + 1 이어야 Wan 이 받는다
+    assert [frames_for(s) for s in VSECS] == [49, 73, 121]
+    assert all((frames_for(s) - 1) % 4 == 0 for s in (0.1, 1, 2, 3, 4.4, 5, 9))
+    assert frames_for(0.1) == 17
+    for q in VQ.values():
+        w, h = vid_size(Image.new("RGB", SIZE["cut"]), q["area"])
+        assert w % 32 == 0 and h % 32 == 0 and w * h <= q["area"]
+        assert abs(w / h - SIZE["cut"][0] / SIZE["cut"][1]) < 0.1
+    wv, hv = vid_size(Image.new("RGB", SIZE["pose"]), VQ["fast"]["area"])
+    assert hv > wv and wv % 32 == 0 and hv % 32 == 0
+    assert eta("fine", 5) > eta("fast", 5) > 0
+    # 첫 프레임은 우리 통의 img/ 키만 받는다
+    assert key_of("/img/a.png") == key_of("https://cdn.example/img/a.png?v=2") == "img/a.png"
+    assert KEY_OK.match("img/a.png") and KEY_OK.match(key_of("/img/x/y_1.jpeg"))
+    for bad in ("https://evil.example/x.png", "/etc/passwd", "img/a.txt", "", "img/../a.png"):
+        assert not KEY_OK.match(key_of(bad)), bad
+    assert "watermark" in VNEG and "storyboard" in MOTION
 
     assert min(int(Req(steps=9999).steps or 0), MAX_STEPS) == MAX_STEPS
     assert min(int(Req().steps or MODELS["chroma"]["steps"]), MAX_STEPS) == 12
@@ -419,6 +763,21 @@ if __name__ == "__main__":
     assert all(NOTEXT not in build(MODELS[k], r) for k in ("chroma", "hd", "sd35"))
     assert all(KEEP not in build(v, Req(prompt="x")) and FINISH not in build(v, Req(prompt="x"))
                for v in MODELS.values())
+
+    # 기반 이미지가 무엇인지 말해 주면 모델 갈래와 상관없이 그 말이 앞에 온다
+    for k in MODELS:
+        if k in VIDEO:
+            continue
+        sk = build(MODELS[k], Req(prompt="p", init="x", refKind="sketch"))
+        fa = build(MODELS[k], Req(prompt="p", init="x", refKind="face"))
+        ca = build(MODELS[k], Req(prompt="p", init="x", refKind="cast"))
+        kv = build(MODELS[k], Req(prompt="p", init="x", refKind="image"))
+        assert FINISH in sk and KEEP not in sk, k
+        assert KEEP in fa and FINISH not in fa, k
+        assert CAST in ca and KEEP not in ca, k
+        assert LOOK in kv and FINISH not in kv, k
+    # 모르는 값은 「그림 한 장」으로 봅니다 — 구도까지 물려받는 것이 가장 나쁜 기본값입니다
+    assert LOOK in build(MODELS["klein"], Req(prompt="p", init="x", refKind="???"))
 
     ref = Image.new("RGB", (32, 32), "white")
     ac = args_for(MODELS["chroma"], "p", 64, 32, 12, 2.5, None, ref, 0.85)

@@ -1,5 +1,5 @@
 /*
- * 네 화면의 주소표입니다. 어느 탭이 어떤 파일로 가는지, 주소의 ?board= · ?new= · ?tab=
+ * 화면들의 주소표입니다. 어느 탭이 어떤 파일로 가는지, 주소의 ?board= · ?new= · ?tab=
  * 을 어떻게 읽는지만 정합니다. 순수 데이터라서 DOM 을 만들지 않습니다. 탭 바를 그리는
  * 것은 components/nav-tabs.js 입니다.
  *
@@ -16,7 +16,16 @@ export const NAV_TABS = [
   { id: 'develop', label: '스토리 디벨롭', desc: '시놉시스 → 대본', href: '/story-graph.html' },
   { id: 'script', label: '대본화', desc: '기존 이야기 → 그래프', href: '/story-graph.html?tab=script' },
   { id: 'keyvisual', label: '키비주얼', desc: '대본 → 씬별 그림', href: '/key-visual.html' },
-  { id: 'board', label: '스토리보드', desc: '컷 · 그룹 · 콘티 · 승인', href: '/board.html' },
+  /*
+   * 마지막 단계입니다. 영상은 여기 안에 있습니다 — 컷의 그림을 승인하면 그 자리에 「영상으로
+   * 생성」이 열립니다(pages/board.js 의 animate).
+   *
+   * 한때 '영상화'라는 다섯째 탭이었습니다. 그 화면은 보드의 컷을 다시 읽어 목록으로 늘어놓고
+   * 만든 영상을 다시 op 로 보드에 붙였습니다 — 같은 컷을 두 화면이 각자 그리는 셈이라, 어느
+   * 컷이 승인됐는지도 누가 담당인지도 그쪽에서는 보이지 않았습니다. 컷을 보고 있는 자리에서
+   * 누르는 일이므로 탭을 없애고 보드 안으로 넣었습니다.
+   */
+  { id: 'board', label: '스토리보드', desc: '컷 · 그룹 · 콘티 · 승인 · 영상', href: '/board.html' },
 ]
 
 export const navTab = (id) => NAV_TABS.find((t) => t.id === id) || null
@@ -24,7 +33,7 @@ export const navTab = (id) => NAV_TABS.find((t) => t.id === id) || null
 /*
  * 링크로 그릴 때 쓸 주소.
  *
- * 지금은 네 탭 모두 href 가 있어 이 함수는 그것을 그대로 돌려줍니다. 모르는 id 가
+ * 지금은 모든 탭에 href 가 있어 이 함수는 그것을 그대로 돌려줍니다. 모르는 id 가
  * 들어오면 홈으로 보냅니다. 이 갈래가 없으면 href 가 undefined 인 <a> 가 되어
  * 눌렀을 때 /undefined 같은 곳으로 가 404 가 납니다. 실제로 그랬습니다.
  *
@@ -78,9 +87,9 @@ export const DEFAULT_BOARD = 'demo'
 /**
  * 프로젝트 서랍(app/project.html)으로 가는 주소.
  *
- * NAV_TABS 에 다섯째로 넣지 않았습니다. 그 표는 「일하는 화면 넷」이고 탭 바를 그리는
- * 재료입니다(components/nav-tabs.js). 서랍을 거기 넣으면 모든 화면의 탭 바에 다섯째
- * 탭이 생기는데, 서랍은 작업하는 곳이 아니라 한 프로젝트를 들여다보는 곳입니다.
+ * NAV_TABS 에 넣지 않았습니다. 그 표는 「일하는 화면」이고 탭 바를 그리는 재료입니다
+ * (components/nav-tabs.js). 서랍을 거기 넣으면 모든 화면의 탭 바에 탭이 하나 더 생기는데,
+ * 서랍은 작업하는 곳이 아니라 한 프로젝트를 들여다보는 곳입니다.
  *
  * boardId 가 없으면 그냥 /project.html 입니다. 서랍은 그때 기본 보드로 떨어지지 않고
  * 「어느 프로젝트인지 모른다」고 말합니다(pages/project.js 가 boardParam 을 쓰는 이유).

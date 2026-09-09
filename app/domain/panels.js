@@ -315,9 +315,12 @@ const PARENS_ONLY = /^\(([^)]+)\)$/
 
 /**
  * 컷 수 상한. 대본 한 편을 붙였을 때 컷이 끝없이 늘지 않게 끊는다.
- * splitScenario 의 12 보다 큰 이유는 정형 대본은 한 편이 통째로 들어오기 때문이다.
+ *
+ * 산문 쪽(splitScenario)의 기본값 12 보다 큰 이유는 정형 대본은 한 편이 통째로 들어오기
+ * 때문이다. 화면이 산문에도 이 값을 넘겨 쓴다 — 같은 판에 들어가는 컷의 상한이 붙여 넣은
+ * 글의 모양에 따라 달라질 이유가 없다(board.js 의 breakdown).
  */
-const SCRIPT_CUT_MAX = 48
+export const CUT_MAX = 48
 
 /*
  * 컷 길이 어림. 한국어 대사는 초당 5자쯤 읽힌다. 지문만 있는 컷은 2초로 둔다
@@ -415,7 +418,7 @@ export function splitScript(text) {
     // 첫 씬 머리줄 앞의 것은 제목이나 표지다. 컷이 아니다
     if (!scene) return
     if (!action && !dialogue) return
-    if (cuts.length >= SCRIPT_CUT_MAX) return
+    if (cuts.length >= CUT_MAX) return
     const cast = who ? [who] : roster.slice()
     cuts.push({
       scene: scene || '',
@@ -533,7 +536,15 @@ export function scenarioFromScript(text, opts = {}) {
   return out.join('\n\n')
 }
 
-export function splitScenario(text) {
+/**
+ * 산문을 컷으로 쪼갠다. 빈 줄이 경계고, 한 문단 안에서도 문장 끝에서 갈라진다.
+ *
+ * @param {string} text
+ * @param {number} [max] - 컷 수 상한. 기본 12 는 기획 결과를 컷으로 옮길 때의 값이다
+ *   (local-fallback.js). 사람이 붙여 넣은 것을 쪼갤 때는 화면이 CUT_MAX 를 넘겨 준다 —
+ *   상한에 걸려 잘린 것을 사람에게 말해 주려면 부르는 쪽이 상한을 알아야 한다.
+ */
+export function splitScenario(text, max = 12) {
   const blocks = String(text || '')
     .split(/\n[ \t]*\n|(?<=[.!?…])[ \t]+(?=[가-힣A-Z"'“])/)
     .map((s) => s.trim())
@@ -541,7 +552,7 @@ export function splitScenario(text) {
 
   const isDialogue = (line) => /^["'“]|^[가-힣A-Za-z ]{1,10}\s*:/.test(line)
 
-  return blocks.slice(0, 12).map((block) => {
+  return blocks.slice(0, max).map((block) => {
     const lines = block.split('\n').map((l) => l.trim()).filter(Boolean)
     const dialogue = lines.filter(isDialogue).join(' ')
     const action = lines.filter((l) => !isDialogue(l)).join(' ')
@@ -647,10 +658,37 @@ export function debounceBy(ms, set = setTimeout, clear = clearTimeout) {
   }
 }
 
+/*
+ * src 에 들어올 수 있는 것은 세 가지뿐입니다. 이 사이트 안의 경로, 브라우저가 만든
+ * data:image, 그리고 바깥 영상 파일 하나입니다.
+ *
+ * 셋째 것은 영상 생성 서버가 돌려주는 주소입니다(우리 GPU 의 /gen/animate, 그리고 없어진
+ * 영상화 화면이 MCP 로 붙였던 바깥 서버). 앞의 둘만
+ * 허용하던 때에는 그 주소가 판에 닿는 순간 빈 칸이 되어 컷에 깨진 그림이 남았습니다.
+ * 그래서 딱 그 모양만 더 받습니다 — https 이고, 물음표 앞이 영상 파일 확장자여야 합니다.
+ * http 도, 바깥 이미지도, javascript: 도 여전히 받지 않습니다. 판은 여러 사람이 같이
+ * 보는 곳이라, 아무 주소나 실리면 op 를 넣은 사람이 남의 브라우저로 아무 데나 부릅니다.
+ *
+ * 이 주소는 대개 서명이 붙어 있어 시간이 지나면 만료됩니다. 오래된 컷의 영상이 안
+ * 열리는 것은 그래서이고, 고치려면 그때 다시 만들어야 합니다.
+ */
+/*
+ * 그 셋째 갈래를 따로 둡니다. 주소를 파내는 쪽(domain/mcp.js 의 videoFrom)도 같은 자로
+ * 재야 하기 때문입니다. 두 곳이 다르면 저기서 통과한 주소가 여기서 빈 칸이 되고, 화면은
+ * 「만들었습니다」라고 말해 놓고 컷에는 아무것도 남지 않습니다. 실제로 그랬습니다.
+ */
+const VID_SRC = 'https://[\\w.-]{1,120}/[\\w./%~-]{1,300}\\.(?:mp4|webm|mov|m4v)(?:\\?[\\w=&.%~+/-]{0,400})?'
+const VID_RE = new RegExp(`^(?:${VID_SRC})$`)
+
+/** 판이 받아 주는 바깥 영상 주소인지. 주소를 판에 넣기 전에 이것으로 걸러 주십시오 */
+export const isVideoSrc = (s) => VID_RE.test(String(s || ''))
+
 const RE = {
   id: /^[A-Za-z0-9._:#-]{1,64}$/,
   color: /^#[0-9A-Fa-f]{3,8}$/,
-  src: /^(?:\/[\w./-]{1,200}|data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]{1,4000000})$/,
+  src: new RegExp('^(?:\\/[\\w./-]{1,200}'
+    + '|data:image\\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]{1,4000000}'
+    + `|${VID_SRC})$`),
 }
 
 const SHAPE = {
