@@ -96,6 +96,16 @@ LOOK = (
     "Do not copy its layout or camera. New shot: "
 )
 NOTEXT = "Do not write any text, labels or captions. "
+# 실사 스틸(자산관리 화면). 콘티는 연필이지만 스틸은 VFX·영상 기획이 룩을 잡는 한 장이라
+# 사실적인 사진 룩으로 간다. 참조 자산(연필 그림)에서 얼굴·장소·물건만 물려받고 질감은 버린다
+STYLE_REAL = (
+    "photorealistic cinematic film still, natural physically based lighting, real skin and "
+    "fabric texture, shallow depth of field, 35mm lens, color graded, ultra detailed"
+)
+NEG_REAL = (
+    NEG.replace("photograph, ", "") + ", illustration, drawing, sketch, pencil, ink, monochrome, "
+    "sepia, painting, cartoon, anime, paper texture"
+)
 # 승인된 컷 한 장에서 자산을 떼어 내는 자리(화면의 extractAssets). 열쇠는 domain/panels.js 의
 # assetJobs 가 refKind 로 보내는 값과 같다. 그 컷의 「이 사람만 · 사람 없는 이 장소만 · 이
 # 물건만」을 새로 그리게 한다 — 잘라 내는 것이 아니라 다시 그리는 것이라 배경에서 사람이
@@ -125,7 +135,9 @@ ASSETS = (
     "layout of any reference. New shot: "
 )
 
-SIZE = {"pose": (896, 1152), "cut": (1216, 688), "asset": (1024, 1024)}
+# still 은 실사 스틸. 확대해 보는 그림이라 컷의 두 배 남짓이다. klein 4B 가 L40S 에서 8걸음에
+# 20초 안팎이고, CloudFront 의 /gen 60초 안에 들어온다(실측은 pages/assets.js 머리글)
+SIZE = {"pose": (896, 1152), "cut": (1216, 688), "asset": (1024, 1024), "still": (1920, 1088)}
 MAX_STEPS = 40
 
 # 영상. 컷 그림을 첫 프레임으로 두고 몇 초를 움직인다.
@@ -450,6 +462,8 @@ class Req(BaseModel):
     # 말해 주지 않으면 서버가 구별할 수 없고, 그러면 스케치에게 「인물을 그대로 두라」고
     # 하거나 얼굴에게 「같은 구도를 유지하라」고 하게 된다
     refKind: str | None = None
+    # 룩. 기본은 연필 콘티(STYLE), "real" 이면 실사 스틸(STYLE_REAL)
+    style: str | None = None
     strength: float = 0.85
     steps: int | None = None
     guidance: float | None = None
@@ -473,25 +487,29 @@ def build(spec: dict, req: Req) -> str:
     body = en(req.prompt)[:400]
     head = SHEET if req.kind == "pose" else ""
     pre = NOTEXT if spec["family"] in ("flux2", "krea") else ""
+    style = STYLE_REAL if real(req) else STYLE
     # 그림을 받지 않는 갈래(krea)는 참조가 와도 「참조를 보고」로 시작하면 안 된다 — 볼 그림이 없다
     if not (req.init or req.refs) or spec.get("init") is False:
-        return f"{pre}{head}{body}. {STYLE}"
+        return f"{pre}{head}{body}. {style}"
     kind = req.refKind or ("sketch" if spec["family"] in ("chroma", "sd3") else "face")
     lead = {"sketch": FINISH, "face": KEEP, "cast": CAST, "assets": ASSETS, **ISOLATE}.get(kind, LOOK)
-    return f"{pre}{lead}{head}{body}. {STYLE}"
+    return f"{pre}{lead}{head}{body}. {style}"
+
+def real(req: Req) -> bool:
+    return str(req.style or "") == "real"
 
 def args_for(spec: dict, prompt: str, w: int, h: int, steps: int, guide: float,
-             g, refs: list, strength: float) -> dict:
+             g, refs: list, strength: float, neg: str = NEG) -> dict:
     """refs 는 참조 그림 목록(없으면 빈 목록). klein 은 전부 조건으로, img2img 갈래는 첫 장만"""
     fam = spec["family"]
     a = dict(prompt=prompt, num_inference_steps=steps, width=w, height=h, generator=g)
     if fam in ("chroma", "sd3"):
-        a.update(negative_prompt=NEG, guidance_scale=guide)
+        a.update(negative_prompt=neg, guidance_scale=guide)
         if refs:
             a.update(image=lamp(refs[0].resize((w, h), Image.LANCZOS)), strength=clamp(strength))
     elif fam == "krea":
         # 그림을 받지 않는다. 증류판은 guidance 0 이라 negative 는 뜻이 없지만 파이프가 받으니 넘긴다
-        a.update(negative_prompt=NEG, guidance_scale=guide)
+        a.update(negative_prompt=neg, guidance_scale=guide)
     else:
         a["guidance_scale"] = guide
         if refs:
@@ -523,7 +541,7 @@ def run(req: Req, seed: int) -> Image.Image:
         if cur != mid:
             raise HTTPException(503, f"{spec['label']}을 올리는 중입니다. 잠시 뒤 다시 눌러주세요.")
         g = torch.Generator("cuda").manual_seed(seed)
-        a = args_for(spec, prompt, w, h, steps, guide, g, refs, req.strength)
+        a = args_for(spec, prompt, w, h, steps, guide, g, refs, req.strength, NEG_REAL if real(req) else NEG)
         try:
             return pipes["ref" if refs else "txt"](**a).images[0]
         except torch.OutOfMemoryError:
@@ -783,6 +801,13 @@ if __name__ == "__main__":
     assert en("hello") == "hello" and en("") == ""
     assert SIZE["pose"][0] % 16 == 0 and SIZE["cut"][1] % 16 == 0
     assert all(w % 16 == 0 and h % 16 == 0 for w, h in SIZE.values())
+    assert SIZE["still"][0] > SIZE["cut"][0] and "still" in SIZE
+    # 실사 룩. 연필 말이 빠지고 사진 말이 붙는다. 참조 앞말은 그대로다
+    rl = build(MODELS["klein"], Req(prompt="p", refs=["x"], refKind="assets", style="real", kind="still"))
+    assert STYLE_REAL in rl and STYLE not in rl and ASSETS in rl and "pencil" not in rl
+    assert STYLE in build(MODELS["klein"], Req(prompt="p")) and STYLE_REAL not in build(MODELS["klein"], Req(prompt="p"))
+    assert "sketch" in NEG_REAL and "photograph" not in NEG_REAL and "photograph" in NEG
+    assert args_for(MODELS["chroma"], "p", 64, 32, 12, 2.5, None, [], 0.85, NEG_REAL)["negative_prompt"] == NEG_REAL
     assert set(ISOLATE) == {"asset_char", "asset_bg", "asset_prop"}
     assert ART_ROLES < ASSET_ROLES and {"director", "admin"} < ASSET_ROLES
     assert extracting(Req(refKind="asset_bg")) and not extracting(Req(refKind="face")) and not extracting(Req())

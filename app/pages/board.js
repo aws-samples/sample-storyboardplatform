@@ -4,7 +4,7 @@ import {
   FEEDBACK_TAGS, NEEDS, canTransition, canEditContent, splitScenario, splitScript,
   scenarioFromScript, mergeField, handBackTo, notifFor, sceneGroups, sceneKey, sceneMeta,
   clock, startTimes, scrub, debounceBy, epLabel, lostEdit, isActionable, changedSince,
-  workload, liveVer, deadVer, tally, actorPace, CUT_MAX, ASSET_TYPES, assetJobs,
+  workload, liveVer, deadVer, tally, actorPace, CUT_MAX, ASSET_TYPES, REF_TYPES, assetJobs,
 } from '../domain/panels.js'
 import { confirmAsk } from '../components/confirm.js'
 import { josa } from '../lib/josa.js'
@@ -82,7 +82,7 @@ const emptyState = () => ({
   board: { title: '스토리보드', scenario: '', _ts: {} },
   eps: {},
   chars: {},
-  // 승인된 컷에서 떼어 낸 인물·배경·상품 그림 (asset.add). 컷 생성의 참조가 됩니다
+  // 승인된 컷에서 떼어 낸 인물·배경·소품 그림 (asset.add). 컷 생성의 참조가 됩니다
   assets: {},
   panels: {},
   members: {},
@@ -1111,7 +1111,7 @@ function transition(panel, action, note) {
   }
   emit({ kind: 'panel.status', panelId: panel.id, from: panel.status, to: check.to, assignee })
   /*
-   * 승인은 「이 그림으로 간다」는 결정입니다. 그 자리에서 그림 속 인물·배경·상품을 자산으로
+   * 승인은 「이 그림으로 간다」는 결정입니다. 그 자리에서 그림 속 인물·배경·소품을 자산으로
    * 떼어 둡니다(extractAssets). 기다리지 않습니다 — 상태는 이미 바뀌었고, 뽑기는 GPU 가
    * 몇 십 초를 쓰는 뒷일입니다. 진행과 결과는 컷 상세의 「자산」칸이 보여줍니다.
    */
@@ -1197,7 +1197,7 @@ const optsFor = (panel) => {
 
 /*
  * 아무것도 고르지 않았을 때의 참조 자산. 컷에 붙인 인물의 자산과, 같은 씬의 다른 컷에서
- * 뽑은 배경입니다. 상품은 넣지 않습니다 — 이 컷에 그 물건이 나오는지는 사람만 압니다.
+ * 뽑은 배경입니다. 소품은 넣지 않습니다 — 이 컷에 그 물건이 나오는지는 사람만 압니다.
  * autoRef 와 같은 이유로 값으로 박아 두지 않고 쓸 때마다 다시 셉니다.
  */
 function autoAssets(panel) {
@@ -1603,7 +1603,7 @@ async function animate(panel) {
   }
 }
 
-/* ══ 자산 — 승인된 컷에서 인물·배경·상품을 떼어 둡니다 ═══════════════════════════════
+/* ══ 자산 — 승인된 컷에서 인물·배경·소품을 떼어 둡니다 ═══════════════════════════════
  *
  * 무엇을 뽑는지는 domain/panels.js 의 assetJobs 가 정하고, 어떻게 그리는지는 server.py 의
  * ISOLATE 가 정합니다. 여기는 그 둘을 이어 부르고 결과를 op(asset.add)로 남기는 자리입니다.
@@ -1611,6 +1611,8 @@ async function animate(panel) {
 
 const assetWork = new Map()   // panelId → 진행 한 줄. 이 브라우저에서 뽑는 것만 압니다
 const assetList = () => Object.values(state.assets || {}).sort((a, b) => (a.ts || 0) - (b.ts || 0))
+/** 컷의 참조로 내밀 수 있는 자산. 스틸(자산들로 만든 결과물)은 빼고, 그림이 있는 것만 */
+const refAssets = () => assetList().filter((a) => REF_TYPES.includes(a.type) && assetSrc(a))
 const assetsFrom = (panelId) => assetList().filter((a) => a.fromPanelId === panelId)
 const mayExtract = () => allowed('extract', roleOf(me.id))
 /** 참조로 쓸 수 있는 그림. 영상은 참조가 못 됩니다(faceOf 와 같은 이유) */
@@ -1717,45 +1719,16 @@ async function extractAssets(panel, { auto = false } = {}) {
     kind: 'panel.patch', panelId: panel.id,
     fields: { generating: false, genError: failed.length ? `자산 뽑기 · ${failed[0]}` : null },
   })
-  if (made) announce(`${labelOf(panel)} · 자산 ${made}개를 뽑았습니다.`)
+  if (made) announce(`${labelOf(panel)} · 자산 ${made}개를 자산관리에 넣었습니다.`)
   if (failed.length) notice(`${labelOf(panel)} · 자산 ${failed.length}개를 못 뽑았습니다. ${failed[0]}`)
 }
 
-/** 자산 카드 한 장. pick 이면 참조로 고르는 단추, 아니면 이름을 고치고 지울 수 있는 칸입니다 */
-function assetCard(a, { pick = null, edit = false } = {}) {
-  const src = assetSrc(a)
+/** 참조로 고르는 자산 칩 한 장. 자산의 이름·삭제는 자산관리 화면(pages/assets.js)에서 합니다 */
+function assetCard(a, { pick = false } = {}) {
   const type = esc(ASSET_TYPES[a.type] || a.type || '')
-  const img = src ? `<img src="${src}" alt="" loading="lazy">` : '<span class="asset__none mono">그림 없음</span>'
-  if (pick !== null) {
-    return `<button type="button" class="asset asset--pick" data-asset="${a.id}" data-on="${pick ? 1 : 0}"
-      aria-pressed="${pick ? 'true' : 'false'}" title="${type} · ${esc(a.name || '')}${pick ? ' · 참조에서 뺍니다' : ' · 참조에 넣습니다'}">
-      ${img}<span class="asset__cap"><b class="mono">${type}</b>${esc(a.name || '')}</span></button>`
-  }
-  return `<figure class="asset asset--mine" data-type="${esc(a.type || '')}">
-    ${img}
-    <figcaption class="asset__cap"><b class="mono">${type}</b>${edit ? '' : esc(a.name || '')}</figcaption>
-    ${edit ? `<input class="asset__name" data-aname="${a.id}" value="${esc(a.name || '')}" aria-label="자산 이름" maxlength="40">
-    <div class="asset__foot"><button type="button" class="mini" data-arm="${a.id}">지우기</button></div>` : ''}
-  </figure>`
-}
-
-/*
- * 왼쪽 기둥의 자산 목록. 누르면 그것을 뽑은 컷으로 갑니다 — 이름을 고치고 지우는 것은 그
- * 컷의 상세에서 합니다. 생성 서버도 없고 자산도 없는 판(로컬 모드)에는 칸을 내지 않습니다.
- */
-function renderAssets() {
-  const list = assetList()
-  byId('assetBox').hidden = !list.length && !canGen
-  byId('assetCount').textContent = list.length || ''
-  setHtml(byId('assetNav'), list.length ? [...list].reverse().map((a) => {
-    const from = state.panels[a.fromPanelId]
-    const src = assetSrc(a)
-    return `<li><button type="button" class="asset asset--nav" data-goto="${a.fromPanelId}" data-type="${esc(a.type || '')}"
-      title="${esc(from ? `${labelOf(from)}에서 뽑았습니다. 누르면 그 컷으로 갑니다` : '뽑은 컷이 지워졌습니다')}">
-      ${src ? `<img src="${src}" alt="" loading="lazy">` : ''}
-      <span class="asset__cap"><b class="mono">${esc(ASSET_TYPES[a.type] || a.type || '')}</b>${esc(a.name || '')}</span>
-    </button></li>`
-  }).join('') : '<li class="hint">감독이 컷을 승인하면 그 그림에서 인물·배경·상품이 여기 모입니다.</li>')
+  return `<button type="button" class="asset asset--pick" data-asset="${a.id}" data-on="${pick ? 1 : 0}"
+    aria-pressed="${pick ? 'true' : 'false'}" title="${type} · ${esc(a.name || '')}${pick ? ' · 참조에서 뺍니다' : ' · 참조에 넣습니다'}">
+    <img src="${assetSrc(a)}" alt="" loading="lazy"><span class="asset__cap"><b class="mono">${type}</b>${esc(a.name || '')}</span></button>`
 }
 
 let fastPoll = null
@@ -1989,7 +1962,6 @@ function render() {
   renderMe()
   renderGpu()
   renderNav()
-  renderAssets()
   renderMine()
   renderHist()
   renderTime()
@@ -3551,7 +3523,7 @@ function renderDetail() {
   // 참조 자산. 고른 것(없으면 autoAssets)과 고를 수 있는 전부, 그리고 이 컷에서 뽑은 것
   const assetIds = assetIdsOf(p)
   const assetOn = new Set(assetIds)
-  const assetPool = p.charId ? [] : assetList().filter(assetSrc)
+  const assetPool = p.charId ? [] : refAssets()
   const assetMine = p.charId ? [] : assetsFrom(p.id)
   const extracting = assetWork.get(p.id)
   const extractWhy = whyNotExtract(p)
@@ -3635,26 +3607,20 @@ function renderDetail() {
       만들어 보냅니다. 나온 영상은 이 컷의 다음 버전으로 붙습니다.</p>`
 
   /*
-   * 이 컷의 자산. 승인된 그림에서 뽑은 인물·배경·상품이 여기 나오고, 이름을 고치거나 지웁니다.
-   * 승인 전에는 「승인하면 뽑는다」만 말합니다. 생성 칸(genBlock)과 달리 감독에게도 보입니다 —
-   * 승인을 누르는 사람이 감독이라 뽑는 진행도 그 화면에 뜹니다.
+   * 자산 한 줄. 자산 자체는 「자산관리」 화면의 것이라 여기서는 이 컷에서 무엇이 뽑혔는지와
+   * 그 화면으로 가는 길만 둡니다. 승인 전에는 「승인하면 뽑힌다」만 말합니다. 생성 칸
+   * (genBlock)과 달리 감독에게도 보입니다 — 승인을 누르는 사람이 감독이라 뽑는 진행도 그
+   * 화면에 뜹니다.
    */
-  const canEditAsset = mayExtract()
-  const assetBlock = p.charId || !canGen ? '' : `
-    <h2 class="mono h" style="margin-top:22px">이 컷의 자산 <span class="count">${assetMine.length || ''}</span></h2>
-    ${assetMine.length ? `<div class="alib">${assetMine.map((a) => assetCard(a, { edit: canEditAsset })).join('')}</div>` : ''}
-    ${extracting ? `<p class="why why--busy">${esc(extracting)}</p>`
-    : p.status !== 'approved' ? `
-    <p class="why">감독이 이 컷을 승인하면 그 그림에서 인물·배경·상품을 따로 그려 자산으로 둡니다.
-      다음 컷을 만들 때 「참조 자산」으로 골라 넣으면 같은 얼굴·같은 장소·같은 물건으로 나옵니다.</p>`
-      : !assetMine.length ? `
-    <p class="why">승인은 됐지만 뽑은 자산이 없습니다.${extractWhy ? ` ${esc(extractWhy)}.` : ' 아래 단추로 뽑습니다.'}</p>` : ''}
-    ${p.status === 'approved' && !extracting ? `
-    <div class="acts">
-      <button class="btn btn--line" data-do="extract" ${extractWhy ? `aria-disabled="true" title="${esc(extractWhy)}"` : ''}>
-        ${assetMine.length ? '자산 다시 뽑기' : '자산으로 뽑기'}
-      </button>
-    </div>` : ''}`
+  const assetsHref = navHref('assets', boardFromSearch())
+  const assetLine = p.charId || !canGen ? '' : extracting ? `
+    <p class="why why--busy">${esc(extracting)}</p>` : p.status !== 'approved' ? `
+    <p class="why">감독이 이 컷을 승인하면 그 그림에서 인물·배경·소품을 따로 그려
+      <a href="${esc(assetsHref)}">자산관리</a>에 넣습니다.</p>` : `
+    <p class="why">${assetMine.length
+    ? `이 컷에서 뽑은 자산 ${assetMine.length}개가 <a href="${esc(assetsHref)}">자산관리</a>에 있습니다.`
+    : `승인은 됐지만 뽑은 자산이 없습니다.${extractWhy ? ` ${esc(extractWhy)}.` : ''}`}
+      ${extractWhy ? '' : `<button type="button" class="mini" data-do="extract">${assetMine.length ? '다시 뽑기' : '자산으로 뽑기'}</button>`}</p>`
 
   const genBlock = !may('art') ? `
     <h2 class="mono h" style="margin-top:22px">이미지</h2>
@@ -3682,9 +3648,9 @@ function renderDetail() {
       <div class="alib alib--pick" ${editable ? '' : noEdit}>${assetPool.map((a) => assetCard(a, { pick: assetOn.has(a.id) })).join('')}</div>
     </div>
     <p class="why">${assetIds.length
-      ? `자산 ${assetIds.length}장을 참조로 보냅니다. 인물은 그 얼굴로, 배경은 그 장소로, 상품은 그 물건 그대로 새 구도를 그립니다.${
+      ? `자산 ${assetIds.length}장을 참조로 보냅니다. 인물은 그 얼굴로, 배경은 그 장소로, 소품은 그 물건 그대로 새 구도를 그립니다.${
         refKey === 'none' ? '' : ' 위에서 고른 기반 이미지도 뒤에 한 장 더 붙습니다.'}`
-      : '컷에 붙인 인물의 자산과 같은 씬의 배경은 저절로 들어갑니다. 상품은 그 물건이 나오는 컷에서 직접 고르세요.'}</p>` : ''}
+      : '컷에 붙인 인물의 자산과 같은 씬의 배경은 저절로 들어갑니다. 소품은 그 물건이 나오는 컷에서 직접 고르세요.'}</p>` : ''}
     ${faceNote}
     ${refKey === 'keyvisual' ? `
       <p class="why">${esc(sceneMeta(p.scene).no || '이 씬')}의 키 비주얼을 기반으로 잡아 두었습니다.
@@ -3835,7 +3801,7 @@ function renderDetail() {
       ${ch ? poseFields : cutFields}
 
       ${genBlock}
-      ${assetBlock}
+      ${assetLine}
 
       <h2 class="mono h" style="margin-top:22px">버전 ${live.length ? `<span class="count">${live.length}</span>` : ''}
         <button class="mini" data-do="viewer" ${ver ? '' : 'disabled'}
@@ -4056,10 +4022,6 @@ function navClick(e) {
 }
 byId('charNav').addEventListener('click', navClick)
 byId('boardNav').addEventListener('click', navClick)
-byId('assetNav').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-goto]')
-  if (b) goTo(b.dataset.goto)
-})
 byId('newChar').addEventListener('click', addChar)
 byId('histMine').addEventListener('click', () => { histMine = !histMine; renderHist() })
 
@@ -4357,12 +4319,6 @@ detail.addEventListener('change', (e) => {
    */
   if (e.target.id === 'clipSecs') { clipOpts.secs = Number(e.target.value); renderDetail(); return }
   if (e.target.id === 'clipQuality') { clipOpts.quality = e.target.value; renderDetail(); return }
-  if (e.target.dataset.aname) {
-    const a = state.assets?.[e.target.dataset.aname]
-    const name = e.target.value.trim().slice(0, 40)
-    if (a && name && name !== a.name) emit({ kind: 'asset.patch', assetId: a.id, fields: { name } })
-    return
-  }
   if (e.target.dataset.field !== 'assignee') return
   emit({ kind: 'panel.patch', panelId: p.id, fields: { assignee: e.target.value || null } })
 })
@@ -4388,7 +4344,6 @@ detail.addEventListener('click', async (e) => {
   const castId = e.target.closest('[data-cast]')?.dataset.cast
   const refKey = e.target.closest('[data-ref]')?.dataset.ref
   const assetId = e.target.closest('[data-asset]')?.dataset.asset
-  const armId = e.target.closest('[data-arm]')?.dataset.arm
 
   const lostBtn = e.target.closest('[data-lost]')
   if (lostBtn) {
@@ -4412,15 +4367,6 @@ detail.addEventListener('click', async (e) => {
     const cur = assetIdsOf(p)
     optsFor(p).assets = cur.includes(assetId) ? cur.filter((x) => x !== assetId) : [...cur, assetId]
     renderDetail()
-    return
-  }
-  if (armId) {
-    const a = state.assets?.[armId]
-    if (!a) return
-    if (!mayExtract()) { notice(denyReason('extract', roleOf(me.id))); return }
-    if (!confirm(`「${a.name || ASSET_TYPES[a.type] || '자산'}」을 지웁니다. 되돌릴 수 없습니다.\n이것을 참조로 고른 컷은 다음 생성부터 받지 못합니다.`)) return
-    emit({ kind: 'asset.remove', assetId: armId })
-    notice('자산을 지웠습니다', 'ok')
     return
   }
   if (doWhat === 'extract') { extractAssets(p); return }
