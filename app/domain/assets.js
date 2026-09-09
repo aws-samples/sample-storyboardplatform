@@ -18,6 +18,8 @@
  * 서랍이 빈 칸을 「덜 된 것」이 아니라 「아직 없는 것」으로 그리는 이유입니다.
  */
 
+import { summarizeBackground } from './story-background.js'
+
 /**
  * 에셋 종류. key 가 저장소의 sk 접미(ASSET#<key>)이자 화면들이 쓰는 이름입니다.
  *
@@ -53,6 +55,20 @@ export const ASSET_KINDS = [
     label: '씬',
     step: 'keyvisual',
     make: '씬 나누기',
+    text: false,
+  },
+  /*
+   * 스토리의 공통 배경입니다. 씬 뒤, 키 비주얼 앞입니다.
+   *
+   * 만들어지는 순서가 그렇습니다. 씬을 나눈 뒤에 그 씬들을 보고 물음을 만들고, 그 답이
+   * 키 비주얼 프롬프트마다 들어갑니다(domain/story-background.js). 다만 앞의 것이 없어도
+   * 됩니다 — 배경만 미리 정해 두고 대본을 나중에 넣어도 됩니다.
+   */
+  {
+    key: 'background',
+    label: '공통 배경',
+    step: 'keyvisual',
+    make: '배경 정하기',
     text: false,
   },
   {
@@ -140,6 +156,8 @@ const SUM = {
     const withPrompt = list.filter((s) => s?.prompt).length
     return `${list.length}개 · 프롬프트 ${withPrompt}/${list.length}`
   },
+  // 규칙이 story-background.js 에 있습니다. 「쓸 만한 배경인가」의 기준이 그쪽 하나입니다
+  background: (b) => summarizeBackground(b),
   keyvisual: (b) => {
     const list = Array.isArray(b?.shots) ? b.shots : []
     return list.length ? `${list.length}장` : null
