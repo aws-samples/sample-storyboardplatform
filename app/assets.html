@@ -53,6 +53,7 @@ header{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.92);backdro
 .cat:hover{background:var(--fill);color:var(--ink)}
 .cat[aria-current=true]{background:var(--blue-w);color:var(--blue-ink);font-weight:600}
 .cat__n{margin-left:auto;font:500 11px var(--m);color:var(--ink-3)}
+.cat__pend{margin-left:6px;font:600 9.5px/1.4 var(--m);color:var(--blue);background:var(--blue-w);border:1px solid var(--blue-l);border-radius:8px;padding:0 5px}
 .cat[aria-current=true] .cat__n{color:var(--blue)}
 .cats__sep{height:1px;background:var(--line-2);margin:10px 4px}
 .cats .hint{font-size:11.5px;color:var(--ink-3);line-height:1.5;padding:4px 8px}
@@ -71,6 +72,11 @@ header{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.92);backdro
 .mini{font-size:11.5px;padding:4px 8px;border:1px solid var(--line);border-radius:4px;color:var(--ink-2);background:#fff}
 .mini:hover:not(:disabled){background:var(--fill);color:var(--ink)}
 .mini--no{color:var(--no)}
+/* 후보 판의 두 단추. 저장이 주 동작이라 파랑, 버리기는 조용한 회색 — 붉은 글자가 먼저 눈에 오면 안 됩니다 */
+.mini--go{color:var(--blue);border-color:var(--blue-l);background:var(--blue-w);font-weight:600}
+.mini--go:hover:not(:disabled){background:#e0e7ff}
+.mini--quiet{color:var(--ink-3)}
+.mini--quiet:hover:not(:disabled){color:var(--no);border-color:var(--sb-no-line)}
 .note{font-size:12px;color:var(--ink-3);line-height:1.55}
 .note--no{color:var(--no)}
 .note--busy{color:var(--blue)}
@@ -81,6 +87,15 @@ header{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.92);backdro
 .make textarea:focus{border-color:var(--blue);outline:none}
 .make .note{grid-column:1/-1}
 
+/* 후보 판. 옅은 파랑 바탕에 점선 — 「아직 자산이 아니다」가 보입니다 */
+.tray{margin-bottom:14px;padding:10px;border:1px dashed var(--blue-l);border-radius:8px;background:var(--blue-w)}
+.tray__h{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12.5px;font-weight:650}
+.tray__h .note{font-weight:400}
+.tile__acts{display:flex;gap:4px;padding:0 6px 6px}
+.tile__acts .mini{flex:1;text-align:center}
+.nrow{display:flex;gap:6px;align-items:center}
+.nsel{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-2)}
+.nsel select{padding:6px 8px;border:1px solid var(--line);border-radius:var(--r);background:#fff;font-size:12.5px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
 .grid--wide{grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
 .tile{position:relative;display:grid;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fff;text-align:left;padding:0;width:100%}

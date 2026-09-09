@@ -7,9 +7,17 @@
  *   - 스토리보드에서 감독이 컷을 승인하면 그 그림에서 뽑힌 인물·배경·소품(board.js 의 extractAssets)
  *   - 여기서 직접 올린 그림(스케치·레퍼런스 사진)
  *   - 여기서 지시문으로 만든 그림
- * 그리고 그 자산들을 여러 장 골라 실사 스틸 한 장을 만듭니다. 콘티는 연필이지만 스틸은 VFX·영상
- * 기획이 룩을 잡는 한 장이라 사진 룩(server.py 의 STYLE_REAL)으로 갑니다. 참조 자산이 연필 그림이어도
+ * 그리고 그 자산들을 여러 장 골라 실사 스틸을 만듭니다. 콘티는 연필이지만 스틸은 VFX·영상 기획이
+ * 룩을 잡는 한 장이라 사진 룩(server.py 의 STYLE_REAL)으로 갑니다. 참조 자산이 연필 그림이어도
  * 얼굴·장소·물건만 물려받고 질감은 버립니다. 크기는 1920×1088 이고 뷰어에서 원본 크기로 봅니다.
+ *
+ * ══ 후보 → 자산
+ *
+ * 지시문으로 만드는 것(자산·스틸)은 바로 자산이 되지 않습니다. 정한 수(1·2·4)만큼 후보(S.drafts)로
+ * 나오고, 사람이 그중 저장할 것만 고릅니다. 후보는 이 브라우저에만 있고(그림 파일은 S3 에 이미
+ * 있습니다) 저장을 누른 것만 op(asset.add)가 되어 팀에 보입니다. 마음에 안 드는 넷 중 셋을 지우는
+ * 일이 없어지고, 스틸은 여러 버전을 나란히 놓고 고릅니다. 지시문으로 만든 자산은 스틸과 같은
+ * 사진 룩입니다 — 실사 스틸의 참조가 되는 것이라서입니다.
  *
  * ══ 자산은 어디에 있나
  *
@@ -47,15 +55,17 @@ const uid = () => now().toString(36) + Math.random().toString(36).slice(2, 8)
 const CATS = ['char', 'bg', 'prop', 'still']
 /* 종류마다 「AI로 만들기」에 붙는 말. 서버가 한국어를 영어로 옮깁니다(server.py 의 en) */
 const MAKE_HINT = {
-  char: '인물 한 명, 전신, 정면, 단색 배경, 다른 사람 없음',
+  char: '인물 전신, 정면, 단색 배경, 배경 없음',
   bg: '사람 없는 빈 장소, 넓은 설정 샷',
   prop: '물건 하나만, 가운데 크게, 단색 배경, 손이나 사람 없음',
 }
 const MAKE_PLACEHOLDER = {
-  char: '예: 30대 여성 바리스타, 검은 앞치마, 짧은 머리',
-  bg: '예: 새벽의 한강 다리, 안개, 가로등',
-  prop: '예: 유리병에 든 콜드브루, 라벨에 로고',
+  char: '예: 화목한 가족 넷, 여름 옷차림',
+  bg: '예: 넓고 맑은 바다, 한여름 정오',
+  prop: '예: 노란 수영모자',
 }
+/* 한 번에 만드는 수. 후보로 나오고 고른 것만 자산이 됩니다. 서버는 장마다 따로 부르므로 수 자체에 제한은 없습니다 */
+const COUNTS = [1, 2, 3, 4, 6]
 
 const S = {
   me: null,
@@ -65,13 +75,16 @@ const S = {
   cat: 'all',
   sel: [],            // 고른 자산 id. 순서가 참조 순서입니다
   prompt: '',
-  make: null,         // { type, prompt } — 「AI로 만들기」 칸이 열려 있으면
+  make: null,         // { type, prompt, n } — 「AI로 만들기」 칸이 열려 있으면
+  drafts: {},         // 후보. id → { id, type, name, src, prompt, refs?, gen, ts }. 저장한 것만 자산이 됩니다
+  stillN: 2,          // 스틸 버전 수
+  stop: false,        // 「그만」— 다음 장부터 만들지 않습니다
   busy: null,         // 진행 한 줄
+  busyKind: null,     // 'make' | 'still' — 어느 칸이 돌고 있는지. 다른 칸은 「그만」을 내지 않습니다
   err: '',
   view: null,         // 뷰어가 보여주는 자산 id
   zoom: 'fit',
   gpu: { state: 'unknown', text: '확인 중', models: [], resident: null },
-  lastStill: null,
 }
 
 /* ══ 권한 ═══════════════════════════════════════════════════════════════════ */
@@ -91,6 +104,12 @@ const picked = () => S.sel.map((id) => S.assets[id]).filter((a) => a && src(a) &
 const typeName = (t) => ASSET_TYPES[t] || t || ''
 const whence = (a) => (a.fromPanelId ? '컷에서 뽑음' : a.source === 'upload' ? '올림' : a.type === 'still' ? '실사 스틸' : 'AI')
 const charName = (id) => S.chars[id]?.name || ''
+const drafts = () => Object.values(S.drafts).sort((a, b) => (b.ts || 0) - (a.ts || 0))
+// 후보 판은 만든 순서(1 → N)로. 최신순이면 왼쪽이 마지막 버전이라 번호와 자리가 어긋납니다
+const draftsIn = () => drafts().filter((d) => (S.cat === 'all' ? d.type !== 'still' : d.type === S.cat)).sort((a, b) => (a.ts || 0) - (b.ts || 0))
+/** 뷰어·타일이 보는 그림 하나. 자산이거나 후보입니다 */
+const item = (id) => S.assets[id] || S.drafts[id] || null
+const isDraft = (a) => !!a && !S.assets[a.id] && !!S.drafts[a.id]
 
 function apply(raw) {
   const op = scrub(raw)
@@ -215,6 +234,7 @@ async function askPatient(body, tick) {
     tick(`${err.message} 준비되면 이어서 만듭니다.`)
     for (let i = 0; i < 36; i++) {
       await new Promise((r) => setTimeout(r, 5000))
+      if (S.stop) throw new Error(STOPPED)
       const j = await health().catch(() => null)
       if (!j || j.video?.busy) break
       if (j.error && (!j.errorModel || j.errorModel === body.model)) throw new Error(j.error)
@@ -235,72 +255,128 @@ async function asInit(s) {
 
 /* ══ 만들기 ═════════════════════════════════════════════════════════════════ */
 
-/** 고른 자산으로 실사 스틸 한 장 */
+/** 고른 자산으로 실사 스틸을 S.stillN 장. 후보로 나오고 고른 것만 저장합니다 */
 async function makeStill() {
   const refs = picked()
   if (!refs.length) { S.err = '먼저 인물·배경·소품에서 참조할 자산을 고르세요.'; paintStill(); return }
   if (!mayGen()) { S.err = denyReason('gen', role()); paintStill(); return }
   if (S.busy) return
-  const tick = (t) => { S.busy = t; S.err = ''; paintStill() }
+  const n = COUNTS.includes(S.stillN) ? S.stillN : 1
+  const tick = (t) => { S.busy = t; S.err = ''; paint() }
+  S.stop = false
+  S.busyKind = 'still'
   tick('참조 그림을 읽습니다…')
   const names = refs.map((a) => `${typeName(a.type)} ${a.name}`).join(', ')
   const prompt = S.prompt.trim() || `${names}. 영화 스틸 한 장`
-  const t0 = performance.now()
+  let made = 0
   try {
     const imgs = await Promise.all(refs.map((a) => asInit(src(a))))
-    tick('실사 스틸을 그립니다 · 약 20초…')
-    const r = await askPatient({
-      prompt, kind: 'still', model: refModel(), refs: imgs, refKind: 'assets', style: 'real', strength: 0.95,
-    }, tick)
-    const id = uid()
-    emit({
-      kind: 'asset.add',
-      asset: {
-        id, type: 'still', name: (S.prompt.trim() || names).slice(0, 40), src: r.url, source: 'ai',
-        refs: refs.map((a) => a.id), prompt, author: S.me?.id || 'local', ts: now(),
+    for (let i = 0; i < n; i += 1) {
+      if (S.stop) break
+      const t0 = performance.now()
+      tick(`실사 스틸 ${i + 1}/${n} 그리는 중 · 약 20초…`)
+      const r = await askPatient({
+        prompt, kind: 'still', model: refModel(), refs: imgs, refKind: 'assets', style: 'real', strength: 0.95,
+      }, tick)
+      const id = uid()
+      S.drafts[id] = {
+        id, type: 'still', name: (S.prompt.trim() || names).slice(0, 40), v: i + 1, of: n, src: r.url,
+        source: 'ai', refs: refs.map((a) => a.id), prompt, author: S.me?.id || 'local', ts: now(),
         gen: { model: r.model, seed: r.seed ?? null, ms: r.ms ?? Math.round(performance.now() - t0), size: r.size || null },
-      },
-    })
-    S.lastStill = id
+      }
+      made += 1
+      // 스틸 후보는 실사 스틸 칸에 섭니다. 첫 장이 나오면 그쪽으로 옮겨 나란히 보게 합니다(한 번만)
+      if (i === 0) S.cat = 'still'
+      paint()
+    }
     S.busy = null
-    S.view = id; S.zoom = 'fit'
-    say(`실사 스틸이 나왔습니다 · ${Math.round((r.ms || 0) / 1000)}초`)
+    say(`실사 스틸 후보 ${made}장이 나왔습니다. 저장할 것을 고르세요`)
     paint()
   } catch (err) {
     S.busy = null
-    S.err = err.message
-    paintStill()
+    // 「그만」은 오류가 아닙니다. 그때까지 나온 후보 수만 말합니다
+    if (err.message !== STOPPED) S.err = err.message
+    else say(`그만두었습니다. 후보 ${made}장이 남았습니다`)
+    paint()
   }
 }
 
-/** 지시문으로 자산 한 장. 종류의 힌트가 앞에 붙습니다 */
+/** 지시문으로 자산 후보를 S.make.n 장. 종류의 힌트가 뒤에 붙고 사진 룩입니다 */
 async function makeAsset() {
   const m = S.make
   if (!m?.prompt.trim()) return
   if (!mayGen()) { S.err = denyReason('gen', role()); paint(); return }
   if (S.busy) return
+  const n = COUNTS.includes(m.n) ? m.n : 1
   const tick = (t) => { S.busy = t; S.err = ''; paint() }
-  tick(`${typeName(m.type)}을 그립니다…`)
+  S.stop = false
+  S.busyKind = 'make'
+  let made = 0
   try {
-    const r = await askPatient({
-      prompt: `${m.prompt.trim()}, ${MAKE_HINT[m.type]}`, kind: m.type === 'bg' ? 'cut' : 'asset', model: null,
-    }, tick)
-    emit({
-      kind: 'asset.add',
-      asset: {
-        id: uid(), type: m.type, name: m.prompt.trim().slice(0, 40), src: r.url, source: 'ai', prompt: m.prompt.trim(),
-        author: S.me?.id || 'local', ts: now(), gen: { model: r.model, seed: r.seed ?? null, ms: r.ms ?? null },
-      },
-    })
+    for (let i = 0; i < n; i += 1) {
+      if (S.stop) break
+      tick(`${typeName(m.type)} ${i + 1}/${n} 그리는 중…`)
+      const r = await askPatient({
+        prompt: `${m.prompt.trim()}, ${MAKE_HINT[m.type]}`, kind: m.type === 'bg' ? 'cut' : 'asset', model: null, style: 'real',
+      }, tick)
+      const id = uid()
+      S.drafts[id] = {
+        id, type: m.type, name: m.prompt.trim().slice(0, 40), v: i + 1, of: n, src: r.url, source: 'ai',
+        prompt: m.prompt.trim(), author: S.me?.id || 'local', ts: now(), gen: { model: r.model, seed: r.seed ?? null, ms: r.ms ?? null },
+      }
+      made += 1
+      paint()
+    }
     S.busy = null
-    S.make = null
-    say(`${typeName(m.type)} 자산을 만들었습니다`)
+    say(`${typeName(m.type)} 후보 ${made}장이 나왔습니다. 저장할 것을 고르세요`)
     paint()
   } catch (err) {
     S.busy = null
-    S.err = err.message
+    if (err.message !== STOPPED) S.err = err.message
+    else say(`그만두었습니다. 후보 ${made}장이 남았습니다`)
     paint()
   }
+}
+
+/** 후보 하나를 자산으로. op 가 되어 팀에 보입니다 */
+function keep(id) {
+  const d = S.drafts[id]
+  if (!d) return
+  if (!mayEdit()) { S.err = denyReason('extract', role()); paint(); return }
+  delete S.drafts[id]
+  const { v, of, ...rest } = d   // 버전 번호는 후보 판의 것입니다. 고른 뒤에는 뜻이 없어 자산에 남기지 않습니다
+  // 같은 id 로 자산이 되므로 열려 있던 뷰어는 그대로 그 그림을 봅니다
+  emit({ kind: 'asset.add', asset: rest })
+  say(`${typeName(d.type)} 「${d.name}」을 자산으로 저장했습니다`)
+}
+
+async function dropAll() {
+  const dr = draftsIn()
+  if (!dr.length) return
+  // 후보 넷은 GPU 80초분입니다. 한 장은 바로, 여럿은 한 번 묻습니다
+  if (dr.length > 1) {
+    const ok = await confirmAsk({
+      title: `후보 ${dr.length}장을 버립니다`,
+      body: '버린 후보는 되돌릴 수 없습니다. 저장하지 않은 그림은 자산이 되지 않습니다.',
+      list: dr.map((d) => `${typeName(d.type)} · ${d.name}${d.of > 1 ? ` (버전 ${d.v}/${d.of})` : ''}`),
+      yes: '버립니다',
+      danger: true,
+    })
+    if (!ok) return
+  }
+  for (const x of dr) drop(x.id)
+  say(`후보 ${dr.length}장을 버렸습니다`)
+}
+
+function drop(id) {
+  const d = S.drafts[id]
+  if (!d) return
+  // 뷰어에서 버리면 같은 종류의 다음 후보로 넘어갑니다. 넷을 비교하다 하나를 버릴 때마다 판으로 튕기지 않게
+  const next = S.view === id ? drafts().filter((x) => x.type === d.type && x.id !== id)[0] : null
+  delete S.drafts[id]
+  S.sel = S.sel.filter((x) => x !== id)
+  if (S.view === id) S.view = next?.id || null
+  paint()
 }
 
 /** 파일을 올립니다. 브라우저에서 줄여(≤300KB) op 에 그대로 담습니다 */
@@ -357,6 +433,7 @@ function rename(id, name) {
   emit({ kind: 'asset.patch', assetId: id, fields: { name: v } })
 }
 
+const STOPPED = '그만두었습니다'
 const MAX_REFS = 6   // server.py 의 MAX_REFS. 넘는 장은 서버가 말없이 버리므로 여기서 막습니다
 
 function toggle(id) {
@@ -378,8 +455,9 @@ function paint() { paintCats(); paintGrid(); paintStill(); paintViewer() }
 function paintCats() {
   const all = list()
   const count = (t) => all.filter((a) => t === 'all' ? a.type !== 'still' : a.type === t).length
+  const pend = (t) => drafts().filter((d) => (t === 'all' ? d.type !== 'still' : d.type === t)).length
   const row = (id, label) => `<button class="cat" data-cat="${id}" aria-current="${S.cat === id}">
-    ${esc(label)}<span class="cat__n">${count(id) || ''}</span></button>`
+    ${esc(label)}${pend(id) ? `<span class="cat__pend" title="저장을 기다리는 후보">후보 ${pend(id)}</span>` : ''}<span class="cat__n">${count(id) || ''}</span></button>`
   setHtml($('cats'), `
     <div class="cats__h">자산</div>
     ${row('all', '전체')}
@@ -409,11 +487,27 @@ function paintGrid() {
     <div class="make">
       <textarea id="makeText" placeholder="${esc(MAKE_PLACEHOLDER[S.cat] || '')}" ${S.busy ? 'disabled' : ''}>${esc(S.make.prompt)}</textarea>
       <div style="display:grid;gap:6px">
-        <button class="btn btn--go" id="makeGo" ${S.busy || !S.make.prompt.trim() ? 'disabled' : ''}>${S.busy ? '그리는 중…' : '만들기'}</button>
-        <button class="btn" id="makeClose" ${S.busy ? 'disabled' : ''}>닫기</button>
+        <label class="nsel"><span class="mono">장수</span><select id="makeN" ${S.busy ? 'disabled' : ''}>${COUNTS.map((c) => `<option value="${c}"${S.make.n === c ? ' selected' : ''}>${c}</option>`).join('')}</select></label>
+        <button class="btn btn--go" id="makeGo" ${S.busy || !S.make.prompt.trim() ? 'disabled' : ''}>${S.busy ? (S.busyKind === 'make' ? '만드는 중…' : '다른 작업 중…') : `후보 ${S.make.n}장 만들기`}</button>
+        ${S.busy && S.busyKind === 'make' ? `<button class="btn" id="makeStop" ${S.stop ? 'disabled' : ''}>${S.stop ? '멈추는 중' : '그만'}</button>`
+    : `<button class="btn" id="makeClose" ${S.busy ? 'disabled' : ''}>닫기</button>`}
       </div>
-      <p class="note">지시문 뒤에 「${esc(MAKE_HINT[S.cat])}」이 붙어 ${esc(typeName(S.cat))} 한 장으로 나옵니다. 나온 그림은 자산으로 남습니다.</p>
+      <p class="note ${S.busy && S.busyKind === 'make' ? 'note--busy' : ''}">${S.busy && S.busyKind === 'make' ? `${esc(S.busy)}${S.stop ? ' — 지금 장은 끝나면 후보로 남고, 다음 장부터 만들지 않습니다.' : ''}`
+    : `지시문 뒤에 「${esc(MAKE_HINT[S.cat])}」이 붙어 사진 룩의 ${esc(typeName(S.cat))} 후보로 나옵니다. 저장한 것만 자산이 됩니다.`}</p>
     </div>` : ''
+  /*
+   * 후보 판. 지시문으로 만든 것이 여기 서고, 저장한 것만 아래 격자(자산)로 내려갑니다.
+   * 스틸 후보는 실사 스틸 칸에 섭니다 — 여러 버전을 나란히 놓고 고르는 자리입니다.
+   */
+  const dr = draftsIn()
+  const tray = dr.length ? `
+    <section class="tray" aria-label="후보">
+      <div class="tray__h">후보 ${dr.length}장 <span class="note">저장한 것만 자산이 됩니다 · 이 창에만 있어 새로고침하면 사라집니다</span>
+        <span class="spacer"></span>
+        <button class="mini mini--quiet" data-dropall="1">전부 버리기</button>
+        <button class="mini mini--go" data-keepall="1" ${mayEdit() ? '' : 'disabled'}>전부 저장</button></div>
+      <div class="grid ${S.cat === 'still' || S.cat === 'bg' ? 'grid--wide' : ''}">${dr.map(draftTile).join('')}</div>
+    </section>` : ''
   setHtml($('main'), `
     <div class="tools">
       <h1>${esc(catLabel)}<span class="count">${items.length}</span></h1>
@@ -421,21 +515,25 @@ function paintGrid() {
       ${canMake ? `
         ${editNo || genNo ? `<span class="note note--no">${esc(editNo || genNo)}</span>` : ''}
         <button class="btn" id="uploadBtn" ${editNo ? `disabled title="${esc(editNo)}"` : ''}>올리기</button>
-        <button class="btn" id="makeBtn" ${genNo ? `disabled title="${esc(genNo)}"` : ''} aria-expanded="${!!(S.make && S.make.type === S.cat)}">AI로 만들기</button>`
+        <button class="btn" id="makeBtn" ${genNo ? `disabled title="${esc(genNo)}"` : S.busy ? 'disabled' : ''} aria-expanded="${!!(S.make && S.make.type === S.cat)}">AI로 만들기</button>`
     : S.cat === 'all' ? '<span class="note">올리거나 만들려면 왼쪽에서 종류를 고르세요.</span>'
       : '<span class="note">스틸은 오른쪽에서 자산을 골라 만듭니다.</span>'}
     </div>
     ${make}
+    ${tray}
     ${S.err && !S.view ? `<p class="note note--no" style="margin-bottom:10px">${esc(S.err)}</p>` : ''}
     ${items.length ? `<div class="grid ${S.cat === 'still' || S.cat === 'bg' ? 'grid--wide' : ''}">${items.map(tile).join('')}</div>`
+    : dr.length ? `<p class="note">저장한 ${esc(S.cat === 'still' ? '스틸' : catLabel)}은 여기 아래에 모입니다.</p>`
     : `<div class="empty">${S.cat === 'still'
-      ? '아직 스틸이 없습니다.<br>인물·배경·소품에서 자산을 고르고 오른쪽 <b>실사 스틸 만들기</b>를 누르세요.'
+      ? '아직 스틸이 없습니다.<br>인물·배경·소품에서 자산을 고르고 오른쪽 <b>실사 스틸 N버전</b>을 누르세요.'
       : `아직 ${esc(catLabel === '전체' ? '자산' : catLabel)}이 없습니다.<br>스토리보드에서 컷을 <b>승인</b>하면 그 그림에서 뽑혀 옵니다.${canMake ? ' 위의 <b>올리기</b>·<b>AI로 만들기</b>로도 넣습니다.' : ''}`}</div>`}`)
   $('uploadBtn')?.addEventListener('click', () => { const f = $('file'); f.value = ''; f.click() })
-  $('makeBtn')?.addEventListener('click', () => { S.make = S.make?.type === S.cat ? null : { type: S.cat, prompt: '' }; paintGrid(); $('makeText')?.focus() })
+  $('makeBtn')?.addEventListener('click', () => { S.make = S.make?.type === S.cat ? null : { type: S.cat, prompt: '', n: 2 }; paintGrid(); $('makeText')?.focus() })
   $('makeClose')?.addEventListener('click', () => { S.make = null; paintGrid() })
   $('makeGo')?.addEventListener('click', makeAsset)
-  $('makeText')?.addEventListener('input', (e) => { S.make.prompt = e.target.value; $('makeGo').disabled = !e.target.value.trim() })
+  $('makeN')?.addEventListener('change', (e) => { S.make.n = Number(e.target.value); paintGrid() })
+  $('makeStop')?.addEventListener('click', () => { S.stop = true; paint() })
+  $('makeText')?.addEventListener('input', (e) => { S.make.prompt = e.target.value; const g = $('makeGo'); if (g) g.disabled = !e.target.value.trim() })
   back()
 }
 
@@ -454,6 +552,20 @@ function tile(a) {
   </div>`
 }
 
+/** 후보 타일. 저장·버리기가 붙고, 고르기(참조)는 없습니다 — 아직 자산이 아닙니다 */
+function draftTile(d) {
+  return `<div class="tile tile--draft" data-type="${esc(d.type)}" data-draft="${d.id}" role="group">
+    <img class="tile__im" src="${src(d)}" alt="" loading="lazy">
+    <button class="tile__zoom" data-zoom="${d.id}" type="button">크게</button>
+    <div class="tile__cap"><span class="tile__name">${esc(d.name || typeName(d.type))}</span>
+      <span class="tile__meta">${esc([d.of > 1 ? `버전 ${d.v}/${d.of}` : '후보', d.type === 'still' ? `참조 ${(d.refs || []).length}장` : ''].filter(Boolean).join(' · '))}</span></div>
+    <div class="tile__acts">
+      <button class="mini mini--go" data-keep="${d.id}" type="button" ${mayEdit() ? '' : 'disabled'}>저장</button>
+      <button class="mini mini--quiet" data-drop="${d.id}" type="button">버리기</button>
+    </div>
+  </div>`
+}
+
 function paintStill() {
   const back = keepTyping(['stillText'])
   const refs = picked()
@@ -464,7 +576,7 @@ function paintStill() {
   setHtml($('still'), `
     <div>
       <div class="still__h">실사 스틸</div>
-      <p class="still__s">인물·배경·소품에서 여러 장을 골라 사진 룩의 스틸 한 장을 만듭니다. 고른 자산의 얼굴·장소·물건이 그대로 들어갑니다.</p>
+      <p class="still__s">인물·배경·소품에서 여러 장을 골라 사진 룩의 스틸을 정한 버전 수만큼 만듭니다. 고른 자산의 얼굴·장소·물건이 그대로 들어가고, 나온 버전은 「실사 스틸」 칸의 후보 판에 섭니다.</p>
     </div>
     <div class="picked">${refs.length ? refs.map((a) => `
       <div class="pick" data-type="${esc(a.type)}"><img src="${src(a)}" alt=""><b>${esc(typeName(a.type))} · ${esc(a.name || '')}</b>
@@ -476,9 +588,14 @@ function paintStill() {
       <dt>크기</dt><dd>1920 × 1088 · 실사</dd>
       <dt>서버</dt><dd><span class="led led--${led}"></span>${esc(S.gpu.text)}</dd>
     </dl>
-    <button class="btn btn--go btn--wide" id="stillGo" ${S.busy || !refs.length || genNo ? `disabled ${genNo ? `title="${esc(genNo)}"` : ''}` : ''}>
-      ${S.busy ? '만드는 중…' : `실사 스틸 만들기${refs.length ? ` · ${refs.length}장 참조` : ''}`}</button>
-    ${S.busy ? `<p class="note note--busy">${esc(S.busy)}</p>` : ''}
+    <div class="nrow">
+      <label class="nsel"><span class="mono">버전</span><select id="stillN" ${S.busy ? 'disabled' : ''}>${COUNTS.map((c) => `<option value="${c}"${S.stillN === c ? ' selected' : ''}>${c}</option>`).join('')}</select></label>
+      <button class="btn btn--go" id="stillGo" style="flex:1" ${S.busy || !refs.length || genNo ? `disabled ${genNo ? `title="${esc(genNo)}"` : ''}` : ''}>
+        ${S.busy ? (S.busyKind === 'still' ? '만드는 중…' : '다른 작업 중…') : `실사 스틸 ${S.stillN}버전${refs.length ? ` · ${refs.length}장 참조` : ''}`}</button>
+      ${S.busy && S.busyKind === 'still' ? `<button class="btn" id="stillStop" ${S.stop ? 'disabled' : ''}>${S.stop ? '멈추는 중' : '그만'}</button>` : ''}
+    </div>
+    ${S.busy && S.busyKind === 'still' ? `<p class="note note--busy">${esc(S.busy)}${S.stop ? ' — 지금 장은 끝나면 후보로 남고, 다음 장부터 만들지 않습니다.' : ''}</p>` : ''}
+    ${drafts().some((d) => d.type === 'still') ? `<p class="note">스틸 후보 ${drafts().filter((d) => d.type === 'still').length}장이 「실사 스틸」 칸에 있습니다. 나란히 보고 저장할 것을 고르세요.</p>` : ''}
     ${S.err && !S.make ? `<p class="note note--no">${esc(S.err)}</p>` : ''}
     ${genNo && canGen() ? `<p class="note note--no">${esc(genNo)}</p>` : ''}
     ${stills.length ? `<div class="recent"><div class="recent__h">최근 스틸</div>
@@ -489,6 +606,8 @@ function paintStill() {
           <span class="tile__meta">${esc([Array.isArray(a.gen?.size) ? a.gen.size.join('×') : '', `참조 ${(a.refs || []).length}장`].filter(Boolean).join(' · '))}</span></div></div>`).join('')}
       </div></div>` : ''}`)
   $('stillGo')?.addEventListener('click', makeStill)
+  $('stillN')?.addEventListener('change', (e) => { S.stillN = Number(e.target.value); paintStill() })
+  $('stillStop')?.addEventListener('click', () => { S.stop = true; paint() })
   $('stillText')?.addEventListener('input', (e) => { S.prompt = e.target.value })
   back()
 }
@@ -496,23 +615,27 @@ function paintStill() {
 /* ══ 뷰어 ═══════════════════════════════════════════════════════════════════ */
 function paintViewer() {
   const host = $('viewer')
-  const a = S.assets[S.view]
+  const a = item(S.view)
   document.body.classList.toggle('viewing', !!a)
   if (!a || !src(a)) {
     const was = !host.hidden
-    host.hidden = true; setHtml(host, ''); S.view = null
+    host.hidden = true; setHtml(host, ''); S.view = null; delete host.dataset.key
     if (was && viewFrom?.isConnected) viewFrom.focus()
     return
   }
   const opening = host.hidden
   if (opening) viewFrom = document.activeElement
+  // 같은 그림을 같은 상태로 다시 그리지 않습니다. 후보가 한 장씩 올 때마다 이름 칸과 스크롤이 튀었습니다
+  const key = `${a.id}|${src(a)}|${isDraft(a)}|${S.sel.includes(a.id)}|${a.name}|${mayEdit()}`
+  if (!opening && host.dataset.key === key) return
+  host.dataset.key = key
   host.hidden = false
   const refs = (a.refs || []).map((id) => S.assets[id]).filter((x) => x && src(x))
   const on = S.sel.includes(a.id)
   const size = Array.isArray(a.gen?.size) ? a.gen.size.join(' × ') : ''
   setHtml(host, `
     <div class="vw__bar">
-      <span class="vw__type">${esc(typeName(a.type))}</span>
+      <span class="vw__type">${esc(typeName(a.type))}${isDraft(a) ? ' · 후보' : ''}</span>
       <input class="vw__name" id="vwName" value="${esc(a.name || '')}" ${mayEdit() ? '' : 'readonly'} aria-label="자산 이름" maxlength="40">
       <span class="vw__meta" id="vwMeta">${esc([whence(a), a.gen?.model, size].filter(Boolean).join(' · '))}</span>
       <span class="spacer"></span>
@@ -521,9 +644,10 @@ function paintViewer() {
         <button class="vw__btn" data-z="1" aria-pressed="${S.zoom === '1'}">1:1</button>
         <button class="vw__btn" data-z="2" aria-pressed="${S.zoom === '2'}">2×</button>
       </span>
-      ${REF_TYPES.includes(a.type) ? `<button class="vw__btn" id="vwPick" aria-pressed="${on}">${on ? '참조에 들어 있음' : '참조로 고르기'}</button>` : ''}
+      ${isDraft(a) ? `<button class="vw__btn" id="vwKeep" ${mayEdit() ? '' : 'disabled'}>자산으로 저장</button><button class="vw__btn vw__btn--no" id="vwDrop">버리기</button>`
+    : REF_TYPES.includes(a.type) ? `<button class="vw__btn" id="vwPick" aria-pressed="${on}">${on ? '참조에 들어 있음' : '참조로 고르기'}</button>` : ''}
       <a class="vw__btn" href="${src(a)}" download="${esc((a.name || typeName(a.type)).replace(/[\\/:*?"<>|]/g, '_'))}.${src(a).startsWith('data:image/jpeg') ? 'jpg' : 'png'}">다운로드</a>
-      ${mayEdit() ? '<button class="vw__btn vw__btn--no" id="vwRemove">지우기</button>' : ''}
+      ${mayEdit() && !isDraft(a) ? '<button class="vw__btn vw__btn--no" id="vwRemove">지우기</button>' : ''}
       <button class="vw__btn" id="vwClose" aria-label="닫기">닫기 ⎋</button>
     </div>
     <div class="vw__stage" id="vwStage" data-zoom="${S.zoom}">
@@ -547,7 +671,9 @@ function paintViewer() {
   $('vwClose').onclick = () => { S.view = null; paintViewer() }
   $('vwPick')?.addEventListener('click', () => toggle(a.id))
   $('vwRemove')?.addEventListener('click', () => remove(a.id))
-  $('vwName').addEventListener('change', (e) => rename(a.id, e.target.value))
+  $('vwKeep')?.addEventListener('click', () => { keep(a.id); paintViewer() })
+  $('vwDrop')?.addEventListener('click', () => drop(a.id))
+  $('vwName').addEventListener('change', (e) => (isDraft(a) ? (a.name = e.target.value.trim().slice(0, 40) || a.name, paint()) : rename(a.id, e.target.value)))
   host.querySelectorAll('[data-z]').forEach((b) => { b.onclick = () => setZoom(b.dataset.z) })
   /*
    * 그림을 누르면 맞춤 ↔ 1:1. 휠은 한 단계씩.
@@ -613,8 +739,9 @@ function applyZoom(e = null) {
 }
 
 function step(dir) {
-  const cur = S.assets[S.view]
-  const items = cur?.type === 'still' ? list().filter((a) => a.type === 'still' && src(a)) : shown().filter((a) => a.type !== 'still')
+  const cur = item(S.view)
+  const items = isDraft(cur) ? drafts().filter((d) => d.type === cur.type)
+    : cur?.type === 'still' ? list().filter((a) => a.type === 'still' && src(a)) : shown().filter((a) => a.type !== 'still')
   const pool = items.length ? items : list().filter(src)
   const i = pool.findIndex((a) => a.id === S.view)
   const next = pool[(i + dir + pool.length) % pool.length]
@@ -626,13 +753,18 @@ $('cats').addEventListener('click', (e) => {
   const b = e.target.closest('[data-cat]')
   if (!b) return
   S.cat = b.dataset.cat
-  S.make = null
+  // 만드는 중인 폼은 지우지 않습니다. 돌아오면 지시문·진행·「그만」이 그대로 있어야 합니다
+  if (!(S.busy && S.busyKind === 'make')) S.make = null
   S.err = ''
   paint()
 })
 $('main').addEventListener('click', (e) => {
   const z = e.target.closest('[data-zoom]')
   if (z) { e.stopPropagation(); S.view = z.dataset.zoom; S.zoom = 'fit'; paintViewer(); return }
+  const k = e.target.closest('[data-keep]'); if (k) { keep(k.dataset.keep); return }
+  const d = e.target.closest('[data-drop]'); if (d) { drop(d.dataset.drop); return }
+  if (e.target.closest('[data-keepall]')) { for (const x of draftsIn()) keep(x.id); return }
+  if (e.target.closest('[data-dropall]')) { dropAll(); return }
   const t = e.target.closest('.tile[data-id]')
   if (t && t.getAttribute('role') === 'button') toggle(t.dataset.id)
 })
@@ -644,8 +776,8 @@ $('main').addEventListener('keydown', (e) => {
 })
 // 더블클릭도 크게 보기. 마우스로는 「크게」가 hover 에서만 보여 이 길이 하나 더 있어야 합니다
 $('main').addEventListener('dblclick', (e) => {
-  const t = e.target.closest('.tile[data-id]')
-  if (t) { S.view = t.dataset.id; S.zoom = 'fit'; paintViewer() }
+  const t = e.target.closest('.tile[data-id], .tile[data-draft]')
+  if (t) { S.view = t.dataset.id || t.dataset.draft; S.zoom = 'fit'; paintViewer() }
 })
 $('still').addEventListener('click', (e) => {
   const x = e.target.closest('[data-unpick]')
@@ -654,6 +786,8 @@ $('still').addEventListener('click', (e) => {
   if (z) { S.view = z.dataset.zoom; S.zoom = 'fit'; paintViewer() }
 })
 $('file').addEventListener('change', (e) => { if (e.target.files?.length) upload([...e.target.files]) })
+// 후보는 이 창에만 있습니다. 남아 있는데 떠나려 하면 브라우저가 한 번 묻습니다
+window.addEventListener('beforeunload', (e) => { if (Object.keys(S.drafts).length) { e.preventDefault(); e.returnValue = '' } })
 document.addEventListener('keydown', (e) => {
   if (!S.view) return
   if (e.target.tagName === 'INPUT') return

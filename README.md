@@ -82,12 +82,15 @@ here in three categories, plus the stills made from them. Three ways in: when a 
 cut, the approver's browser asks `klein` to redraw the approved image three ways · each cast member
 alone on a plain background, the location with every person removed, the key prop by itself
 (`server.py`'s `ISOLATE`); hand-drawn or photographed references uploaded from the page; and pictures
-made from a prompt per category. Everything is an `asset.*` op on the same log the board reads.
-Pick several assets and the page makes one **photoreal still** (1920×1088, `style: real`): the
-references go to `klein` as a list, so the same face, room and prop come back in a new composition
-with a film look instead of pencil. A viewer opens stills at 1:1 and 2× with drag-pan. The storyboard
-offers the same assets as *reference assets* when generating a cut; a cut's cast and its scene's
-background are preselected, props are picked by hand.
+made from a prompt per category. Prompted pictures come out as **candidates** (1, 2 or 4 per prompt,
+photoreal) and only the ones you keep become assets · everything kept is an `asset.*` op on the same
+log the board reads. Pick several assets ("a swim cap", "a happy family", "a wide clear sea") and the
+page makes **photoreal stills** in 1, 2 or 4 versions (1920×1088, `style: real`): the references go
+to `klein` as a list, so the same faces, place and prop come back in one new composition with a film
+look instead of pencil. Versions land in the same candidate tray; a viewer opens them at 1:1 and 2×
+with drag-pan so you can compare before keeping. The storyboard offers the kept assets as *reference
+assets* when generating a cut; a cut's cast and its scene's background are preselected, props are
+picked by hand.
 
 Only one of them fits in the card's 48 GB at a time, so **picking a model swaps it**: the server loads
 the new weights in the background and refuses generation until they're resident (~1 min from disk).
