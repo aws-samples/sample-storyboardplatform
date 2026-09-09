@@ -21,7 +21,7 @@ import { NAV_TABS, navHref, boardFromSearch } from '../domain/routes.js'
 import { mountNav } from '../components/nav-tabs.js'
 import { mountBrand } from '../components/brand.js'
 import * as coach from '../components/coachmark.js'
-import { emptyPanel } from '../components/empty-panel.js'
+import { emptyHint } from '../components/empty-panel.js'
 import { guiding } from '../../app-walkthrough/guide.js'
 import { boardExample } from '../../app-walkthrough/steps/board.js'
 import { entries, group, toEntry } from '../services/activity-log.js'
@@ -1873,32 +1873,27 @@ function addMember() {
 /* ══ 온보딩 ════════════════════════════════════════ */
 
 /**
- * 비어 있을 때의 판. 예시를 보거나 직접 시작합니다.
+ * 비어 있을 때의 한 줄. 무엇을 하면 되는지와 예시로 가는 길입니다.
  *
  * 예시 데이터는 서버에 남고 같은 보드를 보는 사람에게도 보입니다. push() 가
- * net.sendOp 을 부르기 때문입니다. 그 사실을 버튼 아래에 적어 둡니다. 되돌리려면
- * 관리 화면의 보드 비우기를 씁니다(board.reset).
+ * net.sendOp 을 부르기 때문입니다. 그 사실만은 아래에 적어 둡니다 — 눌러 보고 나서
+ * 알게 되면 되돌릴 곳을 따로 찾아야 합니다. 되돌리는 곳은 관리 화면의 보드 비우기입니다.
+ *
+ * 예전에는 여기에 「처음 오셨나요?」 판이 떴습니다. 제목과 설명 석 줄과 큰 버튼 둘이 든
+ * 카드가 컷이 들어올 자리를 차지했고, 정작 「무엇을 하면 되는지」는 이 화면이 평소에
+ * 쓰는 빈 칸 안내(아래 board--empty)와 겹쳐 있었습니다. 그래서 그 안내에 예시로 가는
+ * 길만 한 줄로 붙입니다.
+ *
+ * @param {boolean} viewChar - 지금 구도 판을 보고 있는지. 빈 칸의 말이 갈립니다
  */
-function welcomePanel() {
-  return emptyPanel({
-    eyebrow: '스토리보드',
-    head: '처음 오셨나요?',
-    lines: [
-      '컷을 만들고, 그림을 붙이고, 리뷰를 받아 승인까지 가는 화면입니다.',
-      '예시를 누르면 15초 브랜드 필름 한 편이 만들어지는 과정을 한 단계씩 눌러 보게 됩니다.',
-      '직접 시작하면 왼쪽에 시나리오를 넣고 컷으로 분해하는 것부터입니다.',
-    ],
+function welcomePanel(viewChar) {
+  return emptyHint({
+    text: viewChar
+      ? '구도가 없습니다. 아래 버튼으로 추가하시거나,'
+      : '컷이 없습니다. 왼쪽에 시나리오를 넣고 「컷으로 분해」를 누르시거나,',
+    exampleLabel: '예시로 보기',
     onExample: () => runExample(),
-    /*
-     * 직접 시작하는 사람에게는 안내를 열지 않습니다. 이미 쓰기로 정한 사람에게 막을
-     * 덮으면 안내가 아니라 걸림돌입니다. 커서만 시나리오 칸에 둡니다. 거절을 기억하는
-     * 이유는 coach.skip 에 적혀 있습니다.
-     */
-    onOwn: () => {
-      coach.skip(COACH_KEY)
-      byId('scenario')?.focus()
-    },
-    warn: '예시 내용은 이 보드에 실제로 저장되고 같은 보드를 보는 사람에게도 보입니다. '
+    note: '예시 내용은 이 보드에 실제로 저장되고 같은 보드를 보는 사람에게도 보입니다. '
       + '지우려면 관리 화면의 보드 비우기를 씁니다.',
   })
 }
@@ -2010,14 +2005,14 @@ function renderBoard() {
 
   /*
    * 보드가 통째로 비어 있는 것과, 인물 하나에 구도가 없는 것은 다른 상황이다.
-   * 앞쪽만 「처음 오셨나요?」를 띄운다. 뒤쪽은 이미 판이 있고 한 칸이 빈 것이라
-   * 온보딩이 아니라 짧은 안내가 맞다.
+   * 앞쪽에만 예시로 가는 길을 한 줄 붙인다. 뒤쪽은 이미 판이 있고 한 칸이 빈 것이라
+   * 여기서 예시를 권하면 하던 일을 밀어내는 셈이다.
    *
-   * 아래 keep 루프가 board--empty 를 list 가 찼을 때 지우므로 이 판도 같은 클래스를
+   * 아래 keep 루프가 board--empty 를 list 가 찼을 때 지우므로 이 줄도 같은 클래스를
    * 달고 있어야 예시가 들어오는 순간 알아서 사라진다.
    */
-  // 예시 프로젝트로 들어온 것이면 「처음 오셨나요?」 판을 띄우지 않는다. 같은 것을
-  // 두 번 묻는 셈이고, render 가 runExample 보다 먼저 지나 한 프레임 깜빡인다
+  // 예시 프로젝트로 들어온 것이면 이 줄을 띄우지 않는다. 같은 것을 두 번 묻는 셈이고,
+  // render 가 runExample 보다 먼저 지나 한 프레임 깜빡인다
   const blank = !Object.keys(state.panels).length && !Object.keys(state.chars).length && !demoActive()
   if (!list.length) {
     if (blank) {
@@ -2025,7 +2020,7 @@ function renderBoard() {
         setHtml(board, '')
         const slot = document.createElement('div')
         slot.className = 'board--empty onbslot'
-        slot.append(welcomePanel())
+        slot.append(welcomePanel(!!viewChar))
         board.append(slot)
       }
     } else {
@@ -4052,8 +4047,15 @@ byId('print').addEventListener('click', () => window.print())
 // 「권한 관리」는 이 화면에서는 perm.js 의 창을 띄우지 않습니다. 같은 판이 관리 화면의
 // 세 번째 장으로 이미 들어 있고, 이 화면은 판(state.perms)을 직접 들고 있어 로그를
 // 다시 읽을 이유가 없습니다.
+//
+// utilMount: 아키텍처 · 권한 관리 · 홈은 탭 바가 아니라 머리 띠(.slate__tools) 오른쪽에
+// 붙습니다. 탭 바 안에서는 잔글씨로 흐려져 있어 셋 다 눈에 걸리지 않았습니다.
 mountNav({
-  mount: byId('navMount'), active: 'board', handled: ['board'], onPerm: () => openAdmin(true, 'perm'),
+  mount: byId('navMount'),
+  active: 'board',
+  handled: ['board'],
+  onPerm: () => openAdmin(true, 'perm'),
+  utilMount: byId('utilMount'),
 })
 // 머리의 왼쪽. 네 화면이 같은 것을 씁니다. 누르면 홈입니다
 mountBrand('#brandMount')

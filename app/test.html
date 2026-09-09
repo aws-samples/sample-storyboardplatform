@@ -64,7 +64,7 @@
   } = await import(`../app-walkthrough/tour.js?t=${Date.now()}`)
   const { guide, guiding, guideAt, guideMarks, stop: stopGuide,
   } = await import(`../app-walkthrough/guide.js?t=${Date.now()}`)
-  const { emptyPanel } = await import(`./components/empty-panel.js?t=${Date.now()}`)
+  const { emptyHint } = await import(`./components/empty-panel.js?t=${Date.now()}`)
   const coach = await import(`./components/coachmark.js?t=${Date.now()}`)
   const { faceSheet, srcOf } = await import(`./lib/placeholder-art.js?t=${Date.now()}`)
 
@@ -1544,6 +1544,36 @@
     mount.remove()
     return r
   })())
+  /*
+   * 세 단추(아키텍처·권한 관리·홈)를 머리 띠로 올리는 길. 탭 바 오른쪽 끝에서는 얇은
+   * 바에 회색으로 앉아 잘 안 보였다. 옮겼는데 탭 바에도 남으면 같은 단추가 두 곳에
+   * 서므로, 옮긴 쪽에 있고 탭 바에는 없는 것까지 함께 본다.
+   */
+  ok('세 단추를 머리 띠로 올릴 수 있고 그때 탭 바에는 남지 않는다', (() => {
+    const mount = document.createElement('div')
+    const util = document.createElement('div')
+    document.body.append(mount, util)
+    mountNav({ mount, active: 'board', handled: ['board'], utilMount: util })
+    const box = util.querySelector('[data-nav-util]')
+    const moved = ['[data-nav-arch]', '[data-nav-perm]', '[data-nav-home]']
+    const r = !!box && moved.every((s) => box.querySelector(s))
+      && moved.every((s) => !mount.querySelector(s))
+      // 네 탭은 그대로 탭 바에 남는다. 옮기는 것은 오른쪽 묶음뿐이다
+      && mount.querySelectorAll('[data-nav]').length === 4
+    mount.remove()
+    util.remove()
+    return r
+  })())
+  /* 자리를 주지 않으면 예전처럼 탭 바 오른쪽 끝이다. 다른 화면들이 아직 그 모양이다 */
+  ok('자리를 주지 않으면 세 단추가 탭 바에 남는다', (() => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    mountNav({ mount, active: 'board', handled: ['board'] })
+    const r = !!mount.querySelector('.navbar > [data-nav-arch]')
+      && !mount.querySelector('[data-nav-util]')
+    mount.remove()
+    return r
+  })())
 
   /* ══ history.js: op → 사람이 읽는 한 줄 ═══════════════════════════════════
    *
@@ -2402,41 +2432,52 @@
 
   /* ══ onboard.js: 빈 화면 안내와 예시 길잡이 ══════════════════════════════ */
 
-  ok('빈 화면 안내에 큰 줄과 설명이 들어간다', (() => {
-    const p = emptyPanel({ eyebrow: '스토리 디벨롭', lines: ['한 줄', '두 줄'], onExample: () => {} })
-    return p.querySelector('.onb__head').textContent === '처음 오셨나요?'
-      && p.querySelector('.onb__eyebrow').textContent === '스토리 디벨롭'
-      && p.querySelectorAll('.onb__lines li').length === 2
+  ok('빈 화면 안내는 한 줄과 버튼으로 나온다', (() => {
+    const p = emptyHint({ text: '처음이시면 예시로 볼 수 있습니다.', onExample: () => {} })
+    return p.querySelector('.ehint__text').textContent === '처음이시면 예시로 볼 수 있습니다.'
+      && p.querySelector('.ehint__go').textContent === '예시로 보기'
   })())
   /*
-   * 「예시 보기」에 data-coach 가 붙어 있어야 코치마크가 그 버튼을 가리킬 수 있다.
+   * 크게 뜨던 판을 한 줄로 줄인 자리다(components/empty-panel.js 의 머리글). 큰 제목과
+   * 설명 목록이 다시 들어오면 같은 것이 되므로, 그 조각이 없는지를 본다.
+   */
+  ok('큰 제목과 설명 목록을 만들지 않는다', (() => {
+    const p = emptyHint({ text: '한 줄', onExample: () => {} })
+    return !p.querySelector('h1, h2, h3, ul, li') && p.className === 'ehint'
+  })())
+  /*
+   * 「예시로 보기」에 data-coach 가 붙어 있어야 코치마크가 그 버튼을 가리킬 수 있다.
    * 이 표시가 빠지면 앵커가 없어 그 장이 조용히 건너뛰어진다. 눈에 안 보이는 고장이다.
    */
-  ok('「예시 보기」는 코치마크가 가리킬 수 있게 표시를 달고 나온다', (() => {
-    const p = emptyPanel({ onExample: () => {} })
-    return p.querySelector('[data-coach="example"]')?.textContent === '예시 보기'
+  ok('「예시로 보기」는 코치마크가 가리킬 수 있게 표시를 달고 나온다', (() => {
+    const p = emptyHint({ onExample: () => {} })
+    return p.querySelector('[data-coach="example"]')?.textContent === '예시로 보기'
   })())
-  ok('두 버튼의 이름을 화면마다 바꿔 달 수 있다', (() => {
-    const p = emptyPanel({ onExample: () => {}, onOwn: () => {}, exampleLabel: '예시 대본으로 보기', ownLabel: '직접 씁니다' })
-    return p.querySelector('.onb__go').textContent === '예시 대본으로 보기'
-      && p.querySelector('.onb__own').textContent === '직접 씁니다'
+  ok('버튼 이름을 화면마다 바꿔 달 수 있다', (() => {
+    const p = emptyHint({ onExample: () => {}, exampleLabel: '메뉴 훑어보기' })
+    return p.querySelector('.ehint__go').textContent === '메뉴 훑어보기'
   })())
   ok('넘기지 않은 버튼은 만들지 않는다', (() => {
-    const only = emptyPanel({ onExample: () => {} })
-    const none = emptyPanel({ lines: ['한 줄'] })
-    return !only.querySelector('.onb__own') && !none.querySelector('.onb__row')
+    const only = emptyHint({ onExample: () => {} })
+    const none = emptyHint({ text: '한 줄' })
+    /* ownLabel 없이 onOwn 만 넘겨도 만들지 않는다. 이름 없는 버튼이 서면 빈 칸으로 보인다 */
+    const noName = emptyHint({ onExample: () => {}, onOwn: () => {} })
+    return !only.querySelector('.ehint__own') && !none.querySelector('button')
+      && !noName.querySelector('.ehint__own')
   })())
-  ok('두 버튼이 각자의 손잡이를 부른다', (() => {
+  ok('버튼이 각자의 손잡이를 부른다', (() => {
     const hit = []
-    const p = emptyPanel({ onExample: () => hit.push('ex'), onOwn: () => hit.push('own') })
-    p.querySelector('.onb__go').click()
-    p.querySelector('.onb__own').click()
+    const p = emptyHint({
+      onExample: () => hit.push('ex'), onOwn: () => hit.push('own'), ownLabel: '직접',
+    })
+    p.querySelector('.ehint__go').click()
+    p.querySelector('.ehint__own').click()
     return hit.join() === 'ex,own'
   })())
   /* 예시 내용이 서버에 남는다는 사실을 모른 채 누르게 두지 않는다 */
-  ok('되돌릴 수 없다는 주의를 판에 남길 수 있다',
-    emptyPanel({ onExample: () => {}, warn: '예시 내용도 서버에 남습니다.' })
-      .querySelector('.onb__warn').textContent.includes('서버에 남습니다'))
+  ok('되돌릴 수 없다는 주의를 남길 수 있다',
+    emptyHint({ onExample: () => {}, note: '예시 내용도 서버에 남습니다.' })
+      .querySelector('.ehint__note').textContent.includes('서버에 남습니다'))
 
   /*
    * 길잡이는 타이머로 넘어가지 않는다. 그래서 검사도 시간을 재지 않고 「눌렀는가」만 본다. * 예전 검사는 ms 를 기다렸다가 넘어갔는지를 봤고, 그건 지금은 있어서는 안 되는 동작이다.

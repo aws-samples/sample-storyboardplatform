@@ -511,8 +511,9 @@ dialog#keys::backdrop { background: rgba(17,19,24,.5); }
   border: 1px dashed var(--pencil-2); border-radius: var(--sb-r-lg); padding: 44px 20px;
   grid-column: 1 / -1; background: var(--paper-2);
 }
-/* 「처음 오셨나요?」 판이 앉는 자리. 안의 판(app/onboard.js 의 .onb)이 자기 테두리와
-   여백을 갖고 있으므로 여기서는 점선과 가운데 정렬만 걷어낸다 */
+/* 비었을 때의 한 줄 안내가 앉는 자리(empty-panel.js 의 .ehint). 그 줄이 자기 여백을
+   갖고 있으므로 여기서는 .board--empty 의 점선과 가운데 정렬만 걷어낸다.
+   예전에는 520px 짜리 「처음 오셨나요?」 카드가 여기 앉아 판을 절반쯤 덮었다 */
 .onbslot {
   border: 0; background: none; padding: 0; text-align: left;
   display: flex; justify-content: center;
@@ -1088,6 +1089,14 @@ dialog.plan { width: min(680px, 95vw); }
       </button>
       <div class="menu" id="meMenu" hidden></div>
     </div>
+    <!--
+      아키텍처 · 권한 관리 · 홈. 탭 바 오른쪽 끝에 흐린 잔글씨로 있던 것을 여기로
+      올렸습니다. 담는 것은 nav-tabs.js 의 mountNav 이고(utilMount) 모양도 그 파일에
+      있습니다(.navutil). 세 화면이 같은 부품을 쓰므로 셋이 같은 자리에 둡니다.
+
+      이 화면의 「권한 관리」는 관리 창의 권한 장을 엽니다(아래 mountNav 의 onPerm).
+    -->
+    <div id="utilMount"></div>
   </div>
 </header>
 

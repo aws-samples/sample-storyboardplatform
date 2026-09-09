@@ -32,7 +32,7 @@ import { setHtml } from '../lib/dom.js'
 import { opsClient, connectorClient } from '../services/api.js'
 import { entries, group } from '../services/activity-log.js'
 import { paintTable } from '../components/history-list.js'
-import { emptyPanel } from '../components/empty-panel.js'
+import { emptyHint } from '../components/empty-panel.js'
 import {
   list as listProjects, remove as removeProject, touch as touchProject,
 } from '../services/projects.js'
@@ -640,21 +640,24 @@ function syncWelcome() {
   byId('onbSlot').hidden = !(view === 'new' && !acts.length)
 }
 
+/*
+ * 여기는 안내가 가장 짧아도 되는 자리입니다.
+ *
+ * 이 화면에는 이미 네 단계가 카드로 늘어서 있고, 예시로 전체를 보는 파란 단추도 그
+ * 아래에 큰 글씨로 있습니다(#demoGo). 그런데도 「처음 오셨나요?」 판이 그 밑에 또 떠서
+ * 같은 두 가지를 다시 말하고 있었습니다 — 네 단계 중 아무 데서나 시작하라는 말과, 아래
+ * 파란 단추를 누르라는 말입니다. 바로 위에 있는 것을 가리키는 안내였습니다.
+ *
+ * 그래서 메뉴를 짚어 주는 길 하나만 남깁니다. 예시는 파란 단추가 이미 자기 자리에서
+ * 훨씬 크게 말합니다.
+ */
 function paintWelcome() {
   const slot = byId('onbSlot')
   slot.textContent = ''
-  slot.append(emptyPanel({
-    eyebrow: '처음',
-    head: '처음 오셨나요?',
-    lines: [
-      '아직 아무 기록도 없습니다. 위의 네 단계 중 어디서 시작해도 됩니다.',
-      '한 번에 다 보시려면 아래 파란 버튼을 누르십시오. 네 단계를 이어서 짚어 드립니다.',
-      '누가 무엇을 했는지는 왼쪽 「팀원들의 작업 상황 확인하기」에 쌓입니다.',
-    ],
-    exampleLabel: '예시 프로젝트로 전체 보기',
-    onExample: () => byId('demoGo').click(),
-    ownLabel: '메뉴 훑어보기',
-    onOwn: () => openCoach(),
+  slot.append(emptyHint({
+    text: '처음이시면 메뉴를 한 번 짚어 드립니다.',
+    exampleLabel: '메뉴 훑어보기',
+    onExample: () => openCoach(),
   }))
 }
 
