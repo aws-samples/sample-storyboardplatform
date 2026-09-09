@@ -261,19 +261,23 @@ _hf: str | None = None
 def hf_token() -> str:
     """부팅 때 한 번 읽지 않는다. 커넥터로 키를 나중에 넣거나 갈아도 재부팅 없이 먹어야 한다."""
     global _hf
-    if _hf is None:
-        try:
-            import json
+    if _hf is not None:
+        return _hf
+    tok = ""
+    try:
+        import json
 
-            import boto3
+        import boto3
 
-            raw = boto3.client("ssm", region_name=REGION).get_parameter(
-                Name=HF_PARAM, WithDecryption=True)["Parameter"]["Value"]
-            # 커넥터는 JSON({"key": …})으로 적는다. 손으로 넣은 평문 토큰도 그대로 받는다
-            _hf = (json.loads(raw).get("key", "") if raw.lstrip().startswith("{") else raw).strip()
-        except Exception:
-            _hf = ""
-    return _hf
+        raw = boto3.client("ssm", region_name=REGION).get_parameter(
+            Name=HF_PARAM, WithDecryption=True)["Parameter"]["Value"]
+        # 커넥터는 JSON({"key": …})으로 적는다. 손으로 넣은 평문 토큰도 그대로 받는다
+        tok = (json.loads(raw).get("key", "") if raw.lstrip().startswith("{") else raw).strip()
+    except Exception:
+        tok = ""
+    # 빈 값은 굳히지 않는다. 굳히면 커넥터에서 키를 넣어도 재시작 전까지 게이트 모델이 영원히 안 올라온다
+    _hf = tok or None
+    return tok
 
 def _unload() -> None:
     """
@@ -338,10 +342,16 @@ def _load(mid: str) -> None:
         if loading == mid:
             loading = None
 
-def _kick(mid: str) -> None:
-
+def _kick(mid: str, force: bool = False) -> None:
+    """
+    모델을 올리기 시작한다. 한 번 엎어진 모델(err_for)은 저절로 다시 올리지 않는다 — /gen 이 올
+    때마다 다시 올리면 그때마다 지금 올라와 있는 모델을 먼저 내려서(_unload) 되는 모델까지
+    죽인다. 사람이 모델 칩을 눌러 /gen/load 로 다시 고르면(force) 그때 다시 해 본다.
+    """
     global loading
     if cur == mid or loading == mid:
+        return
+    if not force and err_for(mid):
         return
     loading = mid
     threading.Thread(target=lambda: _load_locked(mid), daemon=True).start()
@@ -474,6 +484,17 @@ def pick(mid: str | None) -> str:
         return mid
     return cur if cur and cur not in VIDEO else DEFAULT
 
+# 참조 그림을 조건으로 받는 모델. 그림을 받지 않는 모델(krea)에 참조가 오면 여기로 돌린다
+REF_MODEL = next(k for k, v in MODELS.items() if v["family"] == "flux2")
+
+def pick_for(req: Req) -> str:
+    """요청에 맞는 그림 모델. 참조(refs·init)가 있는데 고른 모델이 그림을 받지 않으면 REF_MODEL.
+    화면(board.js 의 modelFor)도 같은 판단을 하지만, 서버가 보장해야 참조를 말없이 버리는 일이 없다"""
+    mid = pick(req.model)
+    if (req.refs or req.init) and MODELS[mid].get("init") is False:
+        return REF_MODEL
+    return mid
+
 def build(spec: dict, req: Req) -> str:
     """
     지시문 한 줄. 기반 이미지가 무엇인지(refKind)에 따라 앞에 붙는 말이 달라진다.
@@ -560,7 +581,7 @@ def extracting(req: Req) -> bool:
 @app.post("/gen")
 async def gen(req: Req, authorization: str | None = Header(None)):
     who(authorization, need_art=True, roles=ASSET_ROLES if extracting(req) else ART_ROLES)
-    mid = pick(req.model)
+    mid = pick_for(req)
     if cur != mid:
         # 영상 일감을 받아 둔 채로 그림 모델을 올리면 영상 모델이 내려가고, 이미 「만듭니다」로
         # 보이던 그 일감이 엎어진다. 그림 쪽을 기다리게 한다 — 이쪽은 다시 눌러도 되지만
@@ -599,7 +620,8 @@ async def load(req: Req, authorization: str | None = Header(None)):
     # /gen 과 같은 이유로, 도는 영상 일감이 있으면 갈지 않는다
     if cur != mid and vid_pending():
         raise HTTPException(503, "지금 영상을 만들고 있습니다. 끝나면 이어서 눌러주세요.")
-    _kick(mid)
+    # 사람이 고른 것이다. 지난 실패가 있어도 다시 해 본다(키를 새로 넣었을 수 있다)
+    _kick(mid, force=True)
     return {"ok": True, "modelId": mid, "resident": cur, "loading": loading, "wait": wait_s(mid)}
 
 VID_MODEL = "wan"
@@ -811,6 +833,14 @@ if __name__ == "__main__":
     assert set(ISOLATE) == {"asset_char", "asset_bg", "asset_prop"}
     assert ART_ROLES < ASSET_ROLES and {"director", "admin"} < ASSET_ROLES
     assert extracting(Req(refKind="asset_bg")) and not extracting(Req(refKind="face")) and not extracting(Req())
+    # 참조가 있으면 그림을 받지 않는 모델(krea)로 가지 않는다. 없으면 고른 대로
+    assert REF_MODEL == "klein"
+    assert pick_for(Req(model="krea", refs=["x"])) == "klein" and pick_for(Req(model="krea", init="x")) == "klein"
+    assert pick_for(Req(model="krea")) == "krea" and pick_for(Req(model="hd", refs=["x"])) == "hd"
+    # 엎어진 모델은 저절로 다시 올리지 않는다. 사람이 고르면(force) 다시 해 본다
+    load_error, load_error_mid = "krea: 실패", "krea"
+    _kick("krea"); assert loading is None
+    load_error, load_error_mid = None, None
     assert "watermark" not in STYLE and "watermark" in NEG
     sk = Image.new("RGB", (64, 32), "white")
     lit = lamp(sk)

@@ -736,7 +736,9 @@ const RE = {
   id: /^[A-Za-z0-9._:#-]{1,64}$/,
   color: /^#[0-9A-Fa-f]{3,8}$/,
   src: new RegExp('^(?:\\/[\\w./-]{1,200}'
-    + '|data:image\\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]{1,4000000}'
+    // 올린 그림은 ≤300KB(assets.js 의 downscale). DynamoDB 항목 한도(400KB)를 넘는 op 는 여기서 걸러
+    // 화면에는 먹히고 서버만 거부해 10초마다 영원히 다시 보내는 일을 막습니다
+    + '|data:image\\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]{1,420000}'
     + `|${VID_SRC})$`),
 }
 

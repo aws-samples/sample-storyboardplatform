@@ -42,7 +42,9 @@ header{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.92);backdro
 
 /* ── 뼈대: 종류 | 격자 | 스틸 ─────────────── */
 .shell{display:grid;grid-template-columns:172px minmax(0,1fr) 300px;min-height:calc(100vh - 82px)}
-@media (max-width:1080px){.shell{grid-template-columns:150px minmax(0,1fr)}.still{grid-column:1/-1;border-left:0;border-top:1px solid var(--line)}}
+/* 좁아져도 고르기 → 스틸 이 한 화면에 남게 세 기둥을 끝까지 지킵니다. 900 아래에서만 쌓습니다 */
+@media (max-width:1080px){.shell{grid-template-columns:140px minmax(0,1fr) 250px}.cats{padding:14px 8px}.still{padding:14px 12px}}
+@media (max-width:900px){.shell{grid-template-columns:1fr}.cats{border-right:0;border-bottom:1px solid var(--line);grid-auto-flow:column;grid-auto-columns:max-content;overflow-x:auto}.still{position:static;max-height:none;border-left:0;border-top:1px solid var(--line)}}
 
 /* 왼쪽: 종류 */
 .cats{padding:18px 12px;border-right:1px solid var(--line);display:grid;gap:2px;align-content:start}
@@ -88,7 +90,7 @@ header{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.92);backdro
 .tile[data-type=bg] .tile__im,.tile[data-type=still] .tile__im{aspect-ratio:16/9}
 .tile__cap{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 6px;padding:6px 8px 7px;border-top:1px solid var(--line-2)}
 .tile__name{font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tile__meta{grid-column:1/-1;font:400 10.5px/1.3 var(--m);color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tile__meta{grid-column:1/-1;font:400 10.5px/1.3 var(--m);color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tile__pick{position:absolute;top:7px;left:7px;width:18px;height:18px;border-radius:50%;border:1.5px solid #fff;background:rgba(17,19,24,.35);box-shadow:0 0 0 1px rgba(0,0,0,.15)}
 .tile[aria-pressed=true] .tile__pick{background:var(--blue);border-color:#fff}
 .tile[aria-pressed=true] .tile__pick::after{content:'';position:absolute;left:5px;top:2px;width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
@@ -125,7 +127,7 @@ header{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.92);backdro
 .vw[hidden]{display:none}
 .vw__bar{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid rgba(255,255,255,.08);flex-wrap:wrap}
 .vw__type{font:500 10.5px/1 var(--m);letter-spacing:.08em;text-transform:uppercase;color:#9aa3b2}
-.vw__name{font-size:14px;font-weight:600;background:none;border:0;border-bottom:1px solid transparent;color:#fff;padding:2px 0;min-width:120px;max-width:360px}
+.vw__name{font-size:14px;font-weight:600;background:none;border:0;border-bottom:1px solid transparent;color:#fff;padding:2px 0;min-width:120px;max-width:520px;width:32vw}
 .vw__name:focus{outline:none;border-bottom-color:var(--blue)}
 .vw__name[readonly]{border-bottom-color:transparent}
 .vw__meta{font:400 11px var(--m);color:#9aa3b2}
@@ -194,7 +196,7 @@ header{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.92);backdro
 </div>
 
 <!-- 크게 보기. pages/assets.js 의 paintViewer 가 채웁니다 -->
-<div class="vw" id="viewer" hidden></div>
+<div class="vw" id="viewer" role="dialog" aria-modal="true" aria-label="자산 크게 보기" hidden></div>
 <input type="file" id="file" accept="image/*" multiple hidden>
 <p class="sr" id="live" role="status" aria-live="polite"></p>
 <div class="gate" id="gate" hidden></div>

@@ -3591,6 +3591,10 @@
     ok('자산 op 의 id·출처가 남는다', op.asset.id === 'a1' && op.asset.fromPanelId === 'p1' && op.asset.src === '/img/x.png')
     ok('fromN 은 숫자로 바뀐다', op.asset.fromN === 2)
     ok('이상한 출처 id 는 비운다', scrub({ kind: 'asset.patch', assetId: '<script>' }).assetId === '')
+    // DynamoDB 항목 한도(400KB) 위의 그림은 화면에서도 버린다. 서버만 거부하면 10초마다 영원히 다시 보낸다
+    ok('300KB 그림은 살고 3MB 그림은 비운다',
+      scrub({ src: 'data:image/png;base64,' + 'A'.repeat(300_000) }).src.length > 0
+      && scrub({ src: 'data:image/png;base64,' + 'A'.repeat(3_000_000) }).src === '')
   }
 
   /* ── permissions.js ↔ 서버의 허용 목록 ───────────────────────────────────────

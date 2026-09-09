@@ -55,7 +55,7 @@ export const JOB_NAMES = {
   saveGraph: '그래프 저장',
   putAsset: '작업물 저장',
   gen: '키 비주얼 생성',
-  extract: '자산 뽑기',
+  extract: '자산 다루기',
   deleteProject: '프로젝트 삭제',
 }
 
