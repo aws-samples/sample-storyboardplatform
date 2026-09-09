@@ -549,8 +549,16 @@ function paintViewer() {
   $('vwRemove')?.addEventListener('click', () => remove(a.id))
   $('vwName').addEventListener('change', (e) => rename(a.id, e.target.value))
   host.querySelectorAll('[data-z]').forEach((b) => { b.onclick = () => setZoom(b.dataset.z) })
-  // 그림을 누르면 맞춤 ↔ 1:1. 휠은 한 단계씩
-  img.onclick = (e) => { if (drag?.moved) return; setZoom(S.zoom === 'fit' ? '1' : 'fit', e) }
+  /*
+   * 그림을 누르면 맞춤 ↔ 1:1. 휠은 한 단계씩.
+   * click 은 stage 에 답니다 — 확대 상태에서는 onpointerdown 의 setPointerCapture 때문에 click 이 img 가
+   * 아니라 stage 로 오므로 img.onclick 은 한 번도 불리지 않았습니다. 끌었으면(moved) 토글하지 않습니다
+   */
+  stage.onclick = (e) => {
+    if (drag?.moved) return
+    if (S.zoom === 'fit' && e.target !== img) return
+    setZoom(S.zoom === 'fit' ? '1' : 'fit', e.target === img ? e : null)
+  }
   stage.onwheel = (e) => {
     e.preventDefault()
     const order = ['fit', '1', '2']
