@@ -56,7 +56,7 @@ export const JOB_NAMES = {
   navigate: '세계관 네비게이터',
   saveGraph: '그래프 저장',
   putAsset: '작업물 저장',
-  gen: '키 비주얼 생성',
+  gen: '그림 생성',
   extract: '자산 다루기',
   power: 'GPU 켜고 끄기',
   deleteProject: '프로젝트 삭제',

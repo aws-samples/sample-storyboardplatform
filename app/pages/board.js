@@ -3912,7 +3912,11 @@ async function gpuPower(action) {
       : `GPU 를 끕니다 (${r.state}). 다시 켤 때까지 그림은 만들 수 없습니다.`)
     pollGpu()
   } catch (err) {
-    notice(`GPU 를 ${action === 'on' ? '켜지' : '끄지'} 못했습니다 · ${err.message}`)
+    if (action === 'on' && /꺼지는 중/.test(err.message)) {
+      // 아직 꺼지는 중이면 20초 뒤 저절로 다시 켭니다
+      notice('GPU 가 아직 꺼지는 중입니다. 끝나면 저절로 켭니다.', 'ok')
+      setTimeout(() => gpuPower('on'), 20_000)
+    } else notice(`GPU 를 ${action === 'on' ? '켜지' : '끄지'} 못했습니다 · ${err.message}`)
   }
   powerBusy = ''
   renderGpuMenu()

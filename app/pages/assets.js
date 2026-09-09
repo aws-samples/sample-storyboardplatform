@@ -296,7 +296,11 @@ async function gpuPower(action) {
     say(action === 'on' ? `GPU 를 켰습니다 (${r.state}). 약 3~4분 뒤 준비됩니다` : `GPU 를 끕니다 (${r.state})`)
     S.gpu.text = action === 'on' ? 'GPU 켜는 중 · 약 3~4분' : 'GPU 끄는 중'
   } catch (err) {
-    S.err = `GPU 를 ${action === 'on' ? '켜지' : '끄지'} 못했습니다 · ${err.message}`
+    // 아직 꺼지는 중이면 1분쯤 뒤 저절로 다시 켭니다. 사람이 시계를 보며 다시 누르게 하지 않습니다
+    if (action === 'on' && /꺼지는 중/.test(err.message)) {
+      S.gpu.text = 'GPU 가 아직 꺼지는 중 · 끝나면 저절로 켭니다'
+      setTimeout(() => gpuPower('on'), 20_000)
+    } else S.err = `GPU 를 ${action === 'on' ? '켜지' : '끄지'} 못했습니다 · ${err.message}`
   }
   S.busy = null
   paintStill()

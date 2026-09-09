@@ -518,11 +518,15 @@ async function power(payload) {
   if (!id) throw new Error('GPU 인스턴스가 설정되지 않았습니다')
   const action = str(payload?.action)
   const c = openEc2()
-  if (action === 'on') await c.send(new StartInstancesCommand({ InstanceIds: [id] }))
-  else if (action === 'off') await c.send(new StopInstancesCommand({ InstanceIds: [id] }))
-  else if (action !== 'state') throw new Error(`모르는 동작: ${action}`)
-  const d = await c.send(new DescribeInstancesCommand({ InstanceIds: [id] }))
-  return { state: d.Reservations?.[0]?.Instances?.[0]?.State?.Name || 'unknown', action, by: str(payload?.who) }
+  const stateOf = async () => (await c.send(new DescribeInstancesCommand({ InstanceIds: [id] }))).Reservations?.[0]?.Instances?.[0]?.State?.Name || 'unknown'
+  let state = await stateOf()
+  // 끄는 중에 켜기를 누르면 EC2 가 영어 오류를 낸다. 화면이 알아서 다시 누를 수 있게 상태를 말로 돌려준다
+  if (action === 'on' && (state === 'stopping' || state === 'shutting-down')) throw new Error('아직 꺼지는 중입니다. 잠시 뒤 다시 켜세요')
+  if (action === 'on' && state !== 'running' && state !== 'pending') await c.send(new StartInstancesCommand({ InstanceIds: [id] }))
+  else if (action === 'off' && state !== 'stopped' && state !== 'stopping') await c.send(new StopInstancesCommand({ InstanceIds: [id] }))
+  else if (!['on', 'off', 'state'].includes(action)) throw new Error(`모르는 동작: ${action}`)
+  if (action !== 'state') state = await stateOf()
+  return { state, action, by: str(payload?.who) }
 }
 
 /*
