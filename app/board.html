@@ -658,43 +658,30 @@ a.btn--wide[hidden] { display: none; }
 .chip:hover:not(:disabled) { border-color: var(--pencil); color: var(--ink); }
 .chip[data-on="1"] { background: var(--stamp-blue); border-color: var(--stamp-blue); color: #fff; }
 .chip:disabled { opacity: .45; cursor: not-allowed; }
-/* ── 자산. 승인된 컷에서 떼어 낸 인물·배경·상품 ───────────────────────────────
- * 왼쪽 기둥(asset--nav) · 컷 상세의 고르는 칩(asset--pick) · 이 컷에서 뽑은 것(asset--mine)이
- * 같은 카드 한 벌입니다. 그림이 곧 이름이라 글자보다 그림을 크게 둡니다.
+/* ── 참조 자산 칩. 자산관리 화면(assets.html)에 쌓인 인물·배경·소품을 컷 생성의 참조로 고릅니다.
+ * 그림이 곧 이름이라 글자보다 그림을 크게 둡니다. 자산의 이름·삭제는 그 화면의 일입니다.
  */
 .alib { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; list-style: none; padding: 0; margin: 6px 0 0; }
-.alib > li { display: contents; }
-.alib .hint { grid-column: 1 / -1; margin: 0; }
 .asset {
   display: flex; flex-direction: column; width: 100%; padding: 0; margin: 0; overflow: hidden;
   background: var(--paper); border: 1px solid var(--edge); border-radius: var(--r);
-  color: var(--ink); font: inherit; text-align: left;
+  color: var(--ink); font: inherit; text-align: left; cursor: pointer;
 }
+.asset:hover { border-color: var(--pencil); }
 .asset img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; background: var(--paper-2); }
-.asset[data-type="bg"] img { aspect-ratio: 16 / 9; }
-.asset__none { display: grid; place-items: center; aspect-ratio: 1; font-size: 9.5px; color: var(--pencil-2); background: var(--paper-2); }
 .asset__cap {
   display: block; padding: 4px 6px 5px; margin: 0; font-size: 11px; line-height: 1.3; color: var(--pencil);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .asset__cap b { font-size: 9px; letter-spacing: .06em; color: var(--pencil-2); margin-right: 4px; font-weight: 600; }
-.asset--nav, .asset--pick { cursor: pointer; }
-.asset--nav:hover, .asset--pick:hover { border-color: var(--pencil); }
 /* 참조로 켠 자산. 켜진 칩(.chip[data-on="1"])과 같은 파랑입니다 */
 .asset--pick[data-on="1"] { border-color: var(--stamp-blue); box-shadow: 0 0 0 1px var(--stamp-blue); }
 .asset--pick[data-on="1"] .asset__cap { color: var(--sb-accent-ink, var(--ink)); }
 .asset--pick[data-on="1"] .asset__cap b { color: var(--stamp-blue); }
 .alib--pick { flex: 1 1 100%; margin: 0; }
 .gen__row--top { align-items: flex-start; }
-/* 이 컷에서 뽑은 것. 이름 칸은 카드 안에 붙어 있어 어디 이름을 고치는지 헷갈리지 않습니다 */
-.asset__name {
-  font: inherit; font-size: 11px; width: 100%; box-sizing: border-box; margin: 0;
-  border: none; border-top: 1px solid var(--edge); padding: 4px 6px; background: var(--paper); color: var(--ink);
-}
-.asset__name:focus { outline: none; background: var(--sb-accent-soft); }
-.asset__foot { display: flex; align-items: center; padding: 2px 6px 5px; }
-.asset__foot .mini { margin-left: auto; }
 .why--busy { color: var(--stamp-blue); }
+.why .mini { margin-left: 6px; }
 .mini {
   margin-left: auto; background: none; border: none; padding: 0; cursor: pointer;
   font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em;
@@ -1223,16 +1210,6 @@ dialog.plan { width: min(680px, 95vw); }
     <h2 class="mono h">인물 <span class="count" id="charCount"></span></h2>
     <ul class="nav" id="charNav"></ul>
     <button class="btn btn--ghost btn--wide" id="newChar">+ 인물 추가</button>
-
-    <!--
-      자산. 감독이 컷을 승인하면 그 그림에서 klein 이 인물·배경·상품을 따로 그려 여기 모입니다
-      (pages/board.js 의 extractAssets). 컷을 만들 때 「참조 자산」으로 골라 넣습니다. 이름을
-      고치고 지우는 것은 그것을 뽑은 컷의 상세에서 합니다. 누르면 그 컷으로 갑니다.
-    -->
-    <div id="assetBox" hidden>
-      <h2 class="mono h" id="assetHead" style="margin-top:22px">자산 <span class="count" id="assetCount"></span></h2>
-      <ul class="nav alib" id="assetNav"></ul>
-    </div>
 
     <h2 class="mono h" style="margin-top:22px">스토리보드</h2>
     <ul class="nav" id="boardNav"></ul>

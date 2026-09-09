@@ -26,6 +26,12 @@ export const NAV_TABS = [
    * 누르는 일이므로 탭을 없애고 보드 안으로 넣었습니다.
    */
   { id: 'board', label: '스토리보드', desc: '컷 · 그룹 · 콘티 · 승인 · 영상', href: '/board.html' },
+  /*
+   * 자산관리. 승인된 컷에서 뽑힌 인물·배경·소품과 직접 올린 그림이 모이는 곳이고, 그것들을
+   * 여러 장 골라 실사 스틸을 만드는 곳입니다(pages/assets.js). 스토리보드 안에 칸으로
+   * 두었던 것을 화면으로 뺐습니다 — 자산은 컷 하나의 것이 아니라 프로젝트의 것입니다.
+   */
+  { id: 'assets', label: '자산관리', desc: '인물 · 배경 · 소품 → 실사 스틸', href: '/assets.html' },
 ]
 
 export const navTab = (id) => NAV_TABS.find((t) => t.id === id) || null

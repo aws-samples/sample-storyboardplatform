@@ -77,13 +77,17 @@ noise, so the layout survives and the face does not. `klein` takes it as a *cond
 survives · that's what makes "one character, many shots" work. `krea` takes no image at all, so the
 board sends any shot that has a reference to `klein` instead of silently drawing from text.
 
-**Assets.** When a director approves a cut, the approver's browser asks `klein` to redraw the approved
-image three ways · each cast member alone on a plain background, the location with every person
-removed, and the key product or prop by itself (`server.py`'s `ISOLATE`). They land in the board as
-assets (`asset.add` ops) and show up in the left column and on the cut. The next cut picks them as
-*reference assets*: several images go to `klein` as a list, so the same face, the same room and the
-same product come back in a new composition. A cut's cast assets and the same scene's background are
-preselected; products are picked by hand.
+**Assets (`assets.html`).** A fifth tab, after the storyboard. Characters, locations and props live
+here in three categories, plus the stills made from them. Three ways in: when a director approves a
+cut, the approver's browser asks `klein` to redraw the approved image three ways · each cast member
+alone on a plain background, the location with every person removed, the key prop by itself
+(`server.py`'s `ISOLATE`); hand-drawn or photographed references uploaded from the page; and pictures
+made from a prompt per category. Everything is an `asset.*` op on the same log the board reads.
+Pick several assets and the page makes one **photoreal still** (1920×1088, `style: real`): the
+references go to `klein` as a list, so the same face, room and prop come back in a new composition
+with a film look instead of pencil. A viewer opens stills at 1:1 and 2× with drag-pan. The storyboard
+offers the same assets as *reference assets* when generating a cut; a cut's cast and its scene's
+background are preselected, props are picked by hand.
 
 Only one of them fits in the card's 48 GB at a time, so **picking a model swaps it**: the server loads
 the new weights in the background and refuses generation until they're resident (~1 min from disk).
