@@ -41,6 +41,14 @@ MODELS = {
         repo="stabilityai/stable-diffusion-3.5-large", label="SD 3.5 Large", note="정밀 · SD 계열",
         family="sd3", steps=28, guide=3.5, guide_ref=3.5, gb=28, gated=True,
     ),
+    # Krea 2 Turbo. 8걸음 증류판이라 빠르고 글자·손이 덜 깨진다. 텍스트→그림만이다 —
+    # diffusers 의 Krea2Pipeline 은 그림을 조건으로 받지 않는다(init 도 refs 도 무시). 참조가
+    # 있는 요청은 화면이 klein 으로 돌려 보낸다(board.js 의 refModelId). 게이트 저장소라
+    # HF 토큰 계정이 약관에 동의해 두어야 내려온다. Qwen3-VL-4B 인코더 9GB + 트랜스포머 26GB.
+    "krea": dict(
+        repo="krea/Krea-2-Turbo", label="Krea 2 Turbo", note="빠름 · 사실적",
+        family="krea", steps=8, guide=0.0, guide_ref=0.0, gb=36, gated=True, init=False,
+    ),
     # 영상 모델. 그림 모델과 같은 자리(GPU 하나)를 쓰므로 올라오면 그림 모델은 내려간다.
     # Apache-2.0 이고 게이트도 없다. 5B 라 34GB 로 이 디스크에 들어가는 유일한 I2V 모델이다.
     "wan": dict(
@@ -53,7 +61,7 @@ VIDEO = {k for k, v in MODELS.items() if v.get("video")}
 # klein 인 이유: 기준 이미지를 조건(reference)으로 받는 계열이 이 빌드에서 flux2 하나뿐이다.
 # 만든 얼굴을 그대로 살리는 일과 얼굴 두 장을 붙인 시트로 두 인물 장면을 그리는 일은
 # img2img 로는 안 된다(args_for 참고). 게이트도 없어서 HF 토큰 없이 올라간다.
-FALLBACK = "klein"
+FALLBACK = "krea"
 _env = os.environ.get("SB_MODEL", FALLBACK)
 DEFAULT = _env if _env in MODELS else next(
     (k for k, v in MODELS.items() if v["repo"] == _env), FALLBACK)
@@ -88,8 +96,36 @@ LOOK = (
     "Do not copy its layout or camera. New shot: "
 )
 NOTEXT = "Do not write any text, labels or captions. "
+# 승인된 컷 한 장에서 자산을 떼어 내는 자리(화면의 extractAssets). 열쇠는 domain/panels.js 의
+# assetJobs 가 refKind 로 보내는 값과 같다. 그 컷의 「이 사람만 · 사람 없는 이 장소만 · 이
+# 물건만」을 새로 그리게 한다 — 잘라 내는 것이 아니라 다시 그리는 것이라 배경에서 사람이
+# 빠지고 상품이 홀로 선다
+ISOLATE = {
+    "asset_char": (
+        "From the reference image, draw only this one character, described below. Keep the "
+        "identical face, hairstyle, build and clothing. Full body, relaxed standing pose facing "
+        "the viewer, alone on a plain empty background. No scenery, no other people, no props. "
+    ),
+    "asset_bg": (
+        "From the reference image, draw the same location as an empty establishing shot: same "
+        "place, architecture, furniture, light and atmosphere, seen from a similar angle. "
+        "Remove every person and character. No people, no faces, no foreground props. "
+    ),
+    "asset_prop": (
+        "From the reference image, draw only the single most important product or prop object "
+        "shown in it, centered and large, alone on a plain empty background. No people, no "
+        "hands, no scenery. "
+    ),
+}
+# 자산 여러 장을 참조로 받아 새 컷을 그리는 자리. refs 가 둘 이상일 때 화면이 이걸 보낸다
+ASSETS = (
+    "The reference images are separate assets: characters, a location and props. Compose them "
+    "into one new shot, keeping each character's face, hairstyle, build and clothing, the "
+    "location's architecture and light, and each product exactly as shown. Do not copy the "
+    "layout of any reference. New shot: "
+)
 
-SIZE = {"pose": (896, 1152), "cut": (1216, 688)}
+SIZE = {"pose": (896, 1152), "cut": (1216, 688), "asset": (1024, 1024)}
 MAX_STEPS = 40
 
 # 영상. 컷 그림을 첫 프레임으로 두고 몇 초를 움직인다.
@@ -181,6 +217,15 @@ def _sd3(spec: dict) -> dict:
         x.set_progress_bar_config(disable=True)
     return {"txt": p, "ref": q}
 
+def _krea(spec: dict) -> dict:
+    import torch
+    from diffusers import Krea2Pipeline
+
+    p = Krea2Pipeline.from_pretrained(spec["repo"], torch_dtype=torch.bfloat16, token=hf_token() or None).to("cuda")
+    p.set_progress_bar_config(disable=True)
+    # 그림을 받는 갈래가 없다. 참조가 와도 같은 파이프로 글만 보고 그린다(args_for 가 image 를 안 넣는다)
+    return {"txt": p, "ref": p}
+
 def _wan(spec: dict) -> dict:
     import torch
     from diffusers import AutoencoderKLWan, WanImageToVideoPipeline
@@ -195,7 +240,7 @@ def _wan(spec: dict) -> dict:
     p.vae.enable_tiling()
     return {"vid": p}
 
-FAMILY = {"chroma": _chroma, "flux2": _flux2, "sd3": _sd3, "wan": _wan}
+FAMILY = {"chroma": _chroma, "flux2": _flux2, "sd3": _sd3, "krea": _krea, "wan": _wan}
 
 # 커넥터가 SSM SecureString 에 넣어 둔 Hugging Face 키. 게이트된 저장소를 받을 때만 쓴다.
 HF_PARAM = os.environ.get("SB_HF_PARAM", "/storyboard/connector/huggingface")
@@ -355,8 +400,12 @@ def en(text: str) -> str:
     return _en[text]
 
 ART_ROLES = {"artist", "planner"}
+# 자산 뽑기(refKind asset_*)는 승인을 누른 사람의 브라우저가 바로 부른다. 승인은 감독의
+# 일이라(domain/panels.js 의 ACTIONS.approve) 감독·관리자도 든다. domain/permissions.js 의
+# extract 와 같아야 한다 — test.html 이 두 줄을 맞대어 본다
+ASSET_ROLES = {"artist", "planner", "director", "admin"}
 
-def who(authorization: str | None, need_art: bool = False) -> str:
+def who(authorization: str | None, need_art: bool = False, roles: set = ART_ROLES) -> str:
 
     if not authorization:
         raise HTTPException(401, "로그인이 필요합니다")
@@ -380,8 +429,9 @@ def who(authorization: str | None, need_art: bool = False) -> str:
         raise HTTPException(401, f"토큰을 확인할 수 없습니다 ({type(e).__name__})") from e
     if claims.get("token_use") != "id":
         raise HTTPException(401, "ID 토큰이 필요합니다")
-    if need_art and (claims.get("custom:role") or "reviewer") not in ART_ROLES:
-        raise HTTPException(403, "그림 만들기는 아티스트와 기획만 할 수 있습니다")
+    if need_art and (claims.get("custom:role") or "reviewer") not in roles:
+        raise HTTPException(403, "자산 뽑기는 아티스트·기획·감독만 할 수 있습니다" if roles is ASSET_ROLES
+                            else "그림 만들기는 아티스트와 기획만 할 수 있습니다")
     return claims.get("cognito:username") or claims["sub"]
 
 _jwks = None
@@ -392,6 +442,9 @@ class Req(BaseModel):
     model: str | None = None
     seed: int | None = None
     init: str | None = None
+    # 참조 그림 여러 장(자산). klein 은 그림 목록을 조건으로 받는다. init 과 같이 오면 refs 가
+    # 앞이고 init 은 뒤에 붙는다. img2img 갈래(chroma·sd3)는 한 장만 받으므로 첫 장을 쓴다
+    refs: list[str] | None = None
     # 기반 이미지가 무엇인가 — sketch(올린 스케치) · face(인물 얼굴 한 장) · cast(얼굴 시트)
     # · image(키비주얼 등 그림 한 장). 모양이 같은 한 칸(init)으로 들어오기 때문에 화면이
     # 말해 주지 않으면 서버가 구별할 수 없고, 그러면 스케치에게 「인물을 그대로 두라」고
@@ -419,26 +472,40 @@ def build(spec: dict, req: Req) -> str:
     """
     body = en(req.prompt)[:400]
     head = SHEET if req.kind == "pose" else ""
-    pre = NOTEXT if spec["family"] == "flux2" else ""
-    if not req.init:
+    pre = NOTEXT if spec["family"] in ("flux2", "krea") else ""
+    # 그림을 받지 않는 갈래(krea)는 참조가 와도 「참조를 보고」로 시작하면 안 된다 — 볼 그림이 없다
+    if not (req.init or req.refs) or spec.get("init") is False:
         return f"{pre}{head}{body}. {STYLE}"
     kind = req.refKind or ("sketch" if spec["family"] in ("chroma", "sd3") else "face")
-    lead = {"sketch": FINISH, "face": KEEP, "cast": CAST}.get(kind, LOOK)
+    lead = {"sketch": FINISH, "face": KEEP, "cast": CAST, "assets": ASSETS, **ISOLATE}.get(kind, LOOK)
     return f"{pre}{lead}{head}{body}. {STYLE}"
 
 def args_for(spec: dict, prompt: str, w: int, h: int, steps: int, guide: float,
-             g, ref: Image.Image | None, strength: float) -> dict:
+             g, refs: list, strength: float) -> dict:
+    """refs 는 참조 그림 목록(없으면 빈 목록). klein 은 전부 조건으로, img2img 갈래는 첫 장만"""
     fam = spec["family"]
     a = dict(prompt=prompt, num_inference_steps=steps, width=w, height=h, generator=g)
     if fam in ("chroma", "sd3"):
         a.update(negative_prompt=NEG, guidance_scale=guide)
-        if ref is not None:
-            a.update(image=lamp(ref.resize((w, h), Image.LANCZOS)), strength=clamp(strength))
+        if refs:
+            a.update(image=lamp(refs[0].resize((w, h), Image.LANCZOS)), strength=clamp(strength))
+    elif fam == "krea":
+        # 그림을 받지 않는다. 증류판은 guidance 0 이라 negative 는 뜻이 없지만 파이프가 받으니 넘긴다
+        a.update(negative_prompt=NEG, guidance_scale=guide)
     else:
         a["guidance_scale"] = guide
-        if ref is not None:
-            a["image"] = [ref]
+        if refs:
+            a["image"] = list(refs)
     return a
+
+MAX_REFS = 6
+
+def refs_of(req: Req) -> list:
+    """요청의 참조 그림들. refs 가 앞, init 이 뒤. 너무 많으면 앞에서 자른다 — 카드가 터진다"""
+    out = [decode(x).convert("RGB") for x in (req.refs or []) if x]
+    if req.init:
+        out.append(decode(req.init).convert("RGB"))
+    return out[:MAX_REFS]
 
 def run(req: Req, seed: int) -> Image.Image:
     import torch
@@ -446,9 +513,9 @@ def run(req: Req, seed: int) -> Image.Image:
     mid = pick(req.model)
     spec = MODELS[mid]
     w, h = SIZE.get(req.kind, SIZE["cut"])
-    ref = decode(req.init).convert("RGB") if req.init else None
+    refs = refs_of(req)
     steps = max(1, min(int(req.steps or spec["steps"]), MAX_STEPS))
-    guide = float(req.guidance or (spec["guide_ref"] if ref is not None else spec["guide"]))
+    guide = float(req.guidance or (spec["guide_ref"] if refs else spec["guide"]))
     # 프롬프트를 잠금 밖에서 먼저 만든다. 한국어면 build 안에서 Bedrock 을 부르는데,
     # 그 네트워크 대기를 잠금 안에서 하면 그 시간만큼 팀 전원의 생성이 밀린다
     prompt = build(spec, req)
@@ -456,9 +523,9 @@ def run(req: Req, seed: int) -> Image.Image:
         if cur != mid:
             raise HTTPException(503, f"{spec['label']}을 올리는 중입니다. 잠시 뒤 다시 눌러주세요.")
         g = torch.Generator("cuda").manual_seed(seed)
-        a = args_for(spec, prompt, w, h, steps, guide, g, ref, req.strength)
+        a = args_for(spec, prompt, w, h, steps, guide, g, refs, req.strength)
         try:
-            return pipes["ref" if ref is not None else "txt"](**a).images[0]
+            return pipes["ref" if refs else "txt"](**a).images[0]
         except torch.OutOfMemoryError:
             # 카드가 꽉 찼다. 사람에게 「서버가 꺼졌다」고 하지 않는다. 내렸다 다시 올리고,
             # 503 으로 돌려준다 — 화면은 503 을 보면 기다렸다가 저절로 다시 누른다
@@ -468,9 +535,13 @@ def run(req: Req, seed: int) -> Image.Image:
                 503, f"GPU 메모리가 가득 차서 {spec['label']}을 다시 올립니다"
                      f"(약 {max(1, round(wait_s(mid) / 60))}분). 준비되면 다시 만듭니다.") from None
 
+def extracting(req: Req) -> bool:
+    """자산 뽑기 요청인가. 이때만 감독도 통과한다(ASSET_ROLES)"""
+    return str(req.refKind or "").startswith("asset_")
+
 @app.post("/gen")
 async def gen(req: Req, authorization: str | None = Header(None)):
-    who(authorization, need_art=True)
+    who(authorization, need_art=True, roles=ASSET_ROLES if extracting(req) else ART_ROLES)
     mid = pick(req.model)
     if cur != mid:
         # 영상 일감을 받아 둔 채로 그림 모델을 올리면 영상 모델이 내려가고, 이미 「만듭니다」로
@@ -687,6 +758,8 @@ def health():
         "loading": loading, "wait": wait_s(loading) if loading else 0,
         "models": [{"id": k, "label": v["label"], "note": v["note"], "wait": wait_s(k),
                     "strength": v["family"] in ("chroma", "sd3"),
+                    # 그림을 조건으로 받지 않는 모델. 화면이 참조 있는 요청을 다른 모델로 돌린다
+                    "init": v.get("init", True),
                     "video": k in VIDEO} for k, v in MODELS.items()],
         # 사유와 그 사유의 주인. 화면은 자기가 기다리는 모델의 것일 때만 읽어야 한다
         "gpu": name, "error": load_error, "errorModel": load_error_mid,
@@ -709,6 +782,10 @@ if __name__ == "__main__":
     assert clamp(9) == 0.95 and clamp(0) == 0.2 and clamp(0.5) == 0.5
     assert en("hello") == "hello" and en("") == ""
     assert SIZE["pose"][0] % 16 == 0 and SIZE["cut"][1] % 16 == 0
+    assert all(w % 16 == 0 and h % 16 == 0 for w, h in SIZE.values())
+    assert set(ISOLATE) == {"asset_char", "asset_bg", "asset_prop"}
+    assert ART_ROLES < ASSET_ROLES and {"director", "admin"} < ASSET_ROLES
+    assert extracting(Req(refKind="asset_bg")) and not extracting(Req(refKind="face")) and not extracting(Req())
     assert "watermark" not in STYLE and "watermark" in NEG
     sk = Image.new("RGB", (64, 32), "white")
     lit = lamp(sk)
@@ -716,12 +793,15 @@ if __name__ == "__main__":
     assert lit.getpixel((2, 16))[0] < lit.getpixel((61, 16))[0] < 256
     assert sum(lit.getpixel((2, 16))) < 3 * 255 * 0.4
 
-    assert set(MODELS) == {"chroma", "klein", "hd", "sd35", "wan"}
-    assert MODELS["sd35"]["gated"] and not any(v.get("gated") for k, v in MODELS.items() if k != "sd35")
+    assert set(MODELS) == {"chroma", "klein", "hd", "sd35", "krea", "wan"}
+    assert MODELS["sd35"]["gated"] and MODELS["krea"]["gated"]
+    assert not any(v.get("gated") for k, v in MODELS.items() if k not in ("sd35", "krea"))
+    assert MODELS["krea"]["init"] is False and all(v.get("init", True) for k, v in MODELS.items() if k != "krea")
     for k, v in MODELS.items():
         assert v["family"] in FAMILY, k
-        assert all(v.get(f) for f in ("repo", "label", "note", "steps", "guide", "guide_ref", "gb"))
-    assert FALLBACK in MODELS and FALLBACK not in VIDEO
+        # guide 0.0 (증류판) 도 값이다 — 참인지가 아니라 있는지를 본다
+        assert all(v.get(f) is not None for f in ("repo", "label", "note", "steps", "guide", "guide_ref", "gb"))
+    assert FALLBACK in MODELS and FALLBACK not in VIDEO and FALLBACK == "krea"
     assert pick(None) == DEFAULT and pick("없는모델") == DEFAULT and pick("hd") == "hd"
     cur = "klein"
     assert pick(None) == "klein" and pick("hd") == "hd"
@@ -730,6 +810,12 @@ if __name__ == "__main__":
     assert pick(None) == DEFAULT and pick("wan") == DEFAULT and pick("hd") == "hd"
     cur = None
     assert wait_s("klein") < wait_s("hd") < wait_s("wan")
+    # krea 는 참조를 무시한다: 앞말도 image 도 없다. NOTEXT 는 붙는다
+    kr = build(MODELS["krea"], Req(prompt="p", init="x", refKind="face"))
+    assert KEEP not in kr and LOOK not in kr and NOTEXT in kr
+    assert ASSETS not in build(MODELS["krea"], Req(prompt="p", refs=["x"], refKind="assets"))
+    akr = args_for(MODELS["krea"], "p", 64, 32, 8, 0.0, None, [Image.new("RGB", (8, 8))], 0.85)
+    assert "image" not in akr and "strength" not in akr and akr["negative_prompt"] == NEG and akr["guidance_scale"] == 0.0
 
     assert VIDEO == {VID_MODEL} and MODELS[VID_MODEL]["family"] == "wan"
     # 프레임 수는 4의 배수 + 1 이어야 Wan 이 받는다
@@ -766,7 +852,7 @@ if __name__ == "__main__":
 
     # 기반 이미지가 무엇인지 말해 주면 모델 갈래와 상관없이 그 말이 앞에 온다
     for k in MODELS:
-        if k in VIDEO:
+        if k in VIDEO or MODELS[k].get("init") is False:
             continue
         sk = build(MODELS[k], Req(prompt="p", init="x", refKind="sketch"))
         fa = build(MODELS[k], Req(prompt="p", init="x", refKind="face"))
@@ -778,19 +864,34 @@ if __name__ == "__main__":
         assert LOOK in kv and FINISH not in kv, k
     # 모르는 값은 「그림 한 장」으로 봅니다 — 구도까지 물려받는 것이 가장 나쁜 기본값입니다
     assert LOOK in build(MODELS["klein"], Req(prompt="p", init="x", refKind="???"))
+    # 자산 뽑기와 자산 여러 장 참조. refs 만 와도 참조로 본다(init 없음)
+    for k, lead in ISOLATE.items():
+        out = build(MODELS["klein"], Req(prompt="p", refs=["x"], refKind=k, kind="asset"))
+        assert lead in out and LOOK not in out and SHEET not in out, k
+    assert ASSETS in build(MODELS["klein"], Req(prompt="p", refs=["x", "y"], refKind="assets"))
+    assert KEEP not in build(MODELS["klein"], Req(prompt="p", refs=[], refKind="face"))
 
     ref = Image.new("RGB", (32, 32), "white")
-    ac = args_for(MODELS["chroma"], "p", 64, 32, 12, 2.5, None, ref, 0.85)
-    ah = args_for(MODELS["hd"], "p", 64, 32, 26, 4.0, None, ref, 0.85)
-    ak = args_for(MODELS["klein"], "p", 64, 32, 8, 4.0, None, ref, 0.85)
+    ac = args_for(MODELS["chroma"], "p", 64, 32, 12, 2.5, None, [ref], 0.85)
+    ah = args_for(MODELS["hd"], "p", 64, 32, 26, 4.0, None, [ref], 0.85)
+    ak = args_for(MODELS["klein"], "p", 64, 32, 8, 4.0, None, [ref], 0.85)
     assert ac["strength"] == 0.85 and ac["image"].size == (64, 32)
     assert ah["strength"] == 0.85 and ah["negative_prompt"] == NEG
-    ax = args_for(MODELS["sd35"], "p", 64, 32, 28, 3.5, None, ref, 0.85)
+    ax = args_for(MODELS["sd35"], "p", 64, 32, 28, 3.5, None, [ref], 0.85)
     assert ax["strength"] == 0.85 and ax["negative_prompt"] == NEG
     assert "strength" not in ak
     assert ak["image"] == [ref]
     assert "negative_prompt" not in ak and ak["guidance_scale"] == 4.0
-    assert "image" not in args_for(MODELS["klein"], "p", 64, 32, 8, 4.0, None, None, 0.85)
+    assert "image" not in args_for(MODELS["klein"], "p", 64, 32, 8, 4.0, None, [], 0.85)
+    # 여러 장이면 klein 은 전부, img2img 갈래는 첫 장만
+    two = [ref, Image.new("RGB", (16, 16), "black")]
+    assert args_for(MODELS["klein"], "p", 64, 32, 8, 4.0, None, two, 0.85)["image"] == two
+    assert args_for(MODELS["chroma"], "p", 64, 32, 12, 2.5, None, two, 0.85)["image"].size == (64, 32)
+    # refs 가 앞, init 이 뒤. 빈 칸은 버리고 너무 많으면 앞에서 MAX_REFS 장
+    got = refs_of(Req(refs=[url, ""], init=url))
+    assert len(got) == 2 and all(im.size == (4, 4) for im in got)
+    assert len(refs_of(Req(refs=[url] * (MAX_REFS + 3)))) == MAX_REFS
+    assert refs_of(Req()) == []
     print("ok")
 
     if "prefetch" in sys.argv:

@@ -33,6 +33,11 @@ export const JOB_ROLES = {
   // infra/gpu/server.py 의 ART_ROLES — 키 비주얼 생성. AppSync 가 아니라 GPU 서버가 봅니다
   gen: ART_ROLES,
   /*
+   * infra/gpu/server.py 의 ASSET_ROLES — 승인된 컷에서 인물·배경·상품 자산 뽑기. 승인을
+   * 누른 사람의 브라우저가 바로 부르므로 감독도 들어 있습니다(ACTIONS.approve 와 짝).
+   */
+  extract: ['planner', 'artist', 'director', 'admin'],
+  /*
    * infra/resolvers/deleteProject.js — 프로젝트를 지웁니다. 에셋과 op 로그가 함께 갑니다.
    *
    * 여기만 한 역할입니다. 다른 일은 되돌릴 수 있습니다. 대본을 잘못 만들면 다시 만들고,
@@ -50,6 +55,7 @@ export const JOB_NAMES = {
   saveGraph: '그래프 저장',
   putAsset: '작업물 저장',
   gen: '키 비주얼 생성',
+  extract: '자산 뽑기',
   deleteProject: '프로젝트 삭제',
 }
 

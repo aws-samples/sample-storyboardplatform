@@ -16,7 +16,7 @@
     clock, startTimes, scrub, debounceBy, lostEdit, isActionable, changedSince, liveVer,
     deadVer, canGrantRole, workload, NEEDS, ROLES, ACTIONS, tally, stalls, retakes, flow,
     pace, actorPace, firstPass, reviewLag, fmtDur,
-    splitScript, scenarioFromScript, sceneKey, sceneMeta,
+    splitScript, scenarioFromScript, sceneKey, sceneMeta, ASSET_TYPES, assetJobs,
   } = await import(`./domain/panels.js?t=${Date.now()}`)
   const { normalizeGraph, validateAgainstCanon, mergeGraphs, normalizeStory } = await import(`./domain/graph-rules.js?t=${Date.now()}`)
   const { josa } = await import(`./lib/josa.js?t=${Date.now()}`)
@@ -3560,6 +3560,37 @@
       && src.includes(key))
   }
 
+  /* ── 자산 — 승인된 컷에서 뽑는 인물·배경·상품 ────────────────────────────────
+   *
+   * 무엇을 뽑는지는 assetJobs 가 정합니다. 서버(server.py 의 ISOLATE)와 화면(board.js 의
+   * extractAssets)이 이 목록의 refKind 와 kind 를 그대로 믿습니다.
+   */
+  {
+    const chars = { c1: { id: 'c1', name: '하나', brief: '20대 바리스타' }, c2: { id: 'c2', name: '둘' } }
+    const cut = { id: 'p1', scene: 'S03 카페 · 밤', action: '하나가 컵을 건넨다', cast: ['c1', 'c2', 'ghost'] }
+    const jobs = assetJobs(cut, chars)
+    ok('자산은 출연자마다 인물 하나, 배경 하나, 상품 하나', jobs.map((j) => j.type).join() === 'char,char,bg,prop')
+    ok('없는 인물은 건너뛴다', !jobs.some((j) => j.charId === 'ghost'))
+    ok('인물 자산은 그 인물에 묶인다', jobs[0].charId === 'c1' && jobs[0].name === '하나' && jobs[1].charId === 'c2')
+    ok('인물 지시문에 이름과 설명이 들어간다', jobs[0].prompt === '하나 - 20대 바리스타' && jobs[1].prompt === '둘')
+    ok('refKind 는 서버의 ISOLATE 열쇠 모양이다', jobs.every((j) => /^asset_(char|bg|prop)$/.test(j.refKind)))
+    ok('배경은 컷 크기, 인물·상품은 정방형', jobs.find((j) => j.type === 'bg').kind === 'cut'
+      && jobs.filter((j) => j.type !== 'bg').every((j) => j.kind === 'asset'))
+    ok('배경 이름은 씬의 장소에서 온다', jobs.find((j) => j.type === 'bg').name === '카페 · 밤 배경'
+      && jobs.find((j) => j.type === 'bg').prompt.startsWith('카페 · 밤'))
+    ok('상품 지시문은 화면 설명이다', jobs.find((j) => j.type === 'prop').prompt === '하나가 컵을 건넨다')
+    ok('출연자가 없어도 배경·상품은 뽑는다', assetJobs({ id: 'p2', scene: '', action: '' }, chars).map((j) => j.type).join() === 'bg,prop')
+    ok('씬 이름이 없으면 「배경」「상품」', assetJobs({ id: 'p2' }, {}).map((j) => j.name).join() === '배경,상품')
+    ok('인물 구도에서는 뽑지 않는다', assetJobs({ id: 'x', charId: 'c1', cast: ['c1'] }, chars).length === 0 && assetJobs(null).length === 0)
+    ok('자산 종류에는 모두 이름이 있다', ['char', 'bg', 'prop'].every((t) => ASSET_TYPES[t]))
+
+    // op 가 서버를 오갈 때 자산 열쇠가 살아 있어야 한다. scrub 이 모르는 열쇠는 그대로 두지만 id 모양은 본다
+    const op = scrub({ kind: 'asset.add', asset: { id: 'a1', type: 'bg', name: '카페', src: '/img/x.png', fromPanelId: 'p1', fromN: '2', charId: null } })
+    ok('자산 op 의 id·출처가 남는다', op.asset.id === 'a1' && op.asset.fromPanelId === 'p1' && op.asset.src === '/img/x.png')
+    ok('fromN 은 숫자로 바뀐다', op.asset.fromN === 2)
+    ok('이상한 출처 id 는 비운다', scrub({ kind: 'asset.patch', assetId: '<script>' }).assetId === '')
+  }
+
   /* ── permissions.js ↔ 서버의 허용 목록 ───────────────────────────────────────
    *
    * domain/permissions.js 의 표는 화면이 버튼을 미리 막는 근거이고, 실제로 튕기는 것은
@@ -3599,6 +3630,7 @@
       putAsset: ['../infra/resolvers/putAsset.js', 'ROLES'],
       deleteProject: ['../infra/resolvers/deleteProject.js', 'ROLES'],
       gen: ['../infra/gpu/server.py', 'ART_ROLES'],
+      extract: ['../infra/gpu/server.py', 'ASSET_ROLES'],
     }
     for (const [job, [file, name]] of Object.entries(SERVER)) {
       const server = rolesIn(await text(file), name)
