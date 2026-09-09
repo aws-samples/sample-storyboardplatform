@@ -102,6 +102,29 @@ const CSS = `
 }
 .navarch:hover { color: var(--sb-accent, #1a56db); opacity: 1; }
 .navarch ~ .navperm, .navarch ~ .navhome { margin-left: 0; }
+
+/*
+ * ── 머리 띠로 올린 오른쪽 묶음 (utilMount)
+ *
+ * 세 단추(아키텍처 · 권한 관리 · 홈)는 탭 바의 오른쪽 끝에 있었습니다. 그 자리에서는
+ * 잘 보이지 않았습니다. 탭 바가 얇은 모양이라 높이가 34px 뿐이고, 세 단추가 회색에
+ * opacity .8 로 앉아 왼쪽 네 탭에 눈이 먼저 가면 끝까지 안 읽혔습니다. 「이게 어디서
+ * 도는 겁니까」의 답과 홈으로 가는 길이 거기 있는데 찾지 못하면 없는 것과 같습니다.
+ *
+ * 그래서 머리 띠의 오른쪽으로 올립니다. 탭 바는 네 단계만 들고, 화면을 옮겨 다니는
+ * 것들은 사람·로그아웃과 한 묶음으로 위에 섭니다. 위로 올린 만큼 흐리게 두지 않습니다
+ * — 아래 규칙이 색과 크기를 다시 잡습니다.
+ */
+.navutil { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.navutil .navarch, .navutil .navperm, .navutil .navhome {
+  margin-left: 0; padding: 6px 10px; border-left: 0; border-radius: var(--sb-r, 6px);
+  font-size: 12.5px; opacity: 1; color: var(--sb-ink-2, #5b6472);
+}
+.navutil .navarch:hover, .navutil .navperm:hover, .navutil .navhome:hover {
+  background: var(--sb-fill, #f8f9fb); color: var(--sb-accent, #1a56db);
+}
+/* 홈은 이 묶음에서 나가는 길이라 앞에 선을 하나 둡니다 */
+.navutil .navhome { margin-left: 4px; border-left: 1px solid var(--sb-line, #e4e7ec); border-radius: 0 }
 `
 
 let styled = false
@@ -126,15 +149,18 @@ function injectCss(doc) {
  * @param {boolean} o.home - 오른쪽 끝에 홈으로 가는 길을 둡니다
  * @param {string} o.board - 고른 프로젝트. 다른 화면으로 가는 링크에 ?board= 로 달립니다.
  *        기본값은 주소에서 읽습니다. 화면마다 따로 챙기지 않아도 프로젝트가 따라갑니다
- * @param {boolean} o.arch - 오른쪽 끝에 「아키텍처」를 둡니다
- * @param {boolean} o.perm - 오른쪽 끝에 「권한 관리」를 둡니다
+ * @param {boolean} o.arch - 「아키텍처」를 둡니다
+ * @param {boolean} o.perm - 「권한 관리」를 둡니다
  * @param {() => void} o.onPerm - 그것을 눌렀을 때. 없으면 perm.js 의 창을 띄웁니다.
  *        보드는 자기 관리 화면 안에 같은 판을 들고 있어서 이것을 넘깁니다
+ * @param {HTMLElement} [o.utilMount] - 세 단추(아키텍처·권한 관리·홈)가 들어갈 자리.
+ *        주면 탭 바 대신 여기 담습니다. 머리 띠의 오른쪽에 올릴 때 씁니다
  * @returns {{ setActive: (id: string) => void, active: () => string }}
  */
 export function mountNav({
   mount, active = 'develop', handled = [], onSelect = () => {},
   slim = true, home = true, board = boardParam(), arch = true, perm = true, onPerm = null,
+  utilMount = null,
 }) {
   const doc = mount.ownerDocument
   injectCss(doc)
@@ -167,6 +193,17 @@ export function mountNav({
   }
 
   /*
+   * 세 단추가 앉을 자리. utilMount 를 주면 머리 띠의 그 자리에 묶어 담고, 없으면
+   * 예전처럼 탭 바의 오른쪽 끝입니다. 아래 세 갈래가 이것 하나만 보면 되도록 여기서
+   * 한 번 정합니다.
+   */
+  const utilBox = utilMount ? doc.createElement('div') : nav
+  if (utilMount) {
+    utilBox.className = 'navutil'
+    utilBox.dataset.navUtil = '1'
+  }
+
+  /*
    * 아키텍처. 「이게 어디서 도는 겁니까」의 답을 화면 안에 둡니다.
    *
    * 탭이 아니라 오른쪽 끝의 작은 단추입니다. 네 단계와 나란히 두면 다섯 번째 작업
@@ -180,7 +217,7 @@ export function mountNav({
     a.title = '아키텍처 · 이 데모가 무엇으로 도는지'
     a.innerHTML = '<span aria-hidden="true">⌗</span><span>아키텍처</span>'
     a.onclick = () => import('./arch.js').then((m) => m.openArch())
-    nav.appendChild(a)
+    utilBox.appendChild(a)
   }
 
   /*
@@ -206,7 +243,7 @@ export function mountNav({
     p.onclick = () => (onPerm
       ? onPerm()
       : import('./perm.js').then((m) => m.openPerm({ board: board || undefined })))
-    nav.appendChild(p)
+    utilBox.appendChild(p)
   }
 
   if (home) {
@@ -216,7 +253,7 @@ export function mountNav({
     h.dataset.navHome = '1'
     h.title = '홈 · 전체 단계'
     h.innerHTML = '<span aria-hidden="true">←</span><span>홈</span>'
-    nav.appendChild(h)
+    utilBox.appendChild(h)
   }
 
   function setActive(id) {
@@ -229,6 +266,8 @@ export function mountNav({
   }
 
   mount.appendChild(nav)
+  // 세 단추를 머리 띠로 올린 경우. 하나도 안 만들었으면 빈 칸을 넣지 않습니다
+  if (utilMount && utilBox.childElementCount) utilMount.appendChild(utilBox)
   setActive(active)
   return { setActive, active: () => cur }
 }

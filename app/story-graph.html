@@ -147,20 +147,56 @@
   }
   .legend i.line { width: 18px; height: 0; border-radius: 0; background: none; box-shadow: none; border-top: 2px solid var(--ink2); }
   .legend i.dash { width: 18px; height: 0; border-radius: 0; background: none; box-shadow: none; border-top: 2px dashed var(--ink3); }
+  /* 아래 여백이 더 넓은 이유는 판 아래에 도구 띠가 앉기 때문입니다(.canvas-tools) */
   .canvas-msg {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    text-align: center; color: var(--ink3); font-size: 15.5px; line-height: 2; padding: 48px; pointer-events: none;
+    text-align: center; color: var(--ink3); font-size: 15.5px; line-height: 2;
+    padding: 48px 48px 110px; pointer-events: none;
   }
   .canvas-msg b { color: var(--acc-ink); }
 
   /*
-   * 처음 온 사람에게 뜨는 판. 모양은 app/onboard.js 가 넣고(.onb*) 여기서는 자리만
-   * 잡는다. 판 가운데가 아니라 대본 카드 오른쪽에 둔다. 가운데에 놓으면 카드를 덮고,
-   * 「직접 시작하기」가 가리키는 대본 칸이 그 아래에 가려진다. 카드를 접으면
-   * (대본 입력 접기) 그 자리까지 넓게 쓴다.
+   * ── 판 아래의 도구 띠 ───────────────────────────────────────────────────
+   *
+   * 판 하단 가운데에 한 줄로 앉는다. 안내를 다시 여는 길과, 처음 온 사람을 위한
+   * 「예시로 보기」 한 줄이 여기 든다.
+   *
+   * 예전에는 둘 다 다른 곳에 있었다. 「안내 다시 보기」는 위 띠에 큰 단추로 있었고,
+   * 처음 온 사람 안내는 대본 카드 오른쪽에 520px 카드로 떠서 판의 절반을 덮었다.
+   * 둘 다 늘 보여야 하는 것이 아니라 필요할 때 찾으면 되는 것이라, 눈이 가장 덜 가는
+   * 자리인 판 아래로 내렸다. 위 띠에는 사람과 프로젝트에 관한 것만 남는다.
+   *
+   * pointer-events 를 띠에서 끊고 안의 것들만 되살린다. 띠는 판 위에 걸쳐 있으므로
+   * 그대로 두면 빈 자리가 그래프의 드래그를 먹는다.
+   *
+   * bottom 이 범례(.legend, right:18 bottom:18) 한 칸 위인 이유. 같은 높이에 두면 가운데로
+   * 모은 이 띠가 오른쪽으로 400px 까지 넓어지는 범례와 겹친다. 한 칸 올려 두면 화면 폭이
+   * 어떻든 겹치지 않는다. 판이 이 띠를 피해 앉도록 insets().b 도 같이 잡아 두었다.
    */
-  .onbslot { position: absolute; z-index: 6; left: 430px; top: 22px; }
-  .onbslot--wide { left: 22px; }
+  .canvas-tools {
+    position: absolute; z-index: 6; left: 0; right: 0; bottom: 74px;
+    display: flex; flex-direction: column; align-items: center; gap: 7px;
+    padding: 0 22px; pointer-events: none;
+  }
+  .canvas-tools > * { pointer-events: auto; }
+  .canvas-tools__row { display: flex; align-items: center; gap: 7px; }
+  /* 안의 안내 줄(.ehint)이 자기 여백을 갖고 있어 여기서는 판만 깐다 */
+  .onbslot {
+    background: rgba(255,255,255,.92); backdrop-filter: blur(8px);
+    border: 1px solid var(--line); border-radius: 999px; padding: 7px 15px;
+    box-shadow: var(--sh1);
+  }
+  .onbslot[hidden] { display: none }
+  /*
+   * 안내를 다시 여는 길. 늘 있지만 작다. 이것을 찾는 사람은 이미 「그 설명 어디
+   * 갔지」를 떠올린 사람이라, 눈에 먼저 들어올 필요가 없다.
+   */
+  .tool-ghost {
+    background: rgba(255,255,255,.88); backdrop-filter: blur(8px);
+    border: 1px solid var(--line); border-radius: 999px; padding: 5px 13px;
+    font: inherit; font-size: 12px; color: var(--ink3); cursor: pointer;
+  }
+  .tool-ghost:hover { color: var(--acc-ink); border-color: var(--sb-accent-line); }
 
   .kv { display: grid; grid-template-columns: 62px 1fr; gap: 5px 12px; font-size: 14.5px; }
   .kv .k { color: var(--ink3); font-weight: 600; }
@@ -406,10 +442,19 @@
     -->
     <div id="brandMount"></div>
     <div class="grow"></div>
+    <!--
+      위 띠에는 사람에 관한 것만 남깁니다. 「안내 다시 보기」는 판 아래 도구 띠로,
+      「대본 입력 접기」는 그 카드 자기 머리로 옮겼습니다. 둘 다 늘 큰 단추로 서 있을
+      일이 아니고, 특히 접기는 어느 카드를 접는다는 말인지 여기서는 알 수 없었습니다.
+    -->
     <span class="who" id="whoAmI" hidden></span>
     <button class="btn btn--line btn--mini" id="logoutBtn" hidden>로그아웃</button>
-    <button class="btn btn--line btn--mini" id="coachBtn">안내 다시 보기</button>
-    <button class="btn btn--line btn--mini" id="inputToggle">대본 입력 접기</button>
+    <!--
+      아키텍처 · 권한 관리 · 홈. 탭 바의 오른쪽 끝에 있던 것을 여기로 올렸습니다.
+      담는 것은 nav-tabs.js 의 mountNav 이고(utilMount) 모양도 그 파일에 있습니다(.navutil).
+      세 화면이 같은 부품을 쓰므로 한 곳에 두어야 셋이 함께 얻습니다.
+    -->
+    <div id="utilMount"></div>
   </div>
 
   <!-- 상단 기능 탭. index.html 과 같은 탭 바를 nav-tabs.js 에서 받아 쓴다 -->
@@ -419,11 +464,28 @@
     <div id="network"></div>
     <div class="canvas-msg" id="canvasMsg" hidden></div>
 
-    <!-- 처음 온 사람에게 뜨는 판. 그래프가 비어 있을 때만 보인다 (onboard.js 의 emptyPanel) -->
-    <div class="onbslot" id="onbSlot" hidden></div>
+    <!--
+      판 아래 가운데의 도구 띠. 안내를 다시 여는 길과, 비어 있을 때의 「예시로 보기」
+      한 줄이 든다. 안내 줄의 모양은 components/empty-panel.js 가 넣는다(.ehint*).
+    -->
+    <div class="canvas-tools" id="canvasTools">
+      <div class="onbslot" id="onbSlot" hidden></div>
+      <div class="canvas-tools__row">
+        <!-- 대본 카드를 접으면 그 안의 접기 단추도 같이 사라집니다. 다시 펴는 길이 여기입니다 -->
+        <button class="tool-ghost" id="inputShow" type="button" hidden>대본 입력 펼치기</button>
+        <button class="tool-ghost" id="coachBtn" type="button">안내 보기</button>
+      </div>
+    </div>
 
     <section class="card card--input" id="inputCard" data-coach="input">
-      <h3>대본 · 시놉시스</h3>
+      <!--
+        접기 단추가 이 카드 머리에 있습니다. 예전에는 위 띠에 있었는데, 거기서는 무엇을
+        접는다는 말인지 알 수 없었고 이 카드와 멀어서 접은 뒤에 다시 펴는 길도 눈에서
+        멀었습니다. 접으면 이 카드가 사라지므로 펴는 단추는 아래 #inputShow 입니다.
+      -->
+      <h3>대본 · 시놉시스
+        <button class="btn btn--line btn--mini" id="inputToggle" style="margin-left:auto">접기</button>
+      </h3>
 
       <!-- 고른 모델은 이 화면의 모든 생성에 쓰인다. 값은 plan 리졸버의 MODELS 키다 -->
       <div class="model-pick">

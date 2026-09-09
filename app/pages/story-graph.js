@@ -39,7 +39,7 @@ import { mountNav } from '../components/nav-tabs.js'
 import { mountBrand } from '../components/brand.js'
 import { entries, group, markOp } from '../services/activity-log.js'
 import { paintList } from '../components/history-list.js'
-import { emptyPanel } from '../components/empty-panel.js'
+import { emptyHint } from '../components/empty-panel.js'
 import { guiding } from '../../app-walkthrough/guide.js'
 import { developExample } from '../../app-walkthrough/steps/develop.js'
 import { wire as wireTour, demoActive, demoAdvance, demoSay, demoTitle } from '../../app-walkthrough/tour.js'
@@ -327,18 +327,30 @@ function renderLegend() {
     + '<span><i class="line"></i>명시</span><span><i class="dash"></i>추론</span>'
 }
 
-/** 대본 카드와 범례가 가리는 자리. 판은 이만큼 비켜 앉는다 */
-const insets = () => ({ l: $('inputCard').hidden ? 24 : 428, t: 24, r: 24, b: 78 })
+/*
+ * 대본 카드·범례·도구 띠가 가리는 자리. 판은 이만큼 비켜 앉는다.
+ *
+ * 아래쪽은 범례(18+44) 위에 도구 띠가 한 칸 더 얹히므로 그 띠 높이까지 재서 더한다.
+ * 띠 안의 안내 줄은 처음 온 사람에게만 보이니 있을 때만 자리를 준다.
+ */
+const insets = () => ({
+  l: $('inputCard').hidden ? 24 : 428,
+  t: 24,
+  r: 24,
+  b: 78 + ($('canvasTools')?.offsetHeight || 0),
+})
 
 function renderNetwork() {
   const g = STORE.toJSON()
   const msg = $('canvasMsg')
   /*
-   * 판 가운데의 안내. 비어 있고 「처음 오셨나요?」 판이 없을 때만 띄운다. 둘 다 띄우면
-   * 같은 말이 두 번 겹치고, 안내 판이 이 글자 위에 앉는다. 예시를 다 보고 판을 지운
-   * 뒤처럼 안내 판이 없는 경우에 이 줄이 남는다.
+   * 판 가운데의 안내. 비어 있으면 띄운다.
+   *
+   * 예전에는 「처음 오셨나요?」 판이 없을 때만 띄웠다. 그 판이 이 글자 위에 앉아 두 벌이
+   * 겹쳐 읽혔기 때문이다. 이제 처음 온 사람에게 하는 말은 판 아래 띠의 한 줄이라 겹치지
+   * 않고, 무엇을 하면 되는지는 이 줄이 말하는 편이 낫다 — 판 가운데라 눈이 먼저 간다.
    */
-  if (!g.nodes.length && $('onbSlot')?.hidden !== false) {
+  if (!g.nodes.length) {
     msg.hidden = false
     msg.innerHTML = '그래프가 비어 있습니다.<br>왼쪽 카드에 대본을 넣고 <b>그래프 추출</b>을 누르거나,<br>'
       + '<b>예시 대본으로 보기</b>로 흐름을 둘러보세요.'
@@ -517,7 +529,7 @@ async function openAsset() {
   if (!text || box.value.trim()) return
   box.value = text
   // 입력 카드가 접혀 있으면 펼칩니다. 글을 걸어 두고 안 보이면 아무 일도 안 한 것입니다
-  if ($('inputCard')?.hidden) $('inputToggle')?.click()
+  if ($('inputCard')?.hidden) toggleInput(false)
   const hint = $('inputHint')
   if (hint) {
     hint.className = 'hint'
@@ -1634,49 +1646,43 @@ async function extract() {
 /*
  * 이 화면은 처음에 비어 있다. 예전에는 start() 가 목데이터를 알아서 얹었고, 그래서
  * 처음 온 사람은 자기가 만든 것도 아닌 케데헌 그래프 앞에 앉았다. 무엇이 예시이고
- * 무엇이 자기 것인지 가를 수 없었다. 이제 두 갈래를 먼저 묻는다.
+ * 무엇이 자기 것인지 가를 수 없었다. 그래서 예시는 눌러서 본다.
  *
- *   예시 보기      loadMock 을 재생기에 태워 차근차근 얹는다 (아래 runExample)
- *   직접 시작하기  대본 칸에 커서를 두고 코치마크를 연다
+ * ══ 큰 판을 걷어낸 자리
+ *
+ * 예전에는 여기에 「처음 오셨나요?」 판이 떴다. 제목과 설명 석 줄과 큰 버튼 둘이 든
+ * 카드가 대본 입력 카드 오른쪽에 앉아 판의 절반을 덮었다. 프로젝트를 새로 만들 때마다
+ * 떴으니 같은 사람이 몇 번이고 다시 읽었다.
+ *
+ * 이제 판 아래의 도구 띠에 한 줄로 앉는다(#canvasTools). 「예시로 보기」는 그 줄에 있고,
+ * 자세한 설명은 판 가운데 안내(canvasMsg)와 대본 카드가 이미 자기 자리에서 한다. 처음
+ * 온 사람은 알아서 예시를 눌러 보고, 두 번째로 온 사람은 그 줄을 지나쳐도 된다.
  */
 function paintWelcome() {
   const slot = $('onbSlot')
   if (!slot) return
   slot.textContent = ''
-  slot.append(emptyPanel({
-    eyebrow: '스토리 디벨롭',
-    head: '처음 오셨나요?',
-    lines: [
-      '판이 비어 있습니다. 대본이나 시놉시스를 넣으면 인물·장소·사건이 그래프가 됩니다.',
-      '그 그래프에서 탐지기 12종이 이야기 씨앗을 찾고, 씨앗 하나가 분기 → 개요 → 컷 → 대본으로 펼쳐집니다.',
-      '어떻게 도는지 먼저 보시려면 예시를 눌러 보세요. 케데헌 그래프로 그 순서를 한 단계씩 밟습니다.',
-    ],
-    exampleLabel: '예시 보기',
+  slot.append(emptyHint({
+    text: '처음이시면 예시로 흐름을 먼저 볼 수 있습니다.',
+    exampleLabel: '예시로 보기',
     onExample: () => runExample(),
-    ownLabel: '직접 시작하기',
     /*
-     * 직접 시작하는 사람에게는 안내를 열지 않습니다. 이미 쓰기로 정한 사람에게 막을
-     * 덮어 넉 장을 넘기게 하면 안내가 아니라 걸림돌입니다. 커서만 대본 칸에 둡니다.
-     * 거절을 기억해 두는 이유는 coach.skip 에 적어 두었습니다. 다시 보고 싶으면
-     * 헤더의 「안내 다시 보기」가 있습니다.
+     * 「직접 시작하기」를 없앴습니다. 이 화면의 「직접」은 대본 카드에 글을 넣는 것이고
+     * 그 카드가 바로 옆에 열려 있습니다. 버튼이 하는 일도 커서를 그 칸에 두는 것뿐이라,
+     * 사람이 그냥 칸을 누르는 것과 같습니다. 대신 코치마크를 거절로 적어 두던 것도
+     * 같이 사라졌으므로, 안내는 아래 「안내 보기」로 직접 여는 것만 남습니다.
      */
-    onOwn: () => { coach.skip(COACH_KEY); $('scriptIn')?.focus() },
-    warn: NET
-      ? '직접 하실 때의 추출과 생성은 Bedrock 을 부릅니다. 한 번에 10~30초씩 걸리고, 여기 남는 기록은 같은 보드를 보는 사람에게도 보입니다. '
-        + '예시는 미리 받아 둔 데이터만 쓰므로 기다리지 않습니다.'
-      : '로컬 모드입니다. 직접 하는 추출은 Bedrock 이 필요해 막혀 있습니다. 예시는 미리 받아 둔 데이터만 쓰므로 그대로 볼 수 있습니다.',
   }))
   slot.hidden = false
-  slot.classList.toggle('onbslot--wide', !!$('inputCard').hidden)
 }
 
 /**
  * 판에 노드가 있으면 안내를 걷습니다. build 와 예시 안내가 같은 자리를 지납니다.
  *
- * 예시 프로젝트로 들어온 것이면(?demo=1) 이 판을 아예 띄우지 않습니다. 홈의 파란 버튼을
- * 누른 사람은 「예시를 보겠다」를 이미 말한 사람인데, 여기서 「처음 오셨나요? … 예시를
- * 눌러 보세요」를 다시 내밀면 같은 것을 두 번 묻는 셈입니다. build 가 runExample 보다
- * 먼저 지나므로, 여기서 막지 않으면 한 프레임 깜빡이고 사라집니다.
+ * 예시 프로젝트로 들어온 것이면(?demo=1) 이 줄을 아예 띄우지 않습니다. 홈의 파란 버튼을
+ * 누른 사람은 「예시를 보겠다」를 이미 말한 사람인데, 여기서 「예시로 보기」를 다시
+ * 내밀면 같은 것을 두 번 묻는 셈입니다. build 가 runExample 보다 먼저 지나므로, 여기서
+ * 막지 않으면 한 프레임 깜빡이고 사라집니다.
  */
 function syncWelcome() {
   const slot = $('onbSlot')
@@ -1706,7 +1712,7 @@ function runExample() {
      * 화면을 짚어 가며 다 보여준 뒤라, 끝났다고 생각한 사람에게 막이 한 번 더 덮였습니다.
      *
      * 코치마크 자체는 남아 있습니다. 예시를 보지 않고 온 사람에게는 열리고, 다시 보려면
-     * 헤더의 「안내 다시 보기」입니다. 봤다고 적어 두는 이유는 coach.skip 에 있습니다.
+     * 판 아래의 「안내 보기」입니다. 봤다고 적어 두는 이유는 coach.skip 에 있습니다.
      */
     afterDone: () => { coach.skip(COACH_KEY); syncWelcome(); paintHist() },
   })
@@ -1840,18 +1846,28 @@ document.querySelectorAll('.tabs .tab').forEach((t) => { t.onclick = () => openT
     active: first,
     handled: ['develop', 'script'],
     onSelect: (id) => openTab(id === 'script' ? 'script' : LAST_DEV_TAB),
+    // 아키텍처·권한 관리·홈은 머리 띠의 오른쪽으로 올립니다. 탭 바 끝에서는 잘 안 보였습니다
+    utilMount: $('utilMount'),
   })
   if (first === 'script') openTab('script')
 }
 $('nodeClose').onclick = hideNode
 $('extractBtn').onclick = extract
-$('inputToggle').onclick = () => {
-  const card = $('inputCard')
-  card.hidden = !card.hidden
-  $('inputToggle').textContent = card.hidden ? '대본 입력 펼치기' : '대본 입력 접기'
+/*
+ * 대본 카드 접기·펴기. 단추가 둘입니다.
+ *
+ * 접는 단추는 그 카드 머리에 있고(inputToggle), 펴는 단추는 판 아래 도구 띠에
+ * 있습니다(inputShow). 하나로 둘 수 없는 이유는 접으면 카드가 hidden 이 되어 그 안의
+ * 단추가 같이 사라진다는 것입니다. 예전에는 위 띠에 단추 하나가 글자를 바꿔 가며 둘을
+ * 다 했는데, 거기서는 무엇을 접는다는 말인지 알 수 없었습니다.
+ */
+function toggleInput(hide) {
+  $('inputCard').hidden = hide
+  $('inputShow').hidden = !hide
   VIS?.setInsets(insets()) // 카드가 접히면 판이 그 자리까지 쓴다
-  $('onbSlot').classList.toggle('onbslot--wide', card.hidden) // 안내도 그 자리까지 당긴다
 }
+$('inputToggle').onclick = () => toggleInput(true)
+$('inputShow').onclick = () => toggleInput(false)
 
 const drop = $('inputCard')
 drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('drop') })

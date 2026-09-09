@@ -20,7 +20,7 @@ import { NAV_TABS, navHref, boardFromSearch } from '../domain/routes.js'
 import { mountNav } from '../components/nav-tabs.js'
 import { mountBrand } from '../components/brand.js'
 import * as coach from '../components/coachmark.js'
-import { emptyPanel } from '../components/empty-panel.js'
+import { emptyHint } from '../components/empty-panel.js'
 import { guiding } from '../../app-walkthrough/guide.js'
 import { keyVisualExample } from '../../app-walkthrough/steps/key-visual.js'
 import { makeArt } from '../lib/placeholder-art.js'
@@ -1328,27 +1328,16 @@ function card(title, sub, coach) {
  * 없었습니다. 이제 비어 있으면 비어 있는 대로 두고, 예시는 눌러서 넣습니다.
  */
 function welcomePanel() {
-  return emptyPanel({
-    eyebrow: '키 비주얼',
-    head: '처음 오셨나요?',
-    lines: [
-      '대본을 씬으로 나누고, 씬마다 대표 그림 한 장을 만드는 화면입니다.',
-      '예시를 누르면 대본 넣기 → 씬 나누기 → 프롬프트 → 생성까지 네 단계를 직접 눌러 보게 됩니다.',
-      '직접 하시려면 왼쪽 칸에 대본을 붙여넣는 것부터입니다.',
-    ],
+  return emptyHint({
+    text: '처음이시면 예시로 네 단계를 먼저 볼 수 있습니다.',
+    exampleLabel: '예시로 보기',
     onExample: () => runExample(),
     /*
-     * 직접 시작하는 사람에게는 안내를 열지 않습니다. 이미 쓰기로 정한 사람에게 막을
-     * 덮으면 안내가 아니라 걸림돌입니다. 커서만 대본 칸에 둡니다. 거절을 기억하는
-     * 이유는 coach.skip 에 적혀 있습니다. 다시 보려면 헤더의 「안내 다시 보기」입니다.
+     * 「직접 시작하기」를 없앴습니다. 이 화면의 「직접」은 왼쪽 칸에 대본을 붙여넣는
+     * 것이고 그 칸이 바로 옆에 열려 있습니다. 버튼이 하던 일도 커서를 그 칸에 두는
+     * 것뿐이라, 사람이 그냥 칸을 누르는 것과 같았습니다.
      */
-    onOwn: () => {
-      coach.skip(COACH_KEY)
-      $('.script')?.focus()
-    },
-    warn: '예시는 미리 받아 둔 데이터만 씁니다. 문장 모델도 생성 서버도 부르지 않으므로 '
-      + '기다리는 시간이 없고, 그림은 「예시」로 표시된 대신 그림입니다. '
-      + '진짜 그림은 예시를 마친 뒤 「이 씬만 다시 생성」을 누를 때 나옵니다.',
+    note: '예시는 미리 받아 둔 데이터만 씁니다. 기다리는 시간이 없고, 그림은 「예시」로 표시됩니다.',
   })
 }
 
@@ -1514,7 +1503,13 @@ async function boot() {
    * 아래의 #nav(paintNav)와는 층이 다르다. 이건 "어느 기능", 그건 "그 기능의 몇 번째
    * 단계"다.
    */
-  mountNav({ mount: $('#navMount'), active: 'keyvisual', handled: ['keyvisual'] })
+  /*
+   * utilMount: 아키텍처 · 권한 관리 · 홈은 탭 바가 아니라 머리 띠 오른쪽에 붙는다.
+   * 탭 바 안에서는 잔글씨로 흐려져 있어 셋 다 눈에 걸리지 않았다.
+   */
+  mountNav({
+    mount: $('#navMount'), active: 'keyvisual', handled: ['keyvisual'], utilMount: $('#utilMount'),
+  })
 
   // 머리의 왼쪽. 네 화면이 같은 것을 씁니다. 누르면 홈입니다
   mountBrand('#brandMount')

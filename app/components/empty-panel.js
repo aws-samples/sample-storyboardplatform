@@ -1,47 +1,48 @@
 /*
- * 빈 화면 안내 · 「처음 오셨나요?」 판 하나.
+ * 빈 화면 안내 한 줄.
  *
- * 각 화면은 처음에 비어 있습니다. 비어 있을 때 두 갈래를 보여줍니다. 예시를 보거나,
- * 직접 시작하거나. 비어 있지 않으면 이 판을 부르지 않고 화면이 자기 목록을 그립니다.
+ * ══ 크게 떠 있던 판을 걷어낸 이유
  *
- * 예시가 아니라 제품입니다. 「직접 시작하기」를 누른 사람도 이 판을 지나므로 예시를
- * 한 줄도 읽지 않는 사람에게도 뜹니다. 그래서 app-walkthrough 가 아니라 여기 있습니다.
- * 예시 길잡이는 app-walkthrough/guide.js 입니다. 한 파일에 같이 있었는데, 그때는
- * app-walkthrough 를 지우면 빈 화면이 안내 없이 비어 버렸습니다.
+ * 예전에는 이 파일이 「처음 오셨나요?」 라는 큰 판을 만들었습니다. 제목 한 줄, 설명 석
+ * 줄, 큰 버튼 둘, 주의 한 단락이 520px 폭의 카드에 들어 있었습니다. 화면이 비어 있을
+ * 때마다 떴으니 프로젝트를 새로 만들면 네 화면에서 네 번 떴습니다.
  *
- * 붙이는 것은 부르는 쪽이 합니다. 화면마다 들어갈 자리가 다르고, 어떤 화면은 이걸
- * 카드 안에 넣습니다.
+ * 그 판이 화면을 가렸습니다. 스토리 디벨롭에서는 대본 입력 카드 오른쪽에 앉아 판의
+ * 절반을 덮었고, 키비주얼과 보드에서는 목록이 들어올 자리를 차지했습니다. 무엇보다
+ * 읽을 것이 많았습니다. 처음 온 사람에게 필요한 것은 「여기서 무엇을 하나」 한 줄과
+ * 예시를 눌러 볼 자리 하나인데, 그것을 여덟 줄로 말하고 있었습니다.
+ *
+ * 그래서 한 줄로 줄입니다. 설명 한 마디와 작은 버튼입니다. 자세한 것은 그 화면이 이미
+ * 자기 자리에서 말합니다 — 대본 카드의 hint, 보드의 빈 칸 안내, 코치마크입니다.
+ *
+ * 예시가 아니라 제품입니다. 예시를 한 줄도 읽지 않는 사람에게도 뜨므로
+ * app-walkthrough 가 아니라 여기 있습니다. 예시 길잡이는 app-walkthrough/guide.js 입니다.
+ *
+ * 붙이는 것은 부르는 쪽이 합니다. 화면마다 들어갈 자리가 다릅니다.
  */
 
 const CSS = `
-/* ── 빈 화면 안내 ─────────────────────────────── */
-.onb {
-  display: grid; gap: 14px; justify-items: start; max-width: 520px;
-  padding: 22px; border: 1px solid var(--sb-line, #e4e7ec);
-  border-radius: var(--sb-r-lg, 10px); background: var(--sb-panel, #fff);
-  font-family: var(--sb-sans, sans-serif); color: var(--sb-ink, #111318);
+/* ── 빈 화면 안내 한 줄 ───────────────────────────── */
+.ehint {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 7px 10px;
+  font-family: var(--sb-sans, sans-serif); font-size: 13px; line-height: 1.6;
+  color: var(--sb-ink-3, #767f8c); text-align: left;
 }
-.onb__eyebrow {
-  font: 500 10.5px/1 var(--sb-mono, monospace); letter-spacing: .14em;
-  color: var(--sb-accent, #1a56db); text-transform: uppercase;
+.ehint__text { margin: 0 }
+.ehint__go, .ehint__own {
+  font: inherit; font-size: 12.5px; font-weight: 600; padding: 5px 11px;
+  border-radius: var(--sb-r, 6px); cursor: pointer; white-space: nowrap;
+  border: 1px solid var(--sb-line, #e4e7ec); background: var(--sb-panel, #fff);
+  color: var(--sb-ink-2, #5b6472);
 }
-.onb__head { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -.02em; line-height: 1.35; }
-.onb__lines { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
-.onb__lines li { font-size: 13px; line-height: 1.6; color: var(--sb-ink-2, #5b6472); }
-.onb__row { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
-.onb__go, .onb__own {
-  font: inherit; font-size: 13.5px; font-weight: 600; padding: 9px 15px;
-  border-radius: var(--sb-r, 6px); border: 1px solid transparent; cursor: pointer;
-}
-.onb__go { background: var(--sb-accent, #1a56db); color: #fff; }
-.onb__go:hover { background: var(--sb-accent-ink, #1543ad); }
-.onb__own {
-  background: var(--sb-panel, #fff); color: var(--sb-ink, #111318);
-  border-color: var(--sb-line, #e4e7ec);
-}
-.onb__own:hover { background: var(--sb-fill, #f8f9fb); }
-.onb__warn {
-  margin: 0; font-size: 11.5px; line-height: 1.6; color: var(--sb-ink-3, #767f8c);
+/* 예시가 앞이라 강조를 조금 얹습니다. 그래도 테두리 버튼입니다 — 파란 판이 되면 다시 큽니다 */
+.ehint__go { color: var(--sb-accent, #1a56db); border-color: var(--sb-accent-line, #c7d2fe) }
+.ehint__go:hover { background: var(--sb-accent-soft, #eef2ff) }
+.ehint__own:hover { background: var(--sb-fill, #f8f9fb); color: var(--sb-ink, #111318) }
+/* 주의는 줄을 따로 씁니다. 버튼 옆에 붙으면 버튼을 누르기 전에 읽히지 않습니다 */
+.ehint__note {
+  flex-basis: 100%; margin: 0; font-size: 11px; line-height: 1.6;
+  color: var(--sb-ink-3, #767f8c);
 }
 `
 
@@ -63,48 +64,40 @@ const mk = (t, c, x) => {
 }
 
 /**
- * 빈 화면 안내 한 판을 만듭니다. 붙이는 것은 부르는 쪽이 합니다.
+ * 빈 화면 안내 한 줄을 만듭니다. 붙이는 것은 부르는 쪽이 합니다.
  *
  * @param {object} o
- * @param {string} o.head - 큰 줄. 기본은 「처음 오셨나요?」
- * @param {string} o.eyebrow - 위의 작은 줄. 어느 단계인지
- * @param {string[]} o.lines - 설명 줄들
- * @param {() => void} o.onExample - 「예시 보기」
- * @param {() => void} o.onOwn - 「직접 시작하기」. 없으면 그 버튼을 안 만든다
+ * @param {string} o.text - 설명 한 마디. 한 줄로 읽히는 길이로 씁니다
+ * @param {() => void} o.onExample - 「예시로 보기」. 없으면 그 버튼을 안 만든다
+ * @param {() => void} o.onOwn - 두 번째 버튼. 없으면 안 만든다
  * @param {string} o.exampleLabel
  * @param {string} o.ownLabel
- * @param {string} o.warn - 버튼 아래의 작은 주의. 예시가 서버에 남는 화면에서 쓴다
+ * @param {string} o.note - 아래에 붙는 작은 주의. 예시가 서버에 남는 화면에서 씁니다
  * @returns {HTMLElement}
  */
-export function emptyPanel({
-  head = '처음 오셨나요?', eyebrow = '', lines = [],
-  onExample, onOwn, exampleLabel = '예시 보기', ownLabel = '직접 시작하기', warn = '',
+export function emptyHint({
+  text = '', onExample, onOwn, exampleLabel = '예시로 보기', ownLabel = '', note = '',
 } = {}) {
   injectCss(document)
-  const box = mk('div', 'onb')
-  if (eyebrow) box.append(mk('div', 'onb__eyebrow', eyebrow))
-  const h = mk('h2', 'onb__head', head)
-  box.append(h)
-  if (lines.length) {
-    const ul = mk('ul', 'onb__lines')
-    for (const l of lines) ul.append(mk('li', null, l))
-    box.append(ul)
-  }
-  const row = mk('div', 'onb__row')
+  const box = mk('div', 'ehint')
+  if (text) box.append(mk('p', 'ehint__text', text))
   if (onExample) {
-    const b = mk('button', 'onb__go', exampleLabel)
+    const b = mk('button', 'ehint__go', exampleLabel)
     b.type = 'button'
+    /*
+     * 코치마크가 이 버튼을 짚습니다. 이 표시가 빠지면 앵커를 못 찾아 그 장이 조용히
+     * 건너뛰어집니다 — 눈에 보이지 않는 고장이라 검사가 이것을 봅니다.
+     */
     b.dataset.coach = 'example'
     b.onclick = () => onExample()
-    row.append(b)
+    box.append(b)
   }
-  if (onOwn) {
-    const b = mk('button', 'onb__own', ownLabel)
+  if (onOwn && ownLabel) {
+    const b = mk('button', 'ehint__own', ownLabel)
     b.type = 'button'
     b.onclick = () => onOwn()
-    row.append(b)
+    box.append(b)
   }
-  if (row.childElementCount) box.append(row)
-  if (warn) box.append(mk('p', 'onb__warn', warn))
+  if (note) box.append(mk('p', 'ehint__note', note))
   return box
 }
