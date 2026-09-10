@@ -3652,6 +3652,60 @@
       && scrub({ src: 'data:image/png;base64,' + 'A'.repeat(3_000_000) }).src === '')
   }
 
+  /* ── 자산으로 생성하기 — 사람이 짚은 하나만 (board.js 의 openMake) ─────────────
+   *
+   * assetJobs 는 컷을 읽어 한 벌을 뽑고, 이 창은 사람이 「소품 · 삼각김밥」이라고 짚어 그
+   * 하나만 뽑습니다. 두 길이 같은 서버 자리(server.py 의 ISOLATE)를 쓰므로, 짚어 보내는
+   * 값이 assetJobs 가 보내는 것과 같은 모양이어야 합니다. 여기서 그 셋을 맞대어 봅니다.
+   *
+   * 소스를 읽습니다 — 창을 여는 길이 로그인·GPU·승인을 지나야 열려서 실행할 수 없습니다.
+   */
+  try {
+    const src = await (await fetch(`pages/board.js?t=${Date.now()}`)).text()
+    const mk = src.slice(src.indexOf('async function runMake()'), src.indexOf('async function saveMake()'))
+
+    ok('짚은 종류를 서버의 ISOLATE 열쇠로 보낸다', /refKind:\s*`asset_\$\{type\}`/.test(mk))
+    ok('배경만 컷 크기, 나머지는 정방형 — assetJobs 의 kind 와 같다',
+      /kind:\s*type === 'bg' \? 'cut' : 'asset'/.test(mk))
+    /*
+     * 「이 그림 속 이것만」이라 그림을 조건으로 받는 모델이어야 합니다. 화면이 고른 모델이
+     * img2img 갈래면 기반을 지우고 다시 그려서 다른 물건이 나옵니다(extractAssets 와 같은 판단).
+     */
+    ok('그림을 조건으로 받는 모델로 보낸다', /model:\s*keepModelId\(\)/.test(mk))
+    ok('그 컷의 승인된 그림을 기반으로 넣는다', /asInit\(stillOf\(p\)\)/.test(mk)
+      && /refs:\s*\[init\]/.test(mk))
+    /* 뽑는 자격은 한 곳에서 봅니다. 여기 조건을 새로 적으면 두 단추가 다른 때에 열립니다 */
+    ok('뽑을 수 있는지는 whyNotExtract 하나가 정한다',
+      /const whyNotMake = \(panel\) => whyNotExtract\(panel\)/.test(src))
+    /*
+     * 남의 화면에도 「생성 중」으로 보여야 합니다. GPU 한 대를 나눠 쓰므로 이 칸이 비어
+     * 있으면 두 사람이 같은 기계를 겹쳐 부릅니다(extractAssets · animate 와 같은 규칙).
+     */
+    ok('그리는 동안 판에 generating 을 적는다', /generating: me\.id, genAt: now\(\)/.test(mk))
+    ok('끝나면 generating 을 반드시 되돌린다',
+      /finally \{[\s\S]*generating: false/.test(mk))
+
+    const save = src.slice(src.indexOf('async function saveMake()'), src.indexOf('let fastPoll'))
+    /*
+     * 검수가 저장보다 앞입니다. 팀 전체가 보는 자산이 되는 일이라, 눌러서 바로 들어가면
+     * 사람은 마음에 안 드는 그림을 자산관리에서 지우는 일부터 배웁니다.
+     */
+    ok('저장 전에 한 번 더 묻는다', /confirmAsk\(\{[\s\S]*재활용하시겠습니까/.test(save)
+      && save.indexOf('confirmAsk') < save.indexOf("kind: 'asset.add'"))
+    ok('그만두면 아무것도 남기지 않는다', /if \(!ok\) return/.test(save))
+    /*
+     * 덮지 않습니다. extractAssets 는 같은 컷의 같은 종류를 다시 뽑으면 갈아 끼우는데
+     * (asset.patch) 여기서 그러면 방금 짚은 삼각김밥이 그 앞의 커피를 지웁니다.
+     */
+    ok('자산은 새로 붙는다(갈아 끼우지 않는다)', /kind: 'asset\.add'/.test(save)
+      && !/asset\.patch/.test(save))
+    /* 자산관리 화면은 op 로그를 다시 읽습니다. 그 화면이 장을 가르는 열쇠가 type 입니다 */
+    ok('자산관리가 장을 가르는 type 을 남긴다', /asset: \{[\s\S]*\btype,/.test(save))
+    ok('어느 컷에서 나왔는지 남긴다', /fromPanelId: p\.id/.test(save))
+  } catch (e) {
+    ok('자산으로 생성하기 소스를 읽는다', false, e.message)
+  }
+
   /* ── permissions.js ↔ 서버의 허용 목록 ───────────────────────────────────────
    *
    * domain/permissions.js 의 표는 화면이 버튼을 미리 막는 근거이고, 실제로 튕기는 것은
