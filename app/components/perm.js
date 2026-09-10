@@ -23,11 +23,21 @@ import {
   ACTIONS, TRANSITIONS, STATUS, ROLES,
   canEditContent, ART_ROLES, PLAN_ROLES, ADMIN_VIEW_ROLES,
 } from '../domain/panels.js'
+import { JOB_ROLES } from '../domain/permissions.js'
 import { esc, setHtml } from '../lib/dom.js'
 import { josa } from '../lib/josa.js'
 import { opsClient } from '../services/api.js'
 import { session } from '../services/auth.js'
 
+/*
+ * server 가 있는 일은 서버가 Cognito 역할(custom:role)로 막는 일입니다. 이 표는 화면의
+ * 손질이고 서버는 이 표를 읽지 않으므로, 서버 목록 밖의 역할에는 「허용」을 줄 수 없습니다 —
+ * 줄 수 있는 것처럼 보여 주면 켜 놓고 눌렀을 때 서버가 튕겨서 표가 거짓말이 됩니다.
+ * 그 칸은 「역할 고정」으로 잠그고, 허용하려면 관리자가 역할을 바꾸라고 말합니다.
+ *   art   → infra/gpu/server.py ART_ROLES · infra/resolvers/genConnector.js ROLES
+ *   plan  → infra/resolvers/plan.js · navigate.js · saveGraph.js · updateGraph.js ROLES
+ *   grant → infra/resolvers/putOp.js (member.role 은 admin 만)
+ */
 export const CAPS = {
   ...Object.fromEntries(Object.entries(ACTIONS).map(([k, v]) => [k, {
     label: v.label, group: '컷 진행', roles: v.roles,
@@ -40,11 +50,17 @@ export const CAPS = {
     roles: Object.keys(ROLES).filter((r) => canEditContent(r, { status: 'draft' })),
     note: '작업 내용·대사·카메라. 승인된 컷은 역할과 무관하게 잠깁니다',
   },
-  art: { label: '이미지 만들기', group: '컷 내용', roles: ART_ROLES, note: '스케치 올리기, AI 생성, 모델 고르기' },
-  plan: { label: '기획 도구', group: '도구', roles: PLAN_ROLES, note: '이야기 기획, 컷을 대본으로, 대본 불러오기, 관계 그래프' },
+  art: { label: '이미지 만들기', group: '컷 내용', roles: ART_ROLES, server: JOB_ROLES.gen, note: '스케치 올리기, AI 생성, 모델 고르기' },
+  plan: { label: '기획 도구', group: '도구', roles: PLAN_ROLES, server: JOB_ROLES.plan, note: '이야기 기획, 컷을 대본으로, 대본 불러오기, 관계 그래프' },
   admin: { label: '관리 화면', group: '도구', roles: ADMIN_VIEW_ROLES, note: '로그와 기여도' },
-  grant: { label: '역할 바꾸기', group: '도구', roles: ['admin'], note: '팀원의 역할을 다른 역할로 바꿉니다' },
+  grant: { label: '역할 바꾸기', group: '도구', roles: ['admin'], server: ['admin'], note: '팀원의 역할을 다른 역할로 바꿉니다' },
 }
+
+/** 서버가 이 역할에게 이 일을 막는가. 표로는 못 여는 칸입니다 */
+export const serverFixed = (cap, role) => !!CAPS[cap]?.server && !CAPS[cap].server.includes(role)
+const FIXED_WHY = (cap, role) => `「${CAPS[cap].label}」${josa(CAPS[cap].label, '은', '는')} 서버가 역할로 고정한 일입니다. `
+  + `${CAPS[cap].server.map((r) => ROLES[r] || r).join('·')}만 할 수 있고, ${ROLES[role] || role}에게는 이 표로 열 수 없습니다. `
+  + '허용하려면 관리자가 역할을 바꿔야 합니다'
 
 export const CAP_GROUPS = ['컷 진행', '컷 내용', '도구']
 
@@ -114,15 +130,17 @@ export function permModel({ perms, roleOf, nameOf = (id) => id, meId = null }) {
     return c && c.on !== null && c.on !== undefined ? c : null
   }
 
-  /** 역할까지만 본 값. 역할 표가 이것을 보여 줍니다 */
+  /** 역할까지만 본 값. 역할 표가 이것을 보여 줍니다. 서버가 고정한 칸은 손질이 있어도 막음입니다 */
   const mayRole = (cap, role) => {
+    if (serverFixed(cap, role)) return false
     const r = cell('role', role, cap)
     return r ? r.on : !!CAPS[cap]?.roles.includes(role)
   }
 
-  /** 이 사람이 이것을 할 수 있는가. 사람 예외 → 역할 손질 → panels.js 기본값 순서입니다 */
+  /** 이 사람이 이것을 할 수 있는가. 서버 고정 → 사람 예외 → 역할 손질 → panels.js 기본값 순서입니다 */
   const may = (cap, who = self()) => {
     if (!CAPS[cap]) return false
+    if (serverFixed(cap, roleOf(who))) return false
     const u = cell('user', who, cap)
     if (u) return u.on
     return mayRole(cap, roleOf(who))
@@ -133,6 +151,7 @@ export function permModel({ perms, roleOf, nameOf = (id) => id, meId = null }) {
     const spec = CAPS[cap]
     if (!spec) return '알 수 없는 권한입니다'
     const role = roleOf(who)
+    if (serverFixed(cap, role)) return FIXED_WHY(cap, role)
     if (cell('user', who, cap)) {
       return `${who === self() ? '나에게' : `${nameOf(who) || '이 사람'}에게`}만 따로 `
         + `「${spec.label}」${josa(spec.label, '을', '를')} 막아 두었습니다. 감독이 권한 관리에서 풉니다`
@@ -152,6 +171,7 @@ export function permModel({ perms, roleOf, nameOf = (id) => id, meId = null }) {
   const whyNotRole = (cap, role) => {
     const spec = CAPS[cap]
     if (!spec) return '알 수 없는 권한입니다'
+    if (serverFixed(cap, role)) return FIXED_WHY(cap, role)
     if (cell('role', role, cap)) {
       return `권한 관리에서 ${ROLES[role] || role}의 「${spec.label}」${josa(spec.label, '을', '를')} 꺼 두었습니다`
     }
@@ -160,7 +180,12 @@ export function permModel({ perms, roleOf, nameOf = (id) => id, meId = null }) {
   }
 
   /** 손댄 칸 목록. 되돌리기 버튼과 「n칸 손질」 표시가 이것을 셉니다 */
-  const changed = () => Object.entries(table()).filter(([, v]) => v && v.on !== null && v.on !== undefined)
+  const changed = () => Object.entries(table()).filter(([key, v]) => {
+    if (!v || v.on === null || v.on === undefined) return false
+    // 서버 고정 칸에 남은 옛 손질은 아무 힘이 없습니다. 「n칸 손질」에 세지 않습니다
+    const [scope, who, cap] = key.split(':')
+    return !serverFixed(cap, scope === 'user' ? roleOf(who) : who)
+  })
 
   /**
    * 칸 하나를 뒤집는 op 를 만듭니다. 뒤집은 값이 기본값과 같아지면 손질을 지웁니다 —
@@ -170,6 +195,8 @@ export function permModel({ perms, roleOf, nameOf = (id) => id, meId = null }) {
   const toggle = (scope, who, cap) => {
     if (!CAPS[cap] || !who) return null
     const role = scope === 'user' ? roleOf(who) : who
+    // 서버가 고정한 칸은 뒤집을 것이 없습니다. op 를 만들면 표만 「허용」이 되고 서버는 그대로 튕깁니다
+    if (serverFixed(cap, role)) return null
     const base = scope === 'user' ? mayRole(cap, role) : CAPS[cap].roles.includes(role)
     const cur = cell(scope, who, cap)
     const want = !(cur ? cur.on : base)
@@ -181,10 +208,12 @@ export function permModel({ perms, roleOf, nameOf = (id) => id, meId = null }) {
 
 /* ── 표 ─────────────────────────────────────────────────────────────────────── */
 
-const cellHtml = (scope, who, cap, on, set, edit, why) => `
+const cellHtml = (scope, who, cap, on, set, edit, why, fixed = false) => (fixed ? `
+  <button class="pm__cell" data-pscope="${scope}" data-pwho="${esc(who)}" data-pcap="${cap}"
+    data-on="0" data-set="0" data-fixed="1" disabled title="${esc(why)}">역할 고정</button>` : `
   <button class="pm__cell" data-pscope="${scope}" data-pwho="${esc(who)}" data-pcap="${cap}"
     data-on="${on ? 1 : 0}" data-set="${set ? 1 : 0}" ${edit ? '' : 'disabled'}
-    title="${esc(`${on ? '할 수 있습니다' : why}${set ? ' · 기본값에서 손질한 칸입니다' : ''}`)}">${on ? '허용' : '막음'}</button>`
+    title="${esc(`${on ? '할 수 있습니다' : why}${set ? ' · 기본값에서 손질한 칸입니다' : ''}`)}">${on ? '허용' : '막음'}</button>`)
 
 function roleTable(m, edit) {
   const roles = Object.keys(ROLES)
@@ -198,11 +227,12 @@ function roleTable(m, edit) {
             <tr>
               <td class="pm__cap"><b>${esc(c.label)}</b><span>${esc(c.note || '')}</span></td>
               ${roles.map((r) => `<td>${cellHtml('role', r, k, m.mayRole(k, r),
-    !!m.cell('role', r, k), edit, m.whyNotRole(k, r))}</td>`).join('')}
+    !!m.cell('role', r, k), edit, m.whyNotRole(k, r), serverFixed(k, r))}</td>`).join('')}
             </tr>`).join('')}`).join('')}
       </tbody>
     </table>
     <p class="pm__note">테두리가 도드라진 칸은 기본값에서 손질한 것입니다. 다시 눌러 기본값으로 되돌립니다.
+      「역할 고정」은 서버가 로그인 역할로 막는 일이라 이 표로는 열 수 없습니다 — 허용하려면 관리자가 그 사람의 역할을 바꿔야 합니다.
       승인된 컷은 여기서 무엇을 켜도 잠긴 채로 있습니다 — 그것은 권한이 아니라 이야기의 규칙입니다.</p>`
 }
 
@@ -223,8 +253,8 @@ function userTable(m, edit, who, team) {
     return `
           <tr>
             <td class="pm__cap"><b>${esc(c.label)}</b><span>${esc(c.note || '')}</span></td>
-            <td class="pm__base">${base ? '허용' : '막음'}</td>
-            <td>${cellHtml('user', who, k, on, !!m.cell('user', who, k), edit, m.whyNot(k, who))}</td>
+            <td class="pm__base">${serverFixed(k, role) ? '역할 고정' : base ? '허용' : '막음'}</td>
+            <td>${cellHtml('user', who, k, on, !!m.cell('user', who, k), edit, m.whyNot(k, who), serverFixed(k, role))}</td>
             <td class="pm__reason">${on ? '' : esc(m.whyNot(k, who))}</td>
           </tr>`
   }).join('')}
@@ -300,6 +330,8 @@ const CSS = `
 /* 기본값에서 손댄 칸은 눈에 띄어야 합니다. 무엇을 되돌리면 되는지 바로 보입니다 */
 .pm__cell[data-set="1"] { outline: 2px solid var(--sb-bad, #b42318); outline-offset: 1px; }
 .pm__cell:disabled { cursor: not-allowed; opacity: .6; }
+/* 서버가 역할로 고정한 칸. 막음(빨강 점선)과 달리 「누가 잠갔다」가 아니라 「여기서는 못 연다」입니다 */
+.pm__cell[data-fixed="1"] { background: var(--sb-fill, #f8f9fb); color: var(--sb-ink-3, #767f8c); border-style: solid; opacity: .8; cursor: help; }
 .pm__row { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
 .pm__lab { font-size: 11.5px; color: var(--sb-ink-3, #767f8c); }
 .pm__sel, .pm__btn {

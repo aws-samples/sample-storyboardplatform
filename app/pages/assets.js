@@ -112,7 +112,7 @@ const inCat = (a) => S.cat === 'all' ? a.type !== 'still' : a.type === S.cat
 const shown = () => list().filter(inCat).filter(src)
 const picked = () => S.sel.map((id) => S.assets[id]).filter((a) => a && src(a) && REF_TYPES.includes(a.type))
 const typeName = (t) => ASSET_TYPES[t] || t || ''
-const whence = (a) => (a.fromPanelId ? '컷에서 뽑음' : a.source === 'upload' ? '올림' : a.type === 'still' ? '실사 스틸' : 'AI')
+const whence = (a) => (a.source === 'keep' ? '컷에서 저장' : a.fromPanelId ? '컷에서 뽑음' : a.source === 'upload' ? '올림' : a.type === 'still' ? '실사 스틸' : 'AI')
 const charName = (id) => S.chars[id]?.name || ''
 const drafts = () => Object.values(S.drafts).sort((a, b) => (b.ts || 0) - (a.ts || 0))
 // 후보 판은 만든 순서(1 → N)로. 최신순이면 왼쪽이 마지막 버전이라 번호와 자리가 어긋납니다

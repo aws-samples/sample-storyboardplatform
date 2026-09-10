@@ -1725,6 +1725,38 @@ async function extractAssets(panel, { auto = false } = {}) {
   if (failed.length) notice(`${labelOf(panel)} · 자산 ${failed.length}개를 못 뽑았습니다. ${failed[0]}`)
 }
 
+/**
+ * 컷의 지금 그림을 그대로 자산으로 둡니다. extractAssets 와 달리 GPU 로 다시 그리지
+ * 않고, 승인도 기다리지 않습니다 — 사람이 「이 그림이 인물/배경/소품이다」를 골라 넣는
+ * 자리입니다. 같은 컷·같은 종류를 다시 누르면 그 자산의 그림을 갈아 끼웁니다(asset.patch).
+ *
+ * @param {object} panel
+ * @param {'char'|'bg'|'prop'} type
+ */
+function keepAsAsset(panel, type) {
+  if (!REF_TYPES.includes(type)) return
+  if (!mayExtract()) { notice(denyReason('extract', roleOf(me.id))); return }
+  const src = stillOf(panel)
+  if (!src) { notice('먼저 이미지가 있어야 합니다'); return }
+  const firstCast = (panel.cast || []).map((id) => state.chars[id]).find(Boolean)
+  const name = type === 'char' ? (firstCast?.name || labelOf(panel))
+    : type === 'bg' ? (sceneMeta(panel.scene || '').where || labelOf(panel))
+    : labelOf(panel)
+  const fromN = (liveVer(panel)?.i ?? 0) + 1
+  const charId = type === 'char' ? (firstCast?.id ?? null) : null
+  const prev = assetsFrom(panel.id).find((a) => a.type === type && a.source === 'keep')
+  if (prev) {
+    emit({ kind: 'asset.patch', assetId: prev.id, fields: { src, fromN, name, charId, ts: now() } })
+  } else {
+    emit({
+      kind: 'asset.add',
+      asset: { id: uid(), type, name, charId, src, fromPanelId: panel.id, fromN, author: me.id, ts: now(), source: 'keep' },
+    })
+  }
+  announce(`${labelOf(panel)} · ${ASSET_TYPES[type]} 자산으로 자산관리에 넣었습니다.`)
+  renderDetail()
+}
+
 /** 참조로 고르는 자산 칩 한 장. 자산의 이름·삭제는 자산관리 화면(pages/assets.js)에서 합니다 */
 function assetCard(a, { pick = false } = {}) {
   const type = esc(ASSET_TYPES[a.type] || a.type || '')
@@ -3490,6 +3522,12 @@ function renderDetail() {
   const ch = p.charId ? state.chars[p.charId] : null
   const st = STATUS[p.status]
   const editable = mayEdit(p)
+  /*
+   * 그림 만들기는 「내용 편집」이 아니라 「이미지 만들기」권한입니다. 예전에는 생성 단추까지
+   * editable 로 잠가서, 권한 관리에서 「이미지 만들기」를 허용해도 「내용 편집」이 막힌
+   * 사람에게는 단추가 그대로 잠겨 있었습니다. 승인된 컷은 둘 다 잠깁니다(이야기의 규칙).
+   */
+  const artOk = p.status !== 'approved' && may('art')
   const cmts = state.comments.filter((c) => c.panelId === p.id).sort((x, y) => x.ts - y.ts)
   const logs = state.events.filter((e) => e.panelId === p.id).sort((x, y) => y.ts - x.ts).slice(0, 8)
   const cur = liveVer(p)
@@ -3515,6 +3553,7 @@ function renderDetail() {
    * 아닙니다.
    */
   const noEdit = nope(whyNotEdit(p))
+  const noArt = nope(p.status === 'approved' ? whyNotEdit(p) : whyNot('art'))
   const dis = () => (editable ? '' : `readonly ${noEdit}`)
 
   const o = optsFor(p)
@@ -3617,14 +3656,23 @@ function renderDetail() {
    * 화면에 뜹니다.
    */
   const assetsHref = navHref('assets', boardFromSearch())
-  const assetLine = p.charId || !canGen ? '' : extracting ? `
+  /*
+   * 이 그림을 그대로 자산으로. 뽑기(GPU 로 다시 그림)와 달리 승인·서버가 없어도 됩니다.
+   * 종류 세 개가 곧 단추입니다 — 고르고 저장하는 두 걸음을 한 번에 합칩니다.
+   */
+  const keptOf = (t) => assetsFrom(p.id).some((a) => a.type === t && a.source === 'keep')
+  const keepLine = p.charId || !stillOf(p) || !mayExtract() ? '' : `
+    <p class="why">이 그림을 그대로 <a href="${esc(assetsHref)}">자산관리</a>에 넣기:
+      ${REF_TYPES.map((t) => `<button type="button" class="mini" data-do="keep:${t}"
+        title="${keptOf(t) ? '이미 넣은 자산의 그림을 이 그림으로 바꿉니다' : `${ASSET_TYPES[t]} 자산으로 저장`}">${ASSET_TYPES[t]}${keptOf(t) ? ' ✓' : ''}</button>`).join('')}</p>`
+  const assetLine = keepLine + (p.charId || !canGen ? '' : extracting ? `
     <p class="why why--busy">${esc(extracting)}</p>` : p.status !== 'approved' ? `
     <p class="why">감독이 이 컷을 승인하면 그 그림에서 인물·배경·소품을 따로 그려
       <a href="${esc(assetsHref)}">자산관리</a>에 넣습니다.</p>` : `
     <p class="why">${assetMine.length
     ? `이 컷에서 뽑은 자산 ${assetMine.length}개가 <a href="${esc(assetsHref)}">자산관리</a>에 있습니다.`
     : `승인은 됐지만 뽑은 자산이 없습니다.${extractWhy ? ` ${esc(extractWhy)}.` : ''}`}
-      ${extractWhy ? '' : `<button type="button" class="mini" data-do="extract">${assetMine.length ? '다시 뽑기' : '자산으로 뽑기'}</button>`}</p>`
+      ${extractWhy ? '' : `<button type="button" class="mini" data-do="extract">${assetMine.length ? '다시 뽑기' : '자산으로 뽑기'}</button>`}</p>`)
 
   const genBlock = !may('art') ? `
     <h2 class="mono h" style="margin-top:22px">이미지</h2>
@@ -3633,11 +3681,11 @@ function renderDetail() {
     <label class="f">
       <span class="f__label"><span class="mono">생성 지시</span>
         ${o.prompt !== null ? '<button class="mini" data-do="autofill">작업 내용으로 다시 채우기</button>' : ''}</span>
-      <textarea rows="3" id="genPrompt" placeholder="어떤 그림이 필요한지 적어주세요. 한국어로 써도 됩니다." ${dis()}>${esc(o.prompt ?? autoPrompt(p))}</textarea>
+      <textarea rows="3" id="genPrompt" placeholder="어떤 그림이 필요한지 적어주세요. 한국어로 써도 됩니다." ${artOk ? '' : `readonly ${noArt}`}>${esc(o.prompt ?? autoPrompt(p))}</textarea>
     </label>
     <div class="gen__row">
       <span class="mono gen__lab">기반 이미지</span>
-      ${refs.map((r) => `<button class="chip" data-ref="${r.key}" data-on="${refKey === r.key ? 1 : 0}" title="${esc(r.hint || '')}" ${editable ? '' : noEdit}>${esc(r.label)}</button>`).join('')}
+      ${refs.map((r) => `<button class="chip" data-ref="${r.key}" data-on="${refKey === r.key ? 1 : 0}" title="${esc(r.hint || '')}" ${artOk ? '' : noArt}>${esc(r.label)}</button>`).join('')}
     </div>
     ${/* 고른 기반 이미지를 눈으로 확인시켜 줍니다. 이름만 있으면 무엇을 물려받는지 모릅니다 */ ''}
     ${pickedRef?.srcs ? `<div class="gen__ref gen__ref--many">${pickedRef.srcs.map((s) => media(s, 'alt="" loading="lazy"')).join('')}</div>`
@@ -3649,7 +3697,7 @@ function renderDetail() {
     ${assetPool.length ? `
     <div class="gen__row gen__row--top">
       <span class="mono gen__lab">참조 자산</span>
-      <div class="alib alib--pick" ${editable ? '' : noEdit}>${assetPool.map((a) => assetCard(a, { pick: assetOn.has(a.id) })).join('')}</div>
+      <div class="alib alib--pick" ${artOk ? '' : noArt}>${assetPool.map((a) => assetCard(a, { pick: assetOn.has(a.id) })).join('')}</div>
     </div>
     <p class="why">${assetIds.length
       ? `자산 ${assetIds.length}장을 참조로 보냅니다. 인물은 그 얼굴로, 배경은 그 장소로, 소품은 그 물건 그대로 새 구도를 그립니다.${
@@ -3669,15 +3717,15 @@ function renderDetail() {
       : picked && picked.strength === false ? `
       <p class="why">${esc(picked.label)}은 기반 이미지를 지우고 다시 그리지 않습니다. 조건으로 받아서 인물을 그대로 살립니다. 그래서 변형 정도가 없습니다.</p>` : `
       ${/* 슬라이더는 readonly 를 받지 않습니다. 잠근 채 두고 data-nope 는 감싼 줄에 답니다 */ ''}
-      <div class="gen__row" ${editable ? '' : noEdit}>
+      <div class="gen__row" ${artOk ? '' : noArt}>
         <span class="mono gen__lab">변형 정도</span>
-        <input type="range" id="genStrength" min="0.75" max="0.95" step="0.1" value="${o.strength}" ${editable ? '' : 'disabled'}>
+        <input type="range" id="genStrength" min="0.75" max="0.95" step="0.1" value="${o.strength}" ${artOk ? '' : 'disabled'}>
         <span class="mono gen__val">${morph(o.strength)}</span>
       </div>
       <p class="why">‘선 그대로’는 올린 스케치를 거의 유지하고, ‘새로 그리기’는 구도까지 모델이 다시 잡습니다.</p>`}
     <div class="acts">
-      <button class="btn btn--line" data-do="upload" ${editable ? '' : noEdit}>스케치 올리기</button>
-      <button class="btn btn--solid" data-do="generate" ${!editable ? noEdit : busyBy ? 'disabled' : ''}>
+      <button class="btn btn--line" data-do="upload" ${artOk ? '' : noArt}>스케치 올리기</button>
+      <button class="btn btn--solid" data-do="generate" ${!artOk ? noArt : busyBy ? 'disabled' : ''}>
         ${busyBy ? `${esc(busyBy.name)} 생성 중…` : assetIds.length ? `자산 ${assetIds.length}장으로 생성`
     : refKey === 'none' ? 'AI로 생성'
       : pickedRef?.face ? '이 인물로 생성' : '이 이미지를 기반으로 생성'}
@@ -4426,6 +4474,7 @@ detail.addEventListener('click', async (e) => {
     return
   }
   if (doWhat === 'extract') { extractAssets(p); return }
+  if (doWhat?.startsWith('keep:')) { keepAsAsset(p, doWhat.slice(5)); return }
   if (doWhat === 'autofill') { optsFor(p).prompt = null; renderDetail(); return }
   if (doWhat === 'viewer') { openViewer(p.id); return }
   if (memoClick(e, p, 'cmtInput')) return
