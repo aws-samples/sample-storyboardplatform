@@ -3706,6 +3706,74 @@
     ok('자산으로 생성하기 소스를 읽는다', false, e.message)
   }
 
+  /* ── 오른쪽 판의 모양 — 글씨 크기와 무게 (board.js 의 renderDetail) ───────────
+   *
+   * 이 판이 「글씨가 작고 몰려 있다」로 돌아온 적이 있습니다. 기능을 하나 붙일 때마다 단추를
+   * 같은 .acts 줄에 밀어넣고 설명을 11.5px 문단으로 아래에 쌓은 결과였습니다 — 셋째 단추를
+   * 붙이는 순간 344px 판에서 줄이 접히고, 그때 딸려 온 문단 넷이 그 아래로 흘렀습니다.
+   *
+   * 되돌아가기 쉬운 자리라 규칙을 못으로 박습니다. 검사하는 것은 셋입니다.
+   *
+   *   1. 단추 옆에 설명 문단을 따로 쌓지 않는다 — 이름과 설명이 한 칸에 든다(.tile)
+   *   2. 이 판에서 읽는 글은 한 크기다 — .why 가 12.5px 이다
+   *   3. 실제로 누르는 것에 9.5px 를 쓰지 않는다 — .mini 가 12px 이다
+   *
+   * 소스를 읽습니다. 이 판을 그리는 길이 로그인·소켓·컷 고르기를 지나야 열려서, 위 자산
+   * 검사와 같은 방법입니다.
+   */
+  try {
+    const src = await (await fetch(`pages/board.js?t=${Date.now()}`)).text()
+    const css = await (await fetch(`board.html?t=${Date.now()}`)).text()
+
+    /*
+     * 그림이 나온 다음에 하는 일 셋(영상·자산·스케치)은 타일입니다. 이름과 설명이 한 칸에
+     * 들어 있어야 그 설명이 판 아래로 흐르지 않습니다.
+     */
+    const tile = src.slice(src.indexOf('const tile = (act, label, sub, why'), src.indexOf('const cutTiles ='))
+    ok('타일 하나가 이름과 설명을 같이 든다',
+      /class="tile__t"/.test(tile) && /class="tile__sub"/.test(tile))
+    /*
+     * 막혀 있으면 설명 자리에 막힌 이유가 들어갑니다. 이 규칙이 없어지면 사라진 문단들이
+     * 「왜 막혔는지」를 말할 자리를 잃고 다시 판 아래로 돌아옵니다. 일이 돌고 있을 때는
+     * 그 진행이 이유보다 앞섭니다 — 「이미 영상을 만들고 있습니다」보다 진행 한 줄이 낫습니다.
+     */
+    ok('막힌 타일은 설명 자리에 그 이유를 낸다', /\$\{esc\(busy \|\| why \|\| sub\)\}/.test(tile))
+    ok('일이 돌고 있는 타일은 진행을 앞세우고 aria-busy 를 든다',
+      /tile--busy/.test(tile) && /aria-busy="true"/.test(tile))
+
+    /* 그리기 하나만 큰 단추입니다. 셋이 같은 크기로 한 줄에 서던 자리입니다 */
+    const cutGen = src.slice(src.indexOf('const cutGen = !may('), src.indexOf("const genLead = !may('art')"))
+    ok('그리기만 판 폭을 쓰는 큰 단추다',
+      /data-do="generate"[^>]*/.test(cutGen) && /btn--wide btn--go/.test(cutGen))
+    ok('나머지 셋은 타일로 내려간다', /\$\{cutTiles\}/.test(cutGen)
+      && !/class="acts"/.test(cutGen))
+    /*
+     * 무엇으로 그리는지는 이름·값 표입니다. 한 문장이었는데 조사가 갈리는 자리가 있었고
+     * (「v4으로 붙습니다」) 11.5px 두 줄이라 각주로 보였습니다.
+     */
+    ok('무엇으로 그리는지는 표로 낸다', /class="with"/.test(cutGen)
+      && /genRows\.map/.test(cutGen))
+
+    /*
+     * 바닥 띠. 갈 수 있는 길과 못 가는 길을 층으로 가릅니다 — 다섯이 같은 크기로 서서
+     * 판을 세 줄로 채우던 자리입니다. 감추지는 않습니다(누르면 이유가 뜹니다).
+     */
+    const foot = src.slice(src.indexOf('const actBtn = (x, cls)'), src.indexOf('const poseFields ='))
+    ok('갈 수 있는 길만 큰 단추로 세운다', /class="foot__go"/.test(foot)
+      && /actOn = acts\.filter\(\(x\) => mayTransition\(p\.status, x\)\.ok\)/.test(foot))
+    ok('못 가는 길도 남긴다(감추지 않는다)', /class="foot__off"/.test(foot)
+      && /actOff\.map\(\(x\) => actBtn\(x, 'foot__x'\)\)/.test(foot))
+
+    /* 이 판에서 읽는 글은 한 크기입니다. .cmt · .cut__action 과 같은 12.5px 입니다 */
+    ok('안내 한 줄이 12.5px 다', /\.why \{[^}]*font-size: 12\.5px/.test(css))
+    /* 실제로 누르는 작은 단추(이 컷 지우기 · 크게 보기)에 9.5px 를 쓰지 않습니다 */
+    ok('밑줄 단추가 12px 다', /\.mini \{[^}]*font-size: 12px/.test(css))
+    /* 덩이를 여닫는 제목입니다. 한글에 uppercase·자간을 걸면 잔글씨 라벨로 보입니다 */
+    ok('덩이 제목이 13px 굵은 글씨다', /\.sec__t \{[^}]*font-size: 13px[^}]*font-weight: 600/.test(css))
+  } catch (e) {
+    ok('오른쪽 판의 모양을 읽는다', false, e.message)
+  }
+
   /* ── permissions.js ↔ 서버의 허용 목록 ───────────────────────────────────────
    *
    * domain/permissions.js 의 표는 화면이 버튼을 미리 막는 근거이고, 실제로 튕기는 것은

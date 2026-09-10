@@ -634,6 +634,22 @@ a.btn--wide[hidden] { display: none; }
   position: sticky; bottom: 0; margin-top: 22px; padding: 12px 0 18px;
   background: var(--paper-2); border-top: 1px solid var(--edge);
 }
+/*
+ * 지금 갈 수 있는 길. 어느 상태에서든 한둘입니다(domain/panels.js 의 TRANSITIONS).
+ * 판 폭을 나눠 갖게 두면 하나일 때는 넓은 단추 하나, 둘일 때는 반반입니다.
+ */
+.foot__go { display: flex; gap: 8px; }
+.foot__go .btn { flex: 1 1 0; min-width: 0; padding: 10px 12px; font-size: 13.5px; font-weight: 600; }
+/*
+ * 지금 못 가는 길. 감추지 않고 층을 내립니다 — 눌러 보면 왜 안 되는지 뜹니다(data-act 처리).
+ * 다섯이 같은 크기로 한 줄에 서서 판을 세 줄로 채우던 자리입니다(board.js 의 actionBtns).
+ */
+.foot__off { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 9px; }
+.foot__x {
+  background: none; border: 0; padding: 0; cursor: not-allowed;
+  font-size: 11.5px; color: var(--pencil-2); text-decoration: underline dotted;
+}
+.foot__x:hover { color: var(--pencil); }
 .detail--empty { color: var(--pencil); font-size: 13px; padding: 22px 4px; }
 .detail__head { display: flex; align-items: baseline; gap: 9px; margin-bottom: 4px; }
 .detail__no { font-family: var(--mono); font-size: 13px; font-weight: 600; letter-spacing: .1em; }
@@ -697,11 +713,11 @@ a.btn--wide[hidden] { display: none; }
  * 할 일이 아무것도 안 보입니다. 그래서 .sec--step 의 모양만 물려받고 제목과 번호를 뺍니다.
  */
 .do {
-  border: 1px solid var(--pencil-2); border-radius: var(--r);
-  background: var(--paper); margin-top: 14px; padding: 12px;
+  border: 1px solid var(--pencil-2); border-radius: var(--sb-r-lg);
+  background: var(--paper); margin-top: 16px; padding: 14px;
 }
 /* 안의 첫 줄은 위 여백을 내지 않습니다. 이 장의 padding 이 이미 그것을 들고 있습니다.
-   단추 줄이 첫 줄이지만, 그릴 권한이 없으면 그 줄 대신 이유 한 줄이 옵니다 */
+   그리기 단추가 첫 줄이지만, 그릴 권한이 없으면 그 줄 대신 이유 한 줄이 옵니다 */
 .do > .acts:first-child, .do > .why:first-child { margin-top: 0; }
 
 .sec__sum {
@@ -711,13 +727,25 @@ a.btn--wide[hidden] { display: none; }
 /* webkit 의 기본 삼각형. 아래 ::after 로 우리 것을 그리므로 지웁니다 */
 .sec__sum::-webkit-details-marker { display: none; }
 .sec__sum:hover .sec__t { color: var(--ink); }
-.sec__t { color: var(--pencil-2); flex: 0 0 auto; }
+/*
+ * 덩이 제목. .mono 의 11px 대문자 자간이었습니다.
+ *
+ * 제목이 한글입니다(버전 · 메모 · 기록). uppercase 는 한글에 아무 일도 하지 않고 letter-spacing
+ * .1em 은 글자 사이만 벌려서, 11px 에 자간 넓은 회색 두 글자가 이 판을 여닫는 제목이었습니다.
+ * 여는 줄이라 눌러야 하는 것인데 잔글씨 라벨로 보였습니다. 본문 크기의 굵은 글씨로 세웁니다 —
+ * mono 의 자간만 걷어냅니다(class 는 그대로 둡니다. 다른 화면의 .mono 도 같이 씁니다).
+ */
+.sec__t {
+  color: var(--pencil); flex: 0 0 auto;
+  font-family: var(--sans); font-size: 13px; font-weight: 600;
+  letter-spacing: -.01em; text-transform: none;
+}
 /*
  * 접힌 채로 「안에 무엇이 있는지」 말하는 한 줄. 길면 자릅니다 — 두 줄로 접히면 접어서
  * 줄인 높이를 이 줄이 되찾아 갑니다.
  */
 .sec__lead {
-  font-size: 11px; color: var(--pencil-2); min-width: 0; margin-left: 2px;
+  font-size: 12px; color: var(--pencil-2); min-width: 0; margin-left: 2px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 /* 삼각형은 오른쪽 끝에 둡니다. 왼쪽에 두면 제목들이 한 글자씩 밀려 들쭉날쭉해집니다 */
@@ -741,7 +769,7 @@ a.btn--wide[hidden] { display: none; }
 .sec__aside { display: flex; flex-wrap: wrap; gap: 12px; margin: 0 0 8px; }
 .sec__aside .mini { margin-left: 0; }
 /* 덩이에 속하지 않는 한 줄(자산). 위 덩이의 아래 여백을 나눠 씁니다 */
-.sec__note { padding-bottom: 12px; }
+.sec__note { padding-bottom: 4px; }
 .sec__note .why { margin-top: 0; }
 
 /*
@@ -783,8 +811,139 @@ a.btn--wide[hidden] { display: none; }
 .f textarea[data-locked="1"] { border-color: currentColor; }
 
 .acts { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 16px; }
-.why { font-size: 11.5px; color: var(--pencil); margin: 8px 0 0; }
+/*
+ * 안내 한 줄. 11.5px 이었습니다.
+ *
+ * 이 판에서 「글씨가 작고 몰려 있다」의 절반이 이 규칙이었습니다. 판 하나에 .why 가 열 줄
+ * 넘게 서는 자리가 있었는데, 11.5px 회색이 여러 줄 쌓이면 각각은 안 읽히면서 자리는 다
+ * 먹습니다. 12.5px 로 올리고 줄 간격을 벌립니다 — 아래 .cmt(12.5px)·.cut__action(12.5px)과
+ * 같은 크기입니다. 이 판에서 읽는 글은 다 한 크기입니다.
+ *
+ * 크기를 올린 만큼 줄 수를 줄였습니다. 단추마다 딸려 있던 설명은 그 단추 안으로 들어갔고
+ * (.tile), 무엇으로 그리는지는 표가 됐습니다(.with). 남은 .why 는 「지금 뭔가 잘못됐다」와
+ * 「권한이 없다」뿐입니다.
+ */
+.why { font-size: 12.5px; line-height: 1.55; color: var(--pencil); margin: 10px 0 0; }
 .why--why { margin-top: 10px; padding-left: 8px; border-left: 2px solid var(--edge); }
+
+/*
+ * ── 담당 한 줄 ────────────────────────────────────────────────────────────────
+ *
+ * 이름·값을 나란히 눕힙니다. .f 를 쓰면 이름이 위에 얹혀 두 줄이 되는데, 고를 것이 하나뿐인
+ * 줄에 두 줄을 쓸 이유가 없습니다(board.js 의 renderDetail 「담당」 머리글).
+ */
+.who { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+.who__lab { color: var(--pencil); flex: 0 0 auto; }
+.who select {
+  flex: 1 1 auto; min-width: 0;
+  background: var(--paper); border: 1px solid var(--edge); border-radius: var(--r);
+  padding: 7px 9px; font-size: 13px;
+}
+.who select:focus { border-color: var(--stamp-blue); outline: none; }
+.who select:disabled { background: var(--sb-fill-2); color: var(--pencil-2); }
+
+/*
+ * ── 그리기 단추와 「무엇으로 그리는지」 표 ────────────────────────────────────
+ *
+ * 이 판에서 하는 일 하나가 그리기입니다. 판 폭을 다 쓰는 큰 단추로 세웁니다 — 옆에 같은
+ * 크기의 단추 둘이 서서 셋이 두 줄로 접히던 자리입니다(board.js 의 cutGen 머리글).
+ */
+.btn--go { padding: 11px 14px; font-size: 14px; font-weight: 600; }
+/*
+ * 이름·값 표. 「이 컷의 화면 설명으로, 자산 3장과 …을 물려받아 klein 이 그립니다」 한 문장이
+ * 여기 있었습니다. 왼쪽 이름 폭을 고정해 두면 값만 훑을 수 있고, 조사를 맞출 일도 없습니다.
+ */
+.with { display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 6px 10px; margin: 14px 0 0; }
+.with dt {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--pencil-2); padding-top: 2px;
+}
+.with dd { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--ink); }
+
+/*
+ * ── 그림이 나온 다음에 하는 일 ────────────────────────────────────────────────
+ *
+ * 영상 · 자산 · 스케치. 그리기 단추와 실선으로 갈라 둡니다 — 지금 하는 일이 아니라 그림
+ * 한 장이 정해진 다음의 일이라, 같은 층에 두면 어느 것이 먼저인지 없어집니다.
+ */
+.then { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--edge); }
+/*
+ * 타일 판. 오른쪽 기둥에서는 한 줄에 하나입니다.
+ *
+ * 둘씩 세워 봤습니다. 기둥이 344px 이고 스크롤 막대까지 빠지면 타일 하나에 글 넣을 자리가
+ * 110px 남는데, 그러면 「이 그림을 첫 프레임으로 삼아 움직입니다」가 다섯 줄로 접힙니다 —
+ * 줄여 놓은 높이를 접힌 설명이 되찾아 가고, 글씨는 다시 작아 보입니다. 한 줄에 하나면
+ * 이름 옆으로 설명이 한 줄에 들어갑니다. 세로로 세운 판(아래 1180px)에서는 폭이 남아
+ * 나란히 섭니다.
+ */
+.tiles { display: grid; gap: 8px; }
+/*
+ * 이름과 설명을 한 칸에 담는 단추.
+ *
+ * 이름만 있는 단추 옆에 회색 문단을 따로 쌓던 것을 합친 것입니다. 막혀 있으면 설명 자리에
+ * 막힌 이유가 들어갑니다 — whyNotClip·whyNotMake 가 이미 그 한 줄을 들고 있습니다.
+ */
+.tile {
+  display: grid; gap: 3px; text-align: left; cursor: pointer;
+  background: var(--paper); border: 1px solid var(--edge); border-radius: var(--r);
+  padding: 10px 11px 11px;
+  transition: border-color .12s, background .12s;
+}
+.tile:hover:not([aria-disabled="true"]) { border-color: var(--pencil-2); background: var(--paper-2); }
+.tile__t { font-size: 13px; font-weight: 600; color: var(--ink); }
+.tile__sub { font-size: 11.5px; line-height: 1.45; color: var(--pencil); }
+/*
+ * 막힌 타일. 통째로 흐리지 않습니다 — 그러면 설명 자리에 들어간 「왜 막혔는지」가 같이
+ * 흐려져서 읽으라고 넣은 말을 읽을 수 없습니다. 이름만 흐리고 이유는 그대로 둡니다.
+ */
+.tile[aria-disabled="true"] { cursor: not-allowed; background: var(--sb-fill-2); }
+.tile[aria-disabled="true"] .tile__t { color: var(--pencil-2); }
+.tile[aria-disabled="true"] .tile__sub { color: var(--pencil); }
+/* 지금 돌고 있는 타일. 막힌 것과 같은 회색으로 두면 「끝났나 막혔나」가 구별되지 않습니다 */
+.tile--busy, .tile--busy[aria-disabled="true"] {
+  background: var(--sb-accent-soft); border-color: var(--sb-accent-line); cursor: progress;
+}
+.tile--busy[aria-disabled="true"] .tile__t,
+.tile--busy[aria-disabled="true"] .tile__sub { color: var(--sb-accent-ink); }
+
+/*
+ * 영상의 길이·화질. 라벨 없는 select 둘이 한 줄에 붙어 있었습니다 — 무엇을 고르는 칸인지가
+ * 값에만 있어서, 「곱게 · 1280×704」로 바꾸면 그 줄이 무슨 줄이었는지 사라졌습니다.
+ */
+.opts { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 10px; margin-top: 10px; }
+.opts__cell { display: grid; gap: 4px; flex: 1 1 108px; min-width: 0; }
+.opts__lab { color: var(--pencil-2); font-size: 9.5px; }
+.opts__cell select {
+  width: 100%; background: var(--paper); border: 1px solid var(--edge); border-radius: var(--r);
+  padding: 6px 8px; font-size: 12.5px;
+}
+.opts__cell select:focus { border-color: var(--stamp-blue); outline: none; }
+.opts__eta { flex: 1 1 100%; font-size: 11.5px; color: var(--pencil-2); }
+
+/*
+ * ── 접지 않는 결과 한 줄 (이 컷에서 뽑은 자산) ────────────────────────────────
+ *
+ * 회색 문단 뒤에 9.5px 밑줄 링크로 「자산으로 뽑기」가 붙어 있었습니다. 이 판에서 실제로
+ * 누르는 것 중 가장 작은 글씨였습니다. 아래 덩이(.sec)의 제목 줄과 같은 모양으로 둡니다 —
+ * 이름 · 개수 · 오른쪽 끝에 누르는 것입니다.
+ */
+.line {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 9px;
+  margin-top: 14px; padding: 10px 11px;
+  background: var(--paper); border: 1px solid var(--edge); border-radius: var(--r);
+}
+.line__t { font-size: 12.5px; color: var(--ink); }
+.line__n { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--tape); }
+.line__go, .line__do {
+  margin-left: auto; background: none; border: 0; padding: 0; cursor: pointer;
+  font-size: 12px; color: var(--stamp-blue); text-decoration: underline;
+}
+.line__go { flex: 0 0 auto; }
+.line__do:hover { color: var(--sb-accent-ink); }
+/* 못 뽑는 이유. 줄 전체를 차지하고 다음 줄로 내려갑니다 — 이름 옆에 붙으면 한 문장으로 읽힙니다 */
+.line__why { flex: 1 1 100%; font-size: 11.5px; line-height: 1.45; color: var(--pencil); }
+.line--busy { border-color: var(--sb-accent-line); background: var(--sb-accent-soft); }
+.line--busy .line__t { color: var(--sb-accent-ink); }
 
 .lost {
   display: grid; gap: 4px; margin-top: 6px; padding: 7px 9px;
@@ -834,9 +993,18 @@ a.btn--wide[hidden] { display: none; }
 /* 컷에 인물을 붙이는 칩 줄(.cast · .cast__chip)이 여기 있었습니다. 등장 인물을 이 판에서
    고치지 않게 되면서 같이 나갔습니다(board.js 의 renderDetail 「여기 있던 것」 머리글) */
 
-.gen__row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.gen__lab { color: var(--pencil); flex: 0 0 auto; }
-.gen__val { color: var(--ink); font-size: 10.5px; min-width: 34px; text-align: right; }
+/*
+ * 이름 하나에 칩 몇 줄(기반 이미지 · 기반을 얼마나 살릴지). 인물 구도가 씁니다.
+ *
+ * 이름과 칩이 한 줄에 섞여 있었습니다. 이름이 11px 대문자 mono 라 첫 칩과 구별이 안 됐고,
+ * 칩이 셋 넘으면 다음 줄로 넘어가면서 그 줄이 이름 아래로 들쭉날쭉 흘렀습니다. 이름을
+ * 자기 줄로 올립니다 — 칩은 아래에서 줄바꿈하고, 이름은 늘 왼쪽 맨 위입니다.
+ */
+.gen__row { display: grid; gap: 7px; margin-top: 14px; }
+.gen__lab { color: var(--pencil); font-size: 9.5px; }
+.gen__chips { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+/* 줄 끝의 값 하나(.gen__val)가 여기 있었습니다. 영상 예상 시간만 쓰던 것이라 그 줄이
+   두 칸으로 갈리면서 같이 나갔습니다 — 지금은 .opts__eta 가 그 말을 합니다 */
 /* input[type=range] 규칙이 여기 있었습니다. 변형 정도 슬라이더 하나만 쓰던 것이라
    같이 나갔습니다 — 고를 것이 셋뿐이어서 위 기반 이미지 줄과 같은 칩으로 바꿨습니다 */
 /* 고른 기반 이미지 미리보기. 이름만 있으면 무엇을 물려받는지 안 보인다 */
@@ -845,9 +1013,10 @@ a.btn--wide[hidden] { display: none; }
 /* 인물 여럿을 함께 참조할 때. 실제로 보내는 그림도 이렇게 나란히 붙인 한 장이다 */
 .gen__ref--many { display: flex; gap: 1px; }
 .gen__ref--many img { width: auto; flex: 1 1 0; min-width: 0; object-fit: contain; }
+/* 고르는 칩. 11.5px 에 padding 3px 이라 손가락으로 짚을 자리가 없었습니다 */
 .chip {
-  font-size: 11.5px; background: var(--paper); border: 1px solid var(--edge);
-  border-radius: 12px; padding: 3px 10px 2px; cursor: pointer; color: var(--pencil);
+  font-size: 12.5px; background: var(--paper); border: 1px solid var(--edge);
+  border-radius: 14px; padding: 5px 12px; cursor: pointer; color: var(--pencil);
 }
 .chip:hover:not(:disabled) { border-color: var(--pencil); color: var(--ink); }
 .chip[data-on="1"] { background: var(--stamp-blue); border-color: var(--stamp-blue); color: #fff; }
@@ -861,20 +1030,27 @@ a.btn--wide[hidden] { display: none; }
   font-style: normal; font-size: 9.5px; letter-spacing: .04em; margin-left: 6px; padding: 1px 5px;
   border: 1px solid var(--edge); border-radius: 8px; color: var(--pencil); vertical-align: 1px;
 }
+/*
+ * 밑줄 하나로 된 작은 단추(크게 보기 · 이 버전 지우기 · 이 컷 지우기 · 다시 채우기).
+ *
+ * 9.5px 대문자 mono 였습니다. 한글 이름에 uppercase 는 아무 일도 하지 않고, 실제로 누르는
+ * 것 중에 이 판에서 가장 작은 글씨였습니다 — 「이 컷 지우기」가 그것이라 눌러야 할 것을
+ * 못 찾거나 잘못 눌렀습니다. 12px sans 로 올립니다.
+ */
 .mini {
   margin-left: auto; background: none; border: none; padding: 0; cursor: pointer;
-  font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em;
-  color: var(--stamp-blue); text-decoration: underline;
+  font-size: 12px; color: var(--stamp-blue); text-decoration: underline;
 }
 /* 눌러도 안 되는 작은 단추. 파란 밑줄 그대로 두면 눌릴 것처럼 읽힌다 */
 .mini:disabled, .mini[aria-disabled="true"] {
   color: var(--pencil-2); text-decoration: none; cursor: not-allowed;
 }
 .why--bad { color: var(--stamp-red); }
-.ver__meta { font-family: var(--mono); font-size: 9px; color: var(--pencil-2); letter-spacing: .02em; }
+.ver__meta { font-family: var(--mono); font-size: 10px; color: var(--pencil-2); letter-spacing: .02em; }
 
-.log { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 5px; }
-.log li { font-family: var(--mono); font-size: 10px; color: var(--pencil); line-height: 1.6; }
+.log { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+/* 지난 일의 목록. mono 10px 이었는데 「누가 무엇을 무엇으로」라 읽는 글입니다 */
+.log li { font-size: 11.5px; color: var(--pencil); line-height: 1.6; }
 .log b { color: var(--ink); font-weight: 600; }
 
 .dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; }
@@ -1081,8 +1257,8 @@ dialog.adm::backdrop { background: rgba(17,19,24,.5); }
 /* 머리 띠가 없으므로 한 칸입니다. 넘치는 것은 창이 굴립니다 — 관리 창은 .adm__body 가 굴립니다 */
 dialog.adm.mk { width: min(560px, 94vw); grid-template-rows: minmax(0, 1fr); overflow: auto; }
 .mk__in { padding: 18px 19px 20px; display: grid; gap: 0; }
-.mk__h { margin: 0 0 4px; font-size: 15px; letter-spacing: -.01em; }
-.mk__sub { margin: 0 0 14px; font-size: 11.5px; color: var(--pencil); }
+.mk__h { margin: 0 0 5px; font-size: 16px; letter-spacing: -.015em; }
+.mk__sub { margin: 0 0 15px; font-size: 12.5px; line-height: 1.55; color: var(--pencil); }
 /* 어느 컷에서 떼어내는지. 그림을 옆에 세워 두지 않으면 「무엇에서」가 글자뿐입니다 */
 .mk__from { display: flex; gap: 11px; align-items: flex-start; margin: 0 0 15px; }
 .mk__thumb {
@@ -1090,13 +1266,16 @@ dialog.adm.mk { width: min(560px, 94vw); grid-template-rows: minmax(0, 1fr); ove
   aspect-ratio: 16 / 9; overflow: hidden;
 }
 .mk__thumb img, .mk__thumb video { width: 100%; height: 100%; object-fit: cover; display: block; }
-.mk__fromtxt { min-width: 0; font-size: 11.5px; color: var(--pencil); }
-.mk__fromtxt b { display: block; margin-bottom: 3px; font-size: 12.5px; font-weight: 600; color: var(--ink); }
+.mk__fromtxt { min-width: 0; font-size: 12px; line-height: 1.5; color: var(--pencil); }
+.mk__fromtxt b { display: block; margin-bottom: 4px; font-size: 13px; font-weight: 600; color: var(--ink); }
+/* 무엇을 고르는 자리인지. 9.5px 대문자 mono 였는데 한글이라 자간만 벌어졌습니다 */
 .mk__lab {
-  display: block; margin: 0 0 6px; font-family: var(--mono);
-  font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--pencil-2);
+  display: block; margin: 0 0 7px;
+  font-size: 12px; font-weight: 600; color: var(--pencil);
+  letter-spacing: 0; text-transform: none;
 }
-.mk__types { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 4px; }
+/* 셋이 한 줄에 섭니다. 창이 560px 이라 130px 셋이면 들어갑니다 — 좁으면 둘씩 접힙니다 */
+.mk__types { display: flex; flex-wrap: wrap; gap: 7px; margin: 0 0 4px; }
 /*
  * 종류 셋. 칩 하나에 이름과 「무엇이 나오는지」를 같이 적습니다. 이름만 있으면 「인물」과
  * 「배경」의 차이는 알지만 배경을 골랐을 때 사람이 지워진다는 것은 눌러 봐야 압니다.
@@ -1104,20 +1283,20 @@ dialog.adm.mk { width: min(560px, 94vw); grid-template-rows: minmax(0, 1fr); ove
 .mk__type {
   flex: 1 1 130px; text-align: left; cursor: pointer;
   background: var(--paper); border: 1px solid var(--edge); border-radius: var(--r);
-  padding: 8px 10px; color: var(--ink); font: inherit;
+  padding: 10px 11px 11px; color: var(--ink); font: inherit;
 }
 .mk__type:hover:not(:disabled) { border-color: var(--pencil); }
 .mk__type[data-on="1"] { border-color: var(--stamp-blue); background: var(--sb-accent-soft); }
-.mk__type b { display: block; font-size: 12.5px; font-weight: 600; }
+.mk__type b { display: block; font-size: 13px; font-weight: 600; }
 .mk__type[data-on="1"] b { color: var(--sb-accent-ink); }
-.mk__type span { display: block; margin-top: 2px; font-size: 10.5px; line-height: 1.45; color: var(--pencil); }
+.mk__type span { display: block; margin-top: 3px; font-size: 11.5px; line-height: 1.45; color: var(--pencil); }
 .mk__what {
   width: 100%; font: inherit; font-size: 13px; box-sizing: border-box;
   background: var(--paper); border: 1px solid var(--edge); border-radius: var(--r);
   color: var(--ink); padding: 9px 10px;
 }
 .mk__what:focus { outline: none; border-color: var(--stamp-blue); box-shadow: 0 0 0 2px var(--sb-accent-soft); }
-.mk__field { margin: 14px 0 0; }
+.mk__field { margin: 16px 0 0; }
 /* 나온 그림을 검수하는 자리. 창 안에서 그대로 봅니다 — 저장하고 나서 자산관리로 가서 볼 일이 아닙니다 */
 .mk__out {
   margin: 15px 0 0; border: 1px solid var(--edge); background: var(--paper-2);
@@ -1125,8 +1304,8 @@ dialog.adm.mk { width: min(560px, 94vw); grid-template-rows: minmax(0, 1fr); ove
 }
 .mk__out img { max-width: 100%; max-height: 46vh; display: block; }
 .mk__busy {
-  margin: 15px 0 0; padding: 13px; border: 1px dashed var(--edge); border-radius: var(--r);
-  font-size: 12px; color: var(--stamp-blue); text-align: center;
+  margin: 15px 0 0; padding: 14px; border: 1px dashed var(--edge); border-radius: var(--r);
+  font-size: 13px; color: var(--stamp-blue); text-align: center;
 }
 .mk__row { display: flex; gap: 7px; margin-top: 17px; align-items: center; }
 .mk__row .mk__spacer { margin-left: auto; }
@@ -1318,6 +1497,13 @@ dialog.adm.mk { width: min(560px, 94vw); grid-template-rows: minmax(0, 1fr); ove
   .side + .side { margin-top: 14px; }
   .side__body { overflow: visible; padding-right: 0; margin-right: 0; }
   .vw__body { grid-template-columns: 1fr; }
+  /*
+   * 오른쪽 판이 세로로 눕습니다. 폭이 화면 전체라 타일 셋이 나란히 섭니다 — 344px 기둥에서
+   * 한 줄에 하나였던 이유(설명이 다섯 줄로 접힘)가 여기서는 없습니다.
+   */
+  .tiles { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+  /* 담당 칸이 화면 폭을 다 먹지 않게. 이름 옆의 select 하나가 1200px 이 될 이유가 없습니다 */
+  .who select { max-width: 320px; }
 }
 
 @media (max-width: 760px) {
