@@ -87,6 +87,19 @@
   .btn--line:hover:not(:disabled) { border-color: var(--sb-accent-line); color: var(--acc-ink); background: var(--acc-soft); }
   .btn--wide { width: 100%; }
   .btn--mini { padding: 8px 12px; font-size: 13px; border-radius: var(--sb-r); }
+  /*
+   * 다음 단계로 넘어가는 단추. 한 카드에 하나만 씁니다.
+   *
+   * 카드 안의 단추가 다 같은 크기였습니다. 그래서 「대본화」처럼 다음 화면으로 데려가는
+   * 것과 「닫기」가 같은 무게로 서 있었고, 스토리를 다 만든 사람이 어디를 눌러야 이어지는지
+   * 카드를 다시 읽어야 알았습니다. 다음 걸음만 크게 둡니다.
+   */
+  .btn--lg { padding: 16px 22px; font-size: 16.5px; border-radius: 10px; }
+  /*
+   * 링크로 된 단추. 다른 화면으로 데려가는 자리는 <a> 라야 합니다 — 새 탭으로 열거나
+   * 주소를 복사하는 길이 남고, 스크린리더도 「누르는 것」이 아니라 「가는 것」으로 읽습니다.
+   */
+  a.btn { display: inline-block; text-align: center; text-decoration: none; }
 
   textarea, select, input[type="text"], input[type="password"] {
     width: 100%; background: #fff; border: 1px solid var(--line); border-radius: var(--sb-r);

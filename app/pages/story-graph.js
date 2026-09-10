@@ -1019,11 +1019,17 @@ const expandDone = (x) => {
     <div class="ok">${n ? `새로운 스토리 소재 ${n}개를 발견했습니다.` : '이번에는 새로운 스토리 소재가 나오지 않았습니다.'}</div>
     ${ko.notes.length ? `<details class="warns"><summary>확인사항 ${ko.notes.length}건</summary>
       <ul>${ko.notes.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></details>` : ''}
+    ${/*
+      다음 걸음을 제일 크게 둡니다.
+      스토리를 판에 반영한 다음에 하는 일은 대본화입니다. 그런데 이 카드의 단추 셋이 다
+      같은 크기라서, 이어서 할 자리가 「소재 보기」와 「닫기」 사이에 섞여 있었습니다.
+      대본화만 크게 세우고 나머지는 옆줄로 내립니다(.btn--lg 는 story-graph.html).
+    */''}
+    <div class="card__row"><button class="btn btn--lg btn--wide" id="exScript">대본화로 이어가기 →</button></div>
     <div class="card__row">
-      <button class="btn btn--wide" id="exSeeds">스토리 소재 ${n}개 보기</button>
-      <button class="btn btn--line" id="exScript">대본화</button>
+      <button class="btn btn--line" id="exSeeds">스토리 소재 ${n}개 보기</button>
+      <button class="btn btn--line" id="exClose">닫기</button>
     </div>
-    <div class="card__row"><button class="btn btn--line btn--wide" id="exClose">닫기</button></div>
     <div class="hint">새로 추가된 인물·관계는 관계도에서 녹색으로 표시됩니다.
       변경된 관계는 붉은 점선으로 잠시 표시됩니다.<br>
       소재를 다시 선택하면 업데이트된 세계관에서 다음 회차 스토리가 만들어집니다.</div>`
@@ -1261,6 +1267,24 @@ async function applyToBoard() {
 // ── 대본화 ───────────────────────────────────────────────────────────────────
 // 보드의 컷을 정식 대본 텍스트로 옮긴다. 스토리 디벨롭과는 따로 도는 기능이다.
 
+/**
+ * 대본 다음에 하는 일로 데려가는 줄.
+ *
+ * 대본이 만들어지면 keepScript 가 그것을 이 프로젝트의 script 에셋에 담고, 키비주얼
+ * 화면이 열릴 때 같은 자리를 읽어 대본 칸을 채웁니다(pages/key-visual.js 의
+ * restoreAssets). 그래서 사람이 「복사」를 눌러 옮길 필요가 없는데, 정작 그 화면으로
+ * 가는 길이 이 패널에 없어서 위쪽 탭 바를 다시 찾아야 했습니다. 만든 자리에 둡니다.
+ *
+ * ?board= 를 달고 갑니다. 안 달면 키비주얼이 기본 보드를 열고, 방금 담은 대본이 아니라
+ * 다른 프로젝트의 대본을 읽습니다(domain/routes.js 의 navHref).
+ */
+const nextToKeyVisual = () => `
+  <div class="card__row">
+    <a class="btn btn--lg btn--wide" href="${esc(navHref('keyvisual', BOARD))}">키비주얼로 이어가기 →</a>
+  </div>
+  <div class="hint">이 대본은 프로젝트에 담겼습니다. 키비주얼 화면이 열리면 대본 칸에 그대로 들어가 있어서,
+    복사해 붙이지 않아도 됩니다. 거기서 씬으로 나누고 씬마다 그림을 만듭니다.</div>`
+
 function renderScriptPanel() {
   const box = $('scriptPanel')
   if (!box) return
@@ -1281,6 +1305,7 @@ function renderScriptPanel() {
       </div>
       <div class="hint" id="scNote">이 프로젝트에 담아 둔 대본입니다.
         컷은 남지 않아서 다시 만들려면 씨앗 → 분기를 지나야 합니다.</div>
+      ${nextToKeyVisual()}
     </div>` : `<div class="placeholder">컷이 없습니다. 먼저 스토리를 생성해 주세요.<br>
       씨앗 → 분기 → <b>이 분기로 대본 생성</b> 을 지나면 여기에 컷이 들어옵니다.</div>`
     if ($('scCopy')) $('scCopy').onclick = () => copyScript(SCRIPT.text)
@@ -1311,7 +1336,8 @@ function renderScriptPanel() {
         <button class="btn btn--line" id="scCopy">복사</button>
         <button class="btn btn--line" id="scDown">다운로드</button>
       </div>
-      <div class="hint" id="scNote">${esc(scriptFileName(ep.title))} 으로 내려받습니다 (UTF-8 BOM).</div>` : ''}
+      <div class="hint" id="scNote">${esc(scriptFileName(ep.title))} 으로 내려받습니다 (UTF-8 BOM).</div>
+      ${nextToKeyVisual()}` : ''}
     <div class="sec-label">컷 ${ep.cuts.length}개</div>
     ${ep.cuts.map(cutRow).join('')}
   </div>`
