@@ -30,6 +30,12 @@ MODELS = {
         repo="black-forest-labs/FLUX.2-klein-4B", label="FLUX.2 klein 4B", note="균형 · 기준 반영",
         family="flux2", steps=8, guide=4.0, guide_ref=4.0, gb=15,
     ),
+    # klein 의 큰 판. 같은 파이프라인(참조 그림 목록을 조건으로)이라 스틸·참조 생성의 품질이 오른다.
+    # 게이트 저장소(라이선스 other) — HF 키 계정이 약관에 동의해야 받아진다. 트랜스포머 18GB + Qwen3 8B 인코더.
+    "klein9": dict(
+        repo="black-forest-labs/FLUX.2-klein-9B", label="FLUX.2 klein 9B", note="정밀 · 기준 반영",
+        family="flux2", steps=8, guide=4.0, guide_ref=4.0, gb=35, gated=True,
+    ),
     "hd": dict(
         repo="lodestones/Chroma1-HD", label="Chroma1-HD", note="정밀 · 마감",
         family="chroma", steps=26, guide=4.0, guide_ref=4.0, gb=26,
@@ -487,15 +493,33 @@ def pick(mid: str | None) -> str:
         return mid
     return cur if cur and cur not in VIDEO else DEFAULT
 
-# 참조 그림을 조건으로 받는 모델. 그림을 받지 않는 모델(krea)에 참조가 오면 여기로 돌린다
-REF_MODEL = next(k for k, v in MODELS.items() if v["family"] == "flux2")
+# 참조 그림을 조건으로 받는 갈래(flux2). 큰 판(klein9)이 디스크에 있으면 그것, 없으면 4B 다.
+# 게이트를 아직 못 열었거나 받는 중이면 4B 로 돌아가야 화면이 오지 않는 모델을 기다리지 않는다
+REF_ORDER = ["klein9", "klein"]
+
+def cached(mid: str) -> bool:
+    """가중치가 디스크(HF 캐시)에 있는가. 받는 중이면 snapshots 이 아직 없다"""
+    repo = MODELS[mid]["repo"].replace("/", "--")
+    d = os.path.join(os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface")), "hub", f"models--{repo}", "snapshots")
+    try:
+        return any(os.path.exists(os.path.join(d, sn, "model_index.json")) for sn in os.listdir(d))
+    except OSError:
+        return False
+
+def ref_model() -> str:
+    """지금 참조 생성에 쓸 모델. 올라와 있는 flux2 가 있으면 그것(내렸다 올리지 않는다), 아니면 디스크에 있는 첫 것"""
+    if cur in REF_ORDER:
+        return cur
+    return next((k for k in REF_ORDER if cached(k)), REF_ORDER[-1])
+
+REF_MODEL = REF_ORDER[-1]   # 자체 검사가 보는 최소 보장값
 
 def pick_for(req: Req) -> str:
-    """요청에 맞는 그림 모델. 참조(refs·init)가 있는데 고른 모델이 그림을 받지 않으면 REF_MODEL.
+    """요청에 맞는 그림 모델. 참조(refs·init)가 있는데 고른 모델이 그림을 받지 않으면 ref_model().
     화면(board.js 의 modelFor)도 같은 판단을 하지만, 서버가 보장해야 참조를 말없이 버리는 일이 없다"""
     mid = pick(req.model)
     if (req.refs or req.init) and MODELS[mid].get("init") is False:
-        return REF_MODEL
+        return ref_model()
     return mid
 
 def build(spec: dict, req: Req) -> str:
@@ -834,6 +858,8 @@ def health():
         # 화면이 모델을 안 고르면 이것으로 그린다(pick 의 되돌아갈 곳). 화면이 같은 이름을
         # 따로 적어 두면 여기를 바꿀 때 어긋나므로, 물어보게 한다
         "default": DEFAULT,
+        # 참조 생성에 쓸 모델. 화면(board.js keepModelId · assets.js refModel)이 이것을 고른다
+        "ref": ref_model(),
         "loading": loading, "wait": wait_s(loading) if loading else 0,
         "models": [{"id": k, "label": v["label"], "note": v["note"], "wait": wait_s(k),
                     "strength": v["family"] in ("chroma", "sd3"),
@@ -880,8 +906,7 @@ if __name__ == "__main__":
     job_set("job-000002", status="done", url="/img/a.png"); assert "old-000001" not in jobs and jobs["job-000002"]["url"] == "/img/a.png"
     jobs.clear()
     # 참조가 있으면 그림을 받지 않는 모델(krea)로 가지 않는다. 없으면 고른 대로
-    assert REF_MODEL == "klein"
-    assert pick_for(Req(model="krea", refs=["x"])) == "klein" and pick_for(Req(model="krea", init="x")) == "klein"
+    assert pick_for(Req(model="krea", refs=["x"])) in REF_ORDER and pick_for(Req(model="krea", init="x")) in REF_ORDER
     assert pick_for(Req(model="krea")) == "krea" and pick_for(Req(model="hd", refs=["x"])) == "hd"
     # 엎어진 모델은 저절로 다시 올리지 않는다. 사람이 고르면(force) 다시 해 본다
     load_error, load_error_mid = "krea: 실패", "krea"
@@ -894,9 +919,13 @@ if __name__ == "__main__":
     assert lit.getpixel((2, 16))[0] < lit.getpixel((61, 16))[0] < 256
     assert sum(lit.getpixel((2, 16))) < 3 * 255 * 0.4
 
-    assert set(MODELS) == {"chroma", "klein", "hd", "sd35", "krea", "wan"}
-    assert MODELS["sd35"]["gated"] and MODELS["krea"]["gated"]
-    assert not any(v.get("gated") for k, v in MODELS.items() if k not in ("sd35", "krea"))
+    assert set(MODELS) == {"chroma", "klein", "klein9", "hd", "sd35", "krea", "wan"}
+    assert MODELS["sd35"]["gated"] and MODELS["krea"]["gated"] and MODELS["klein9"]["gated"]
+    assert not any(v.get("gated") for k, v in MODELS.items() if k not in ("sd35", "krea", "klein9"))
+    assert all(MODELS[k]["family"] == "flux2" for k in REF_ORDER) and REF_MODEL == "klein"
+    # 캐시에 없으면 4B, 9B 가 올라와 있으면 9B
+    assert ref_model() in REF_ORDER
+    cur = "klein9"; assert ref_model() == "klein9"; cur = None
     assert MODELS["krea"]["init"] is False and all(v.get("init", True) for k, v in MODELS.items() if k != "krea")
     for k, v in MODELS.items():
         assert v["family"] in FAMILY, k
