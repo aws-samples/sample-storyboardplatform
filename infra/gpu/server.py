@@ -514,6 +514,15 @@ def ref_model() -> str:
 
 REF_MODEL = REF_ORDER[-1]   # 자체 검사가 보는 최소 보장값
 
+# 화면이 고를 수 있는 그림 모델. 둘만 남겼다(2026-09-10) — klein 9B(참조 이미지를 받는다) 와 Krea 2 Turbo(글만).
+# 나머지는 코드에 남아 있지만 목록에 내지 않는다. 9B 가중치가 아직 없으면 그 자리는 4B 가 대신 선다
+PICK = ["klein9", "krea"]
+
+def pickable() -> list:
+    out = [k if not (k == "klein9" and not cached("klein9") and cached("klein")) else "klein" for k in PICK]
+    r = ref_model()
+    return out if r in out else [r, *out]
+
 def pick_for(req: Req) -> str:
     """요청에 맞는 그림 모델. 참조(refs·init)가 있는데 고른 모델이 그림을 받지 않으면 ref_model().
     화면(board.js 의 modelFor)도 같은 판단을 하지만, 서버가 보장해야 참조를 말없이 버리는 일이 없다"""
@@ -861,11 +870,13 @@ def health():
         # 참조 생성에 쓸 모델. 화면(board.js keepModelId · assets.js refModel)이 이것을 고른다
         "ref": ref_model(),
         "loading": loading, "wait": wait_s(loading) if loading else 0,
-        "models": [{"id": k, "label": v["label"], "note": v["note"], "wait": wait_s(k),
-                    "strength": v["family"] in ("chroma", "sd3"),
+        "models": [{"id": k, "label": MODELS[k]["label"], "note": MODELS[k]["note"], "wait": wait_s(k),
+                    "strength": MODELS[k]["family"] in ("chroma", "sd3"),
                     # 그림을 조건으로 받지 않는 모델. 화면이 참조 있는 요청을 다른 모델로 돌린다
-                    "init": v.get("init", True),
-                    "video": k in VIDEO} for k, v in MODELS.items()],
+                    "init": MODELS[k].get("init", True),
+                    "video": False} for k in pickable()]
+                  + [{"id": k, "label": v["label"], "note": v["note"], "wait": wait_s(k), "strength": False,
+                      "init": True, "video": True} for k, v in MODELS.items() if k in VIDEO],
         # 사유와 그 사유의 주인. 화면은 자기가 기다리는 모델의 것일 때만 읽어야 한다
         "gpu": name, "error": load_error, "errorModel": load_error_mid,
         # 영상 칸이 물어보는 것들. 몇 초짜리를 만들 수 있고 얼마나 걸리는지
@@ -926,6 +937,8 @@ if __name__ == "__main__":
     # 캐시에 없으면 4B, 9B 가 올라와 있으면 9B
     assert ref_model() in REF_ORDER
     cur = "klein9"; assert ref_model() == "klein9"; cur = None
+    assert set(PICK) == {"klein9", "krea"} and all(m in MODELS for m in pickable()) and "krea" in pickable()
+    assert ref_model() in pickable()
     assert MODELS["krea"]["init"] is False and all(v.get("init", True) for k, v in MODELS.items() if k != "krea")
     for k, v in MODELS.items():
         assert v["family"] in FAMILY, k

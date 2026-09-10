@@ -3934,12 +3934,19 @@ function renderGpuMenu() {
       <span>GPU 한 장에 한 벌만 올라갑니다</span>
     </div>
     ${!may('art') ? '' : allModels().map((m) => `<button data-model="${m.id}" data-on="${(pickedModel || gpu.resident) === m.id ? 1 : 0}"
-      title="${esc(m.note)}">${esc(m.label)}<span class="mono">${
+      title="${esc(m.note)}${isConn(m.id) ? '' : m.init === false ? ' · 이미지 입력 없음' : ' · 참조 이미지 입력 가능'}">${esc(m.label)}${
+    isConn(m.id) ? '' : `<em class="menu__tag">${m.init === false ? '글만' : '이미지 입력'}</em>`}<span class="mono">${
     isConn(m.id) ? (m.kind === 'video' ? '커넥터 · 영상' : '커넥터')
       : m.id === gpu.resident ? '지금 올라옴'
         : m.id === gpu.loading ? '올리는 중…' : `약 ${mins(m.wait)}분`}</span></button>`).join('')}
     <p class="menu__note">${pickError ? esc(pickError)
-    : 'GPU 모델을 바꾸면 팀 전원의 생성이 그동안 멈춥니다. 커넥터 모델은 기다리지 않고 바로 씁니다.'}</p>
+    : (() => {
+      // 고른 모델이 이미지를 받는지 여기서 말합니다 — 참조·기반 이미지 칸이 왜 있고 없는지의 근거입니다
+      const p = modelOf(pickedModel || gpu.resident)
+      if (p && !isConn(p.id) && p.init === false) return `${esc(p.label)}은 글만 보고 그립니다. 기반 이미지·참조 자산을 고른 컷은 ${esc(modelOf(keepModelId())?.label || 'klein')}이 대신 그립니다.`
+      if (p && !isConn(p.id)) return `${esc(p.label)}은 기반 이미지와 참조 자산(여러 장)을 입력으로 받습니다. 아래 컷 상세의 「기반 이미지」·「참조 자산」에서 넣습니다.`
+      return 'GPU 모델을 바꾸면 팀 전원의 생성이 그동안 멈춥니다. 커넥터 모델은 기다리지 않고 바로 씁니다.'
+    })()}</p>
     ${canGen && conn && allowed('power', roleOf(me.id)) ? `
     <div class="menu__head"><b>GPU</b><span>${esc(gpu.text)}</span></div>
     ${powerBusy ? `<p class="menu__note">${esc(powerBusy)}</p>`
