@@ -228,7 +228,7 @@ async function pollGpu() {
     const resident = draw.some((m) => m.id === j.modelId) ? j.modelId : null
     // 다른 모델의 실패 사유는 이 화면의 것이 아닙니다. 스틸은 참조 모델(klein)로 가므로
     // krea 가 못 올라온 사유를 빨간 불로 보이면 되는 일을 안 되는 것으로 읽습니다
-    const mine = j.ref || draw.find((m) => m.strength === false && m.init !== false)?.id ?? 'klein'
+    const mine = j.ref || draw.find((m) => m.strength === false && m.init !== false)?.id || 'klein'
     const err = j.error && (!j.errorModel || j.errorModel === mine) ? j.error : null
     S.gpu = {
       state: err ? 'error' : j.loading || !j.warm ? 'loading' : j.busy ? 'busy' : 'ready',
@@ -246,6 +246,12 @@ async function pollGpu() {
  * 참조를 조건으로 받는 모델. 스틸은 자산 여러 장을 조건으로 받아야 하므로 klein 계열이어야 합니다.
  * img2img 갈래(chroma·sd3)는 그림을 지우고 다시 그려 얼굴이 바뀌고, krea 는 그림을 받지 않습니다.
  */
+/* 「AI로 만들기」가 쓸 모델. 고른 것이 없으면 올라와 있는 것, 그것도 없으면 서버 기본 */
+const makeModelId = () => {
+  const ids = S.gpu.models.map((m) => m.id)
+  if (S.make?.model && ids.includes(S.make.model)) return S.make.model
+  return [S.gpu.resident, S.gpu.default].find((id) => ids.includes(id)) || ids[0] || null
+}
 const refModel = () => (S.gpu.ref && S.gpu.models.some((m) => m.id === S.gpu.ref) ? S.gpu.ref
   : S.gpu.models.find((m) => m.strength === false && m.init !== false)?.id ?? 'klein')
 
@@ -343,8 +349,11 @@ function makeAsset() {
   if (!m?.prompt.trim()) return
   if (!mayGen()) { S.err = denyReason('gen', role()); paint(); return }
   const n = COUNTS.includes(m.n) ? m.n : 1
+  const model = makeModelId()
+  const takesRefs = S.gpu.models.find((x) => x.id === model)?.init !== false
+  const refs = takesRefs ? picked().map((a) => a.id) : []
   for (let i = 0; i < n; i += 1) {
-    S.queue.push({ job: uid(), kind: 'asset', type: m.type, prompt: m.prompt.trim(), name: m.prompt.trim().slice(0, 40), refs: [], v: i + 1, of: n, status: 'todo', at: now() })
+    S.queue.push({ job: uid(), kind: 'asset', type: m.type, prompt: m.prompt.trim(), name: m.prompt.trim().slice(0, 40), model, refs, v: i + 1, of: n, status: 'todo', at: now() })
   }
   S.err = ''
   saveWork()
@@ -380,9 +389,13 @@ async function runTask(t, tick) {
       prompt: t.prompt, kind: 'still', model: refModel(), refs: imgs, refKind: 'assets', style: 'real', strength: 0.95, job: t.job,
     }, tick)
   }
-  tick(`${taskLabel(t)} 그리는 중…`)
+  // 참조 자산이 있으면(klein) 입력으로 같이 갑니다. 없어진 자산은 빠집니다
+  const refs = (t.refs || []).map((id) => S.assets[id]).filter((a) => a && src(a))
+  const imgs = refs.length ? await Promise.all(refs.map((a) => asInit(src(a)))) : null
+  tick(`${taskLabel(t)} 그리는 중${imgs ? ` · 참조 ${imgs.length}장` : ''}…`)
   return askPatient({
-    prompt: `${t.prompt}, ${MAKE_HINT[t.type]}`, kind: t.type === 'bg' ? 'cut' : 'asset', model: null, style: 'real', job: t.job,
+    prompt: `${t.prompt}, ${MAKE_HINT[t.type]}`, kind: t.type === 'bg' ? 'cut' : 'asset', model: t.model || null, style: 'real', job: t.job,
+    ...(imgs ? { refs: imgs, refKind: 'assets', strength: 0.95 } : {}),
   }, tick)
 }
 
@@ -617,6 +630,7 @@ function paintGrid() {
     <div class="make">
       <textarea id="makeText" placeholder="${esc(MAKE_PLACEHOLDER[S.cat] || '')}" ${S.busy ? 'disabled' : ''}>${esc(S.make.prompt)}</textarea>
       <div style="display:grid;gap:6px">
+        <label class="nsel"><span class="mono">모델</span><select id="makeModel" ${S.busy ? 'disabled' : ''}>${S.gpu.models.map((m) => `<option value="${esc(m.id)}"${makeModelId() === m.id ? ' selected' : ''}>${esc(m.label)}${m.init === false ? ' · 글만' : ' · 이미지 입력'}</option>`).join('')}</select></label>
         <label class="nsel"><span class="mono">장수</span><select id="makeN" ${S.busy ? 'disabled' : ''}>${COUNTS.map((c) => `<option value="${c}"${S.make.n === c ? ' selected' : ''}>${c}</option>`).join('')}</select></label>
         <button class="btn btn--go" id="makeGo" ${S.busy || !S.make.prompt.trim() ? 'disabled' : ''}>${S.busy ? (S.busyKind === 'make' ? '만드는 중…' : '다른 작업 중…') : `후보 ${S.make.n}장 만들기`}</button>
         ${S.busy && S.busyKind === 'make' ? `<button class="btn" id="makeStop" ${S.stop ? 'disabled' : ''}>${S.stop ? '멈추는 중' : '그만'}</button>`
@@ -624,6 +638,14 @@ function paintGrid() {
       </div>
       <p class="note ${S.busy && S.busyKind === 'make' ? 'note--busy' : ''}">${S.busy && S.busyKind === 'make' ? `${esc(S.busy)}${S.stop ? ' — 지금 장은 끝나면 후보로 남고, 다음 장부터 만들지 않습니다.' : ''}`
     : `지시문 뒤에 「${esc(MAKE_HINT[S.cat])}」이 붙어 사진 룩의 ${esc(typeName(S.cat))} 후보로 나옵니다. 저장한 것만 자산이 됩니다.`}</p>
+      ${(() => {
+        // 고른 모델이 이미지를 받는지. klein 이면 오른쪽에서 고른 자산이 입력으로 같이 들어갑니다
+        const m = S.gpu.models.find((x) => x.id === makeModelId())
+        if (!m) return ''
+        if (m.init === false) return `<p class="note">${esc(m.label)}은 글만 보고 그립니다. 참조 이미지를 넣으려면 모델을 FLUX.2 klein 으로 바꾸세요.</p>`
+        const n = picked().length
+        return `<p class="note note--busy">${esc(m.label)}은 참조 이미지를 받습니다. ${n ? `오른쪽에서 고른 자산 ${n}장이 입력으로 들어가 그 얼굴·장소·물건을 살립니다.` : '오른쪽 「실사 스틸」 칸에서 자산을 고르면 그 그림이 입력으로 들어갑니다. 안 고르면 글만으로 그립니다.'}</p>`
+      })()}
     </div>` : ''
   /*
    * 후보 판. 지시문으로 만든 것이 여기 서고, 저장한 것만 아래 격자(자산)로 내려갑니다.
@@ -667,6 +689,7 @@ function paintGrid() {
   $('makeClose')?.addEventListener('click', () => { S.make = null; paintGrid() })
   $('makeGo')?.addEventListener('click', makeAsset)
   $('makeN')?.addEventListener('change', (e) => { S.make.n = Number(e.target.value); paintGrid() })
+  $('makeModel')?.addEventListener('change', (e) => { S.make.model = e.target.value; paintGrid() })
   $('makeStop')?.addEventListener('click', stopNow)
   $('makeText')?.addEventListener('input', (e) => { S.make.prompt = e.target.value; const g = $('makeGo'); if (g) g.disabled = !e.target.value.trim() })
   back()
@@ -719,7 +742,7 @@ function paintStill() {
     : '<div class="empty">왼쪽 격자에서 자산을 눌러 고르세요.</div>'}</div>
     <textarea id="stillText" placeholder="장면 설명 (선택) · 예: 새벽 카페 창가, 손에 든 콜드브루를 바라본다" ${S.busy ? 'disabled' : ''}>${esc(S.prompt)}</textarea>
     <dl class="kv">
-      <dt>모델</dt><dd>${esc(model?.label || 'FLUX.2 klein')} · 참조 ${refs.length}장</dd>
+      <dt>모델</dt><dd>${esc(model?.label || 'FLUX.2 klein')} · 참조 ${refs.length}장 <span class="note">— 참조 이미지를 받는 모델로 만듭니다</span></dd>
       <dt>크기</dt><dd>1920 × 1088 · 실사</dd>
       <dt>서버</dt><dd><span class="led led--${led}"></span>${esc(S.gpu.text)}${conn && allowed('power', role()) ? (S.gpu.state === 'down'
     ? ' <button class="mini mini--go" id="gpuOn" type="button">GPU 켜기</button>'
