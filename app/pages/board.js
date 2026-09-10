@@ -4394,6 +4394,10 @@ function pickMe() {
   })
 }
 
+function isSafeObjectKey(key) {
+  return key !== '__proto__' && key !== 'constructor' && key !== 'prototype'
+}
+
 function pickView() {
   const savedView = sessionStorage.getItem('sb.view')
   viewChar = savedView === null ? (charList()[0]?.id ?? null) : (savedView || null)
@@ -4403,7 +4407,7 @@ function pickView() {
   selectedId = viewPanels().find((p) => p.status === 'changes_requested')?.id ?? viewPanels()[0]?.id ?? null
 
   const linked = location.hash.startsWith('#cut=') && location.hash.slice(5)
-  if (linked && state.panels[linked]) {
+  if (linked && isSafeObjectKey(linked) && state.panels[linked]) {
     const p = state.panels[linked]
     viewChar = p.charId ?? null
     if (!p.charId) viewEp = p.epId ?? null
