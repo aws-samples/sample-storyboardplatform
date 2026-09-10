@@ -16,6 +16,15 @@
  * 빈 칸을 막지 않습니다. 사람이 아직 안 정한 것을 억지로 채우게 하면 아무 말이나 넣게
  * 되고, 그 아무 말이 스무 장의 그림에 다 들어갑니다. 하나도 안 채우고 그냥 넘어가는
  * 길도 둡니다 — 그러면 배경 없이 예전처럼 돕니다.
+ *
+ * ══ Tab 으로 보기글을 그대로 받기
+ *
+ * 칸마다 보기글(hint)이 있습니다. 「1990년대 한국」처럼 그 자리에 실제로 들어가면 되는
+ * 말입니다. 그런데 그것이 placeholder 로만 있어서, 그대로 쓰겠다는 사람도 눈으로 읽고
+ * 손으로 다시 타이핑해야 했습니다. 네 칸이면 네 번입니다. 빈 칸에서 Tab 을 누르면 그
+ * 보기글이 값으로 들어갑니다. 한 번 더 누르면 원래대로 다음 칸으로 넘어갑니다.
+ *
+ * 채워진 칸에서는 손대지 않습니다. Tab 이 사람이 쓴 답을 덮으면 안 됩니다.
  */
 
 const CSS = `
@@ -49,6 +58,22 @@ const CSS = `
 .bga__q input:focus, .bga__note textarea:focus {
   outline: none; border-color: var(--sb-accent, #1a56db);
   box-shadow: 0 0 0 3px rgba(26, 86, 219, .12);
+}
+/*
+ * 「Tab 을 누르면 이 보기글이 들어갑니다」 줄. 빈 칸에만 보입니다.
+ *
+ * 안 적어 두면 아무도 모릅니다. Tab 은 원래 다음 칸으로 가는 열쇠라서, 여기서 다르게
+ * 동작한다는 것을 화면이 말해 주지 않으면 눌러 볼 이유가 없습니다.
+ */
+.bga__tab {
+  display: block; margin: 4px 0 0; font-size: 11px; line-height: 1.5;
+  color: var(--sb-ink-3, #8b93a1);
+}
+.bga__tab[hidden] { display: none; }
+.bga__tab kbd {
+  font: inherit; font-size: 10.5px; font-weight: 600; padding: 1px 5px;
+  border: 1px solid var(--sb-line, #e4e7ec); border-bottom-width: 2px;
+  border-radius: 4px; background: var(--sb-fill, #f8f9fb); color: var(--sb-ink-2, #5b6472);
 }
 .bga__note { margin: 0 0 16px; }
 .bga__note textarea { resize: vertical; min-height: 56px; line-height: 1.6; }
@@ -167,8 +192,42 @@ export function askBackground({
     inp.value = q.answer || ''
     inp.placeholder = q.hint || ''
     inp.maxLength = 120
-    inp.oninput = () => { q.answer = inp.value }
     wrap.appendChild(inp)
+
+    /*
+     * 보기글을 Tab 으로 받는 자리. hint 가 있는 칸에만 답니다.
+     *
+     * 안내 줄은 빈 칸에서만 보입니다. 채워 넣은 다음에도 「Tab 을 누르면 들어갑니다」가
+     * 남아 있으면, 누르면 자기가 쓴 답이 보기글로 바뀌는 것처럼 읽힙니다.
+     */
+    let tip = null
+    if (q.hint) {
+      tip = doc.createElement('span')
+      tip.className = 'bga__tab'
+      const kbd = doc.createElement('kbd')
+      kbd.textContent = 'Tab'
+      tip.append(kbd, doc.createTextNode(` 을 누르면 「${q.hint}」 가 들어갑니다`))
+      tip.hidden = !!inp.value
+      wrap.appendChild(tip)
+
+      inp.addEventListener('keydown', (e) => {
+        if (e.key !== 'Tab') return
+        // Shift+Tab 은 뒤로 가는 열쇠입니다. 뒤로 가려는 사람의 칸을 채우지 않습니다
+        if (e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return
+        if (inp.value) return          // 이미 쓴 답을 덮지 않습니다
+        e.preventDefault()             // 이번 Tab 은 채우는 데 씁니다. 초점은 그대로 둡니다
+        inp.value = q.hint
+        q.answer = inp.value
+        tip.hidden = true
+        // 커서를 글 끝에 둡니다. 받은 보기글에 이어서 고쳐 쓰는 사람이 있습니다
+        try { inp.setSelectionRange(inp.value.length, inp.value.length) } catch { /* 초점만으로 충분합니다 */ }
+      })
+    }
+
+    inp.oninput = () => {
+      q.answer = inp.value
+      if (tip) tip.hidden = !!inp.value
+    }
     box.appendChild(wrap)
   }
 

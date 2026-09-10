@@ -332,41 +332,48 @@ dialog#keys::backdrop { background: rgba(17,19,24,.5); }
   display: flex; align-items: center; gap: 8px;
 }
 .h::after { content: ""; flex: 1; height: 1px; background: var(--edge); }
-.pane--detail .h::after { background: var(--edge); }
 .count { font-family: var(--mono); color: var(--tape); }
 
-#scenario, #briefIn, #nameIn {
+/*
+ * ══ 왼쪽 기둥의 두 칸 (스토리보드 · 인물)
+ *
+ * 목록 둘이 한 기둥에 위아래로 그냥 붙어 있어서 이어진 하나로 읽혔습니다. 실제로는 아예
+ * 다른 것입니다 — 고른 것에 따라 가운데 판과 오른쪽 판이 통째로 갈립니다(renderDetail 의 ch).
+ *
+ * 그래서 각각을 종이 한 장으로 세워 테를 두르고 사이를 띄웁니다. 기둥의 배경이 어두운
+ * 쪽이라(--table-deep) 밝은 종이 두 장이 뜨는 것으로 「둘」이 눈에 먼저 들어옵니다.
+ */
+.side {
+  background: var(--paper-2); border: 1px solid var(--edge); border-radius: var(--r);
+  padding: 13px 12px 12px;
+}
+.side + .side { margin-top: 14px; }
+/* 칸 안에서는 제목이 맨 위 줄이라 위쪽 여백이 필요 없습니다 */
+.side .h { margin-top: 0; }
+/* 목록이 마지막이면 그 아래 여백은 칸의 padding 이 냅니다 */
+.side .nav:last-child { margin-bottom: 0; }
+
+/*
+ * 그 칸이 무엇을 하는 곳인지 한 줄. 잔글씨입니다.
+ *
+ * 빈 목록만 두면 화면이 고장난 것으로 보입니다. 예전에는 기둥에 「시나리오를 컷으로」
+ * 단추가 있어서 컷이 없어도 다음 할 일이 보였는데, 그 단추가 나갔으므로 글로 남깁니다.
+ */
+.side__why { font-size: 11.5px; color: var(--pencil-2); margin: 9px 0 0; line-height: 1.55; }
+.side__why b { color: var(--ink); font-weight: 600; }
+
+#briefIn, #nameIn {
   width: 100%; resize: vertical;
   background: var(--paper); border: 1px solid var(--edge); border-radius: var(--r);
   color: var(--ink); padding: 11px 12px; line-height: 1.65; font-size: 13px;
 }
-#scenario:focus, #briefIn:focus, #nameIn:focus { border-color: var(--stamp-blue); outline: none; }
-#scenario, #briefIn { min-height: 96px; }
+#briefIn:focus, #nameIn:focus { border-color: var(--stamp-blue); outline: none; }
+#briefIn { min-height: 96px; }
 #nameIn { padding: 8px 12px; margin-bottom: 7px; }
-/* 폭만 넓힌다. 색은 .btn--solid 그대로 (예전엔 어두운 사이드바라 색을 뒤집었다) */
-.pane--script .btn--solid { width: 100%; margin-top: 9px; }
-.hint { font-size: 11.5px; color: var(--pencil-2); margin: 8px 0 26px; line-height: 1.55; }
-
-.mine { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.mine__item {
-  display: flex; gap: 9px; align-items: center; width: 100%;
-  background: var(--paper); border: 1px solid var(--edge); border-left: 3px solid var(--tape);
-  border-radius: var(--r); padding: 8px 10px; cursor: pointer; text-align: left;
-  color: var(--ink); font-size: 12.5px;
-}
-.mine__item:hover { background: var(--sb-work-soft); border-color: var(--sb-work-line); }
-.mine__no { font-family: var(--mono); font-size: 10px; color: var(--pencil-2); }
-.mine__where { margin-left: auto; font-family: var(--mono); font-size: 9px; color: var(--pencil-2); }
-.mine--empty { color: var(--pencil-2); font-size: 12px; padding: 6px 2px; }
-
-/* 「지나간 일」의 내 것만 토글. 목록 자체는 app/history.js 가 그린다 */
-.histmine { padding: 3px 7px; font-size: 10px; }
-.histmine[aria-pressed="true"] {
-  color: var(--stamp-blue); background: var(--sb-accent-soft); border-color: var(--sb-accent-line);
-}
-/* .h 는 ::after 로 남는 자리를 채운다. 토글이 그 선 오른쪽으로 밀리지 않게 순서를 뒤집는다 */
-.h .histmine { order: 3; }
-.h::after { order: 2; }
+/* 인물을 골랐을 때만 나오는 칸이라(renderNav) 위에 금을 하나 그어 목록과 가릅니다 */
+#charMeta { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--edge); }
+/* .hint 가 여기 있었습니다. 시나리오 칸 아래 안내(#breakdownHint) 하나만 쓰던 것이라 같이
+   나갔습니다. 잔글씨 한 줄이 필요한 자리는 이제 위의 .side__why 입니다 */
 
 .nav { list-style: none; margin: 0 0 9px; padding: 0; display: grid; gap: 5px; }
 .nav__item {
@@ -393,9 +400,12 @@ dialog#keys::backdrop { background: rgba(17,19,24,.5); }
 .nav__item[data-active="1"] .nav__n { color: var(--pencil); }
 .btn--wide { width: 100%; }
 /*
- * 링크로 만든 넓은 단추(#graphBtn). display 를 인라인 style 로 주면 [hidden] 의
- * display:none 을 이겨서 로그인 전에도 보인다. 그때 눌리면 주소에 보드가 없어서 — 링크의
- * href 는 renderMe 가 채운다 — 빈 판으로 새 탭이 열린다. 그래서 여기서 준다.
+ * 링크로 만든 넓은 단추. display 를 인라인 style 로 주면 [hidden] 의 display:none 을
+ * 이겨서 로그인 전에도 보입니다. 그때 눌리면 주소에 보드가 없어서 — href 는 화면이 채웁니다 —
+ * 빈 판이 열립니다. 그래서 여기서 규칙으로 줍니다.
+ *
+ * 지금 이 판에 그런 링크는 없습니다(「관계 그래프로 디벨롭 ↗」이 그것이었습니다). 규칙은
+ * 남겨 둡니다 — 넓은 단추를 링크로 만드는 자리가 다시 생기면 같은 함정을 또 밟습니다.
  */
 a.btn--wide { display: block; text-align: center; text-decoration: none; }
 a.btn--wide[hidden] { display: none; }
@@ -569,7 +579,114 @@ a.btn--wide[hidden] { display: none; }
 .detail__status[data-tone="reject"] { color: var(--stamp-red); }
 .detail__status[data-tone="wait"], .detail__status[data-tone="work"], .detail__status[data-tone="idle"] { color: var(--pencil); }
 
+/*
+ * ── 오른쪽 판의 접히는 덩이 ─────────────────────────────────────────────────
+ *
+ * 제목 줄(summary)이 예전 <h2 class="h"> 자리를 그대로 받습니다. 그 h2 에는 제목 뒤로
+ * 뻗는 줄이 있었는데(.h::after) 여기서는 삼각형과 접힌 요약이 그 자리를 씁니다.
+ *
+ * 제목 줄만 누를 수 있게 두는 것이 요점입니다. 안의 내용까지 summary 에 들어가면 칸에
+ * 글을 쓰려고 누른 것이 덩이를 접는 일이 됩니다.
+ *
+ * 접는 것만으로는 부족했습니다. 실선 하나로만 갈라 두었더니 덩이 여섯이 다 같은 무게로
+ * 쌓여서, 「무엇을 하러 여기 왔는지」가 목록 안에서 사라졌습니다. 사람이 이 판에서 하는
+ * 일은 딱 둘입니다 — 컷의 내용을 적는 일과 그림을 만드는 일. 나머지 넷(버전·메모·기록,
+ * 그리고 바닥의 승인 띠)은 그 둘의 결과를 보거나 넘기는 자리입니다.
+ *
+ * 그래서 앞의 둘만 종이 한 장으로 세웁니다(.sec--step). 테를 두르고 사이를 띄우고 번호를
+ * 답니다. 뒤의 넷은 지금처럼 실선 위의 접힌 줄로 둡니다. 여섯 중 어느 것이 「할 일」이고
+ * 어느 것이 「본 것」인지가 그 차이로 갈립니다.
+ */
+.sec { border-top: 1px solid var(--edge); margin-top: 4px; }
+.sec:first-of-type { border-top: 0; margin-top: 12px; }
+
+/*
+ * 할 일 두 장. 첫째가 「내용」(무엇을 그릴지 적는 일), 둘째가 「이미지」(그것을 그리는 일)
+ * 입니다. 순서가 그대로 일의 순서라 번호를 답니다 — 접혀 있어도 둘 중 어디가 먼저인지
+ * 제목을 읽지 않고 압니다.
+ */
+.sec--step {
+  border: 1px solid var(--edge); border-radius: var(--r);
+  background: var(--paper); margin-top: 12px; padding: 0 12px;
+}
+/* 판을 열면 이 장이 첫 줄입니다. 위 담당 칸과 붙지 않게 띕니다 */
+.sec--step:first-of-type { margin-top: 14px; }
+.sec--step + .sec--step { margin-top: 9px; }
+.sec--step > .sec__sum { padding-left: 0; padding-right: 0; }
+/* 편 장은 테를 진하게 해서 「지금 여기」를 냅니다 */
+.sec--step[open] { border-color: var(--pencil-2); }
+/*
+ * 제목 앞의 번호. content 로 냅니다 — 글이 아니라 표시라서 제목 문자열에 섞으면
+ * 스크린리더가 「1 내용」으로 읽고 button 이름도 그렇게 잡힙니다.
+ */
+.sec--step > .sec__sum .sec__t::before {
+  content: attr(data-step) ". ";
+  color: var(--tape); font-weight: 600;
+}
+
+.sec__sum {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  padding: 11px 2px; list-style: none; user-select: none;
+}
+/* webkit 의 기본 삼각형. 아래 ::after 로 우리 것을 그리므로 지웁니다 */
+.sec__sum::-webkit-details-marker { display: none; }
+.sec__sum:hover .sec__t { color: var(--ink); }
+.sec__t { color: var(--pencil-2); flex: 0 0 auto; }
+/*
+ * 접힌 채로 「안에 무엇이 있는지」 말하는 한 줄. 길면 자릅니다 — 두 줄로 접히면 접어서
+ * 줄인 높이를 이 줄이 되찾아 갑니다.
+ */
+.sec__lead {
+  font-size: 11px; color: var(--pencil-2); min-width: 0; margin-left: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* 삼각형은 오른쪽 끝에 둡니다. 왼쪽에 두면 제목들이 한 글자씩 밀려 들쭉날쭉해집니다 */
+.sec__sum::after {
+  content: "▾"; margin-left: auto; flex: 0 0 auto;
+  font-size: 9px; color: var(--pencil-2); transition: transform .12s;
+}
+.sec[open] > .sec__sum::after { transform: rotate(180deg); }
+.sec[open] > .sec__sum .sec__t { color: var(--ink); }
+/* 편 칸의 아래 여백. 접힌 덩이 사이는 제목 줄의 padding 만으로 붙습니다 */
+.sec__body { padding-bottom: 14px; }
+/* 첫 칸의 위 여백은 제목 줄이 이미 들고 있습니다. .f 의 margin-top 을 뺍니다 */
+.sec__body > .f:first-child, .sec__body > .f--row:first-child { margin-top: 0; }
+/*
+ * 덩이 안 맨 위에 서는 작은 단추 줄(버전의 「크게 보기 · 핀 메모」). 아래 목록과 달리
+ * 「지금 보는 것」에 대고 하는 일이라 갈라 둡니다.
+ *
+ * 제목 줄(summary)에는 넣지 않습니다. 그 줄을 누르는 일이 여닫는 일이어서, 안에 단추가
+ * 있으면 그것을 누른 것이 덩이를 접는 일이 됩니다.
+ */
+.sec__aside { display: flex; flex-wrap: wrap; gap: 12px; margin: 0 0 8px; }
+.sec__aside .mini { margin-left: 0; }
+/* 덩이에 속하지 않는 한 줄(자산). 위 덩이의 아래 여백을 나눠 씁니다 */
+.sec__note { padding-bottom: 12px; }
+.sec__note .why { margin-top: 0; }
+
+/*
+ * 「이 칸이 무엇인지」. 안내문 여러 줄을 한 줄로 접습니다.
+ *
+ * 덩이(.sec)와 달리 테두리가 없습니다. 이것은 칸이 아니라 그 칸에 붙는 각주라서, 선을
+ * 그으면 접힌 것이 또 하나의 덩이로 읽힙니다.
+ */
+.tip { margin-top: 12px; }
+.tip__sum {
+  display: inline-flex; align-items: center; gap: 5px; cursor: pointer; list-style: none;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em;
+  color: var(--pencil-2); padding: 2px 0;
+}
+.tip__sum::-webkit-details-marker { display: none; }
+.tip__sum::after { content: "▾"; font-size: 8px; transition: transform .12s; }
+.tip[open] > .tip__sum::after { transform: rotate(180deg); }
+.tip__sum:hover { color: var(--pencil); }
+/* 각주라는 것을 왼쪽 선으로 보여 줍니다. .why--why 와 같은 규칙입니다 */
+.tip__body { padding-left: 8px; border-left: 2px solid var(--edge); margin-top: 2px; }
+.tip__body .why:first-child { margin-top: 4px; }
+
 .f { display: block; margin: 14px 0 0; }
+/* 접히지 않는 한 줄 칸(담당). 위에 제목이 없으므로 여백을 스스로 듭니다 */
+.f--tight { margin-top: 12px; }
 .f__label { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
 .f__label .mono { color: var(--pencil); }
 /* 배경색은 잠근 사람의 색(app.js 가 style 로 넣는다). 글자는 어두운 잉크 */
@@ -644,7 +761,8 @@ a.btn--wide[hidden] { display: none; }
 .gen__row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .gen__lab { color: var(--pencil); flex: 0 0 auto; }
 .gen__val { color: var(--ink); font-size: 10.5px; min-width: 34px; text-align: right; }
-.gen__row input[type=range] { flex: 1; min-width: 90px; accent-color: var(--ink); }
+/* input[type=range] 규칙이 여기 있었습니다. 변형 정도 슬라이더 하나만 쓰던 것이라
+   같이 나갔습니다 — 고를 것이 셋뿐이어서 위 기반 이미지 줄과 같은 칩으로 바꿨습니다 */
 /* 고른 기반 이미지 미리보기. 이름만 있으면 무엇을 물려받는지 안 보인다 */
 .gen__ref { margin-top: 8px; border: 1px solid var(--edge); background: var(--paper-2); }
 .gen__ref img, .gen__ref video { display: block; width: 100%; max-height: 128px; object-fit: cover; }
@@ -821,6 +939,17 @@ a.btn--wide[hidden] { display: none; }
 .f--row { display: flex; gap: 8px; }
 .f--row .f { flex: 1; min-width: 0; }
 .f--row .f--narrow { flex: 0 0 96px; }
+.f--row .f--tiny { flex: 0 0 62px; }
+
+/*
+ * 「대개 채워져 오는」 값들의 줄. 컷 내용의 씬·카메라·초입니다(renderDetail 의 cutFields).
+ *
+ * 위의 쓰는 칸들과 같은 크기로 서 있으면 여섯 칸이 한 무게가 되어 어디부터 채우는지가
+ * 보이지 않습니다. 잔글씨로 눕히고 위에 금을 그어 「고칠 일이 드문 것」으로 갈라 둡니다.
+ */
+.f--meta { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--edge); }
+.f--meta .f__label { font-size: 9.5px; }
+.f--meta input, .f--meta select { font-size: 12px; }
 .f input[type=number] {
   width: 100%; background: var(--paper); border: 1px solid var(--edge);
   border-radius: var(--r); padding: 8px 9px; font-size: 13px;
@@ -1022,53 +1151,11 @@ dialog.adm::backdrop { background: rgba(17,19,24,.5); }
 .pace__ax { display: flex; gap: 3px; border-top: 1px solid var(--edge); padding-top: 3px; }
 .pace__ax span { flex: 1 1 0; min-width: 0; font-family: var(--mono); font-size: 8.5px; color: var(--pencil-2); text-align: center; }
 
-dialog.plan { width: min(680px, 95vw); }
-.plan__modes { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 4px; }
-.plan__mode {
-  flex: 1 1 170px; text-align: left; cursor: pointer; font-family: var(--sans);
-  background: var(--paper); border: 1px solid var(--edge); border-radius: var(--r); padding: 8px 10px;
-}
-.plan__mode b { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink); }
-.plan__mode span { font-size: 10.5px; color: var(--pencil); }
-.plan__mode[data-on="1"] { border-color: var(--stamp-blue); background: var(--sb-accent-soft); }
-.plan__mode:disabled { opacity: .45; cursor: not-allowed; }
-.plan__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0 12px; }
-.plan__check { display: flex; align-items: center; gap: 7px; margin: 14px 0 0; font-size: 12.5px; }
-.plan__wait {
-  display: flex; align-items: center; gap: 10px; padding: 30px 0;
-  font-family: var(--mono); font-size: 11px; color: var(--pencil);
-}
-.plan__syn { font-size: 12.5px; line-height: 1.65; color: var(--ink); margin: 0 0 6px; }
-.plan__chars, .plan__beats { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
-.plan__chars li, .plan__beats li {
-  background: var(--paper); border: 1px solid var(--edge); border-radius: var(--r);
-  padding: 7px 9px; font-size: 12.5px; line-height: 1.55;
-}
-.plan__chars b { margin-right: 6px; }
-.plan__meta { display: block; font-family: var(--mono); font-size: 9.5px; color: var(--pencil-2); }
-
 /*
- * 뽑아낸 대본. 들여쓰기와 빈 줄이 대본 형식 그 자체라 pre 로 둔다. 창을 넘기지 않게
- * 높이를 묶고 안에서 굴린다.
+ * 여기 있던 CSS 약 47줄이 나갔습니다 — 「이야기 기획」 창의 모드 단추·격자·기다림 표시와
+ * 줄거리 목록(.plan__*), 뽑아낸 대본 칸(.sc__text), 「대본 불러오기」의 두 칸(.imp__*)
+ * 입니다. 그 네 창이 화면에서 나갔습니다(아래 main 앞의 머리글).
  */
-.sc__text {
-  margin: 12px 0 0; padding: 12px; max-height: 46vh; overflow: auto;
-  background: var(--paper); border: 1px solid var(--edge); border-radius: var(--r);
-  font-family: var(--mono); font-size: 11.5px; line-height: 1.75;
-  white-space: pre-wrap; color: var(--ink);
-}
-
-/*
- * 대본 불러오기 창의 두 칸. 위는 받은 대본 원문, 아래는 줄인 시나리오다. 둘 다 손으로
- * 고칠 수 있어야 해서 pre 가 아니라 textarea 다.
- */
-.imp__raw, .imp__out {
-  width: 100%; margin: 8px 0 0; padding: 10px 12px; resize: vertical;
-  background: var(--paper); border: 1px solid var(--edge); border-radius: var(--r);
-  font-size: 12.5px; line-height: 1.7; color: var(--ink);
-}
-.imp__raw { height: 108px; font-family: var(--mono); font-size: 11.5px; }
-.imp__out { height: 200px; }
 
 /*
  * 권한 표의 모양은 perm.js 가 들고 있습니다. 같은 판이 스토리 디벨롭·대본화·키비주얼
@@ -1179,11 +1266,11 @@ dialog.plan { width: min(680px, 95vw); }
       있었는데 같은 질문(누가 무엇을 하는가)의 답이 두 곳에 갈라져 있어 합쳤습니다.
       탭 바 오른쪽의 「권한 관리」가 이 화면의 권한 장으로 바로 옵니다(nav-tabs.js).
     -->
-    <button class="btn btn--ghost" id="adminBtn" aria-haspopup="dialog" aria-expanded="false" title="로그 · 기여도 · 권한"><span class="mono">관리</span></button>
+    <button class="btn btn--ghost" id="adminBtn" aria-haspopup="dialog" aria-expanded="false" data-coach="admin" title="로그 · 기여도 · 권한"><span class="mono">관리</span></button>
     <button class="btn btn--ghost" id="print" title="브라우저 인쇄로 PDF를 만듭니다"><span class="mono">인쇄 · PDF</span></button>
     <div class="peers" id="peers"></div>
     <div class="bellwrap">
-      <button class="btn btn--ghost bell" id="bell" data-unread="0" aria-haspopup="true" aria-expanded="false">
+      <button class="btn btn--ghost bell" id="bell" data-unread="0" data-coach="bell" aria-haspopup="true" aria-expanded="false">
         <span class="mono">알림</span><span class="bell__n" id="bellN">0</span>
       </button>
       <div class="notifs" id="notifs" hidden></div>
@@ -1210,61 +1297,60 @@ dialog.plan { width: min(680px, 95vw); }
 <div id="navMount"></div>
 
 <main class="work">
+  <!--
+    왼쪽 기둥은 「무엇을 보는가」 하나만 말합니다.
+
+    이 기둥에 여섯 덩이가 쌓여 있었습니다 — 인물 목록, 스토리보드 목록, 그리고 「+ 이야기
+    기획」·「시나리오를 컷으로」·「컷을 대본으로」 세 단추입니다. 기둥을 끝까지 읽어야 그중
+    어느 것이 지금 할 일인지 알았습니다.
+
+    세 단추를 지웠습니다. 셋 다 「이야기를 만드는 일」이고, 그 일을 하는 화면이 위 탭 바에
+    이미 따로 있습니다(components/nav-tabs.js).
+
+      「+ 이야기 기획」      → 스토리 디벨롭 탭
+      「시나리오를 컷으로」  → 스토리 디벨롭 탭. 거기서 만든 것이 컷으로 옵니다
+      「컷을 대본으로」      → 대본화 탭
+
+    보드는 만들어진 컷을 그리고 승인하는 곳입니다. 같은 일을 두 자리에서 할 수 있게 두면
+    어느 쪽이 「진짜」인지 아무도 모릅니다. 실제로 이 세 창은 보드의 판을 직접 갈아
+    치웠으므로, 탭에서 하던 일과 결과가 갈렸습니다.
+
+    ══ 인물과 스토리보드를 갈랐습니다
+
+    두 목록이 한 기둥에 위아래로 붙어 있어서 이어진 하나로 보였습니다. 실제로는 완전히
+    다른 것입니다 — 인물은 얼굴을 정하는 일이고(구도 여섯 벌), 스토리보드는 컷을 잇는
+    일입니다. 오른쪽 판도 무엇을 골랐느냐에 따라 아예 다른 것이 뜹니다(renderDetail 의 ch).
+
+    그래서 칸(.side)으로 갈라 테를 두르고, 스토리보드를 위에 둡니다. 이 화면의 이름이
+    스토리보드이고 사람들이 여기서 여는 것이 컷입니다. 인물은 그 컷에 쓸 얼굴을 만드는
+    곳이라 아래입니다.
+  -->
   <aside class="pane pane--script">
-    <h2 class="mono h">인물 <span class="count" id="charCount"></span></h2>
-    <ul class="nav" id="charNav"></ul>
-    <button class="btn btn--ghost btn--wide" id="newChar">+ 인물 추가</button>
+    <!-- data-coach 는 코치마크가 짚는 이름입니다. board.js 의 BOARD_CARDS 가 씁니다 -->
+    <section class="side" data-side="board" data-coach="side-board">
+      <h2 class="mono h">스토리보드</h2>
+      <ul class="nav" id="boardNav"></ul>
+      <p class="side__why" id="boardWhy" hidden>컷이 아직 없습니다. 위의 <b>스토리 디벨롭</b>에서
+        이야기를 컷으로 나누면 여기 올라옵니다.</p>
+    </section>
 
-    <h2 class="mono h" style="margin-top:22px">스토리보드</h2>
-    <ul class="nav" id="boardNav"></ul>
-    <button class="btn btn--line btn--wide" id="planBtn" aria-haspopup="dialog" aria-expanded="false" hidden
-            title="프롬프트로 이야기·인물·컷을 기획합니다">+ 이야기 기획</button>
-    <a class="btn btn--ghost btn--wide" id="graphBtn" href="./story-graph.html" target="_blank" rel="noopener" hidden
-       style="margin-top:6px" title="대본에서 관계 그래프를 뽑고, 씨앗과 분기를 봅니다">관계 그래프로 디벨롭 ↗</a>
-    <button class="btn btn--ghost btn--wide" id="scriptBtn" aria-haspopup="dialog" aria-expanded="false" hidden
-            style="margin-top:6px" title="지금 회차의 컷을 정식 대본 형식으로 옮깁니다">컷을 대본으로</button>
-    <!--
-      컷 다음에 하는 일은 영상입니다. 한때 여기 「컷을 영상으로 ↗」가 있어 video.html 을 새
-      탭으로 열었습니다. 그 화면이 없어져서 링크도 없습니다 — 승인된 컷을 고르면 오른쪽
-      「AI로 생성」 옆에 「영상으로 생성」이 열립니다(pages/board.js 의 animate).
-    -->
-    <div id="scriptBlock">
-      <h2 class="mono h" style="margin-top:22px">시나리오</h2>
-      <textarea id="scenario" spellcheck="false" data-coach="scenario"></textarea>
-      <button class="btn btn--solid" id="breakdown">컷으로 분해</button>
-      <button class="btn btn--line" id="importBtn" aria-haspopup="dialog" aria-expanded="false" hidden
-              style="margin-left:6px" title="대본화에서 받은 대본을 시나리오로 줄여 넣습니다">대본 불러오기</button>
-      <!--
-        이 문구는 board.js 의 renderBreakdown 이 다시 씁니다. 붙여 넣은 것이 정형 대본이면
-        누르기 전에 씬·컷·인물 수를 보여줍니다. 여기 적힌 것은 아무것도 안 붙인 처음 모양입니다.
-      -->
-      <p class="hint" id="breakdownHint">빈 줄을 기준으로 컷을 나눕니다. 나눈 뒤 컷마다 화면 설명·대사·카메라를 고칠 수 있습니다.
-        이야기부터 만들려면 위의 <b>이야기 기획</b>을 씁니다.
-        <b>정형 대본</b>(S#·INT./EXT.·「이름: 대사」)을 붙이면 씬과 대사까지 알아서 갈라 붙입니다.</p>
-    </div>
+    <section class="side" data-side="char" data-coach="side-char">
+      <h2 class="mono h">인물 <span class="count" id="charCount"></span></h2>
+      <ul class="nav" id="charNav"></ul>
+      <button class="btn btn--ghost btn--wide" id="newChar">+ 인물 추가</button>
+      <p class="side__why">컷에 쓸 얼굴을 만드는 곳입니다. 인물을 고르면 구도 여섯 벌이 보드에 뜹니다.</p>
 
-    <div id="charMeta" hidden>
-      <h2 class="mono h" style="margin-top:22px">인물 설정</h2>
-      <input type="text" id="nameIn" placeholder="인물 이름">
-      <textarea id="briefIn" rows="4" spellcheck="false"></textarea>
-      <p class="hint">설정과 기준 이미지가 구도별 생성의 입력이 됩니다.</p>
-    </div>
-
-    <h2 class="mono h" style="margin-top:22px">내 작업 <span class="count" id="mineCount"></span></h2>
-    <ul class="mine" id="mine" data-coach="mine"></ul>
-
-    <!--
-      지나간 일. 누가 · 어떤 단계에서 · 뭘 · 언제 했는지가 남는다. 줄을 누르면 그 컷으로
-      가서 이어서 한다. 목록의 모양과 문구는 app/history.js 가 들고 있다. 홈과 세
-      화면이 같은 목록을 쓴다.
-    -->
-    <div data-coach="histbox">
-      <h2 class="mono h" style="margin-top:22px">지나간 일
-        <button class="btn btn--ghost histmine" id="histMine" aria-pressed="false"
-                title="내가 등록한 것만 봅니다"><span class="mono">내 것만</span></button>
-      </h2>
-      <div id="hist"></div>
-    </div>
+      <div id="charMeta" hidden>
+        <label class="f">
+          <span class="f__label"><span class="mono">이름</span></span>
+          <input type="text" id="nameIn" placeholder="인물 이름">
+        </label>
+        <label class="f">
+          <span class="f__label"><span class="mono">설정</span></span>
+          <textarea id="briefIn" rows="4" spellcheck="false" placeholder="나이 · 옷 · 분위기. 구도 생성의 입력이 됩니다"></textarea>
+        </label>
+      </div>
+    </section>
   </aside>
 
   <section class="pane pane--board" id="boardPane">
@@ -1319,36 +1405,23 @@ dialog.plan { width: min(680px, 95vw); }
   </header>
   <div class="adm__body" id="admBody"></div>
 </dialog>
-<dialog class="adm plan" id="plan" aria-label="이야기 기획">
-  <header class="adm__bar">
-    <h2 class="mono">이야기 기획</h2>
-    <button class="btn btn--line" id="planClose"><span class="mono">닫기</span></button>
-  </header>
-  <div class="adm__body" id="planBody"></div>
-</dialog>
 <!--
-  컷을 대본으로. 대본을 쓰는 일 자체는 story.js 의 planScript 가 하고, 이 창은 형식을
-  고르고 결과를 보여주는 자리다. 대본화 화면과 같은 엔진을 보드의 컷에 붙인다.
--->
-<dialog class="adm plan" id="script" aria-label="컷을 대본으로">
-  <header class="adm__bar">
-    <h2 class="mono">컷을 대본으로</h2>
-    <button class="btn btn--line" id="scriptClose"><span class="mono">닫기</span></button>
-  </header>
-  <div class="adm__body" id="scriptBody"></div>
-</dialog>
+  ══ 지운 네 창 (이야기 기획 · 컷을 대본으로 · 시나리오를 컷으로 · 대본 불러오기)
 
-<!--
-  대본 불러오기. 대본화 화면은 만든 대본을 저장하지 않으므로(화면 안 변수와 복사·다운로드가
-  전부다) 이 창이 파일과 붙여넣기를 받는다. 받은 대본은 시나리오로 줄여서 넣는다.
+  넷 다 「이야기를 만드는 일」이었고, 그 일을 하는 화면이 위 탭 바에 따로 있습니다.
+  보드는 만들어진 컷을 그리고 승인하는 곳입니다.
+
+    이야기 기획 · 시나리오를 컷으로 → 스토리 디벨롭 탭 (story-graph.html)
+    컷을 대본으로 · 대본 불러오기   → 대본화 탭 (story-graph.html?tab=script)
+
+  같은 일을 두 자리에서 할 수 있게 두면 어느 쪽이 진짜인지 아무도 모릅니다. 게다가 이
+  창들은 보드의 판을 직접 갈아 치웠으므로(applyPlan 이 panel.add 를 쏟아 넣었습니다),
+  탭에서 이야기를 다듬던 사람과 여기서 창을 연 사람의 결과가 서로를 덮었습니다.
+
+  시나리오 원문(#scenario)도 같이 나갔습니다. 그 값은 판에 남아 있고(state.board.scenario)
+  op 로 들어오면 그대로 받습니다 — 스토리 디벨롭이 쓰는 자리입니다. 보드가 그것을 그릴
+  칸만 없앴습니다.
 -->
-<dialog class="adm plan" id="imp" aria-label="대본 불러오기">
-  <header class="adm__bar">
-    <h2 class="mono">대본 불러오기</h2>
-    <button class="btn btn--line" id="impClose"><span class="mono">닫기</span></button>
-  </header>
-  <div class="adm__body" id="impBody"></div>
-</dialog>
 
 <input type="file" accept="image/*" hidden id="file">
 

@@ -1,16 +1,24 @@
 
 import {
   orderKeyBetween, orderKeyForIndex, byOrderKey, STATUS, ACTIONS, TRANSITIONS, ROLES, POSES,
-  FEEDBACK_TAGS, NEEDS, canTransition, canEditContent, splitScenario, splitScript,
-  scenarioFromScript, mergeField, handBackTo, notifFor, sceneGroups, sceneKey, sceneMeta,
+  FEEDBACK_TAGS, NEEDS, CAMERAS, canTransition, canEditContent, splitScenario,
+  mergeField, handBackTo, notifFor, sceneGroups, sceneKey, sceneMeta,
   clock, startTimes, scrub, debounceBy, epLabel, lostEdit, isActionable, changedSince,
-  workload, liveVer, deadVer, tally, actorPace, CUT_MAX, ASSET_TYPES, REF_TYPES, assetJobs,
+  workload, liveVer, deadVer, tally, actorPace, ASSET_TYPES, REF_TYPES, assetJobs,
 } from '../domain/panels.js'
 import { confirmAsk } from '../components/confirm.js'
 import { josa } from '../lib/josa.js'
-import { MODES, GENRES, TONES, LENGTHS, CUTCOUNTS } from '../domain/prompts.js'
-import { planOutline, planCuts, planScript } from '../services/planner.js'
-import { SCRIPT_FORMATS, scriptBlob, scriptFileName, scriptToText } from '../domain/script-format.js'
+/*
+ * 여기 있던 import 넷이 나갔습니다 — domain/prompts.js 의 고르는 값들(MODES·GENRES·TONES·
+ * LENGTHS·CUTCOUNTS), services/planner.js 의 세 부름(planOutline·planCuts·planScript),
+ * domain/script-format.js 의 내려받기 넷, 그리고 domain/panels.js 의 splitScript·
+ * scenarioFromScript·CUT_MAX 입니다.
+ *
+ * 이야기를 만들고 대본으로 내리는 일이 이 화면에서 나갔기 때문입니다. 그 일을 하는 화면이
+ * 위 탭 바에 있고, 같은 것을 그쪽이 씁니다(pages/story-graph.js). 모듈은 그대로 있습니다.
+ *
+ * splitScenario 는 남습니다. 예시 판을 세울 때 씁니다(seedBuild).
+ */
 import { esc, setHtml } from '../lib/dom.js'
 import { srcOf, downscale, faceSheet } from '../lib/placeholder-art.js'
 import { SEED_ART } from '../lib/seed-art.js'
@@ -36,7 +44,9 @@ import { pickProject } from '../components/project-picker.js'
 import { touch as touchProject } from '../services/projects.js'
 import { saveAsset } from '../services/assets.js'
 import { allowed, denyReason } from '../domain/permissions.js'
-import { wire as wireTour, demoActive, demoAdvance, demoSay, demoTitle } from '../../app-walkthrough/tour.js'
+// demoAdvance·demoSay·demoTitle 도 받고 있었지만 이 파일에서 부르는 곳이 없습니다.
+// 예시를 옮길 때 같이 갔습니다(app-walkthrough/steps/board.js 가 직접 받습니다)
+import { wire as wireTour, demoActive } from '../../app-walkthrough/tour.js'
 
 /*
  * 예시가 쓸 제품 쪽 함수를 넣습니다. app-walkthrough 는 app/ 을 import 할 수 없습니다.
@@ -843,7 +853,12 @@ function seedBuild(opAt = null, tag = 'sd') {
   /** 여기서부터 한 덩어리. say 는 재생 중 아래 띠에 적히는 한 줄이다 */
   const mark = (say, sub) => marks.push({ at: ops.length, say, sub })
 
-  mark('시나리오를 넣습니다', '기획자 김하나가 15초 브랜드 필름 한 편을 엽니다')
+  /*
+   * 「시나리오를 넣습니다」였습니다. 그 일을 하는 칸이 이 화면에서 나갔으므로(위 탭 바의
+   * 스토리 디벨롭이 합니다) 「넘어온 것을 엽니다」로 고칩니다. op 는 그대로입니다 —
+   * 판에 시나리오 값이 실려 오는 것은 여전히 사실이고, 다만 실은 곳이 여기가 아닙니다.
+   */
+  mark('스토리 디벨롭에서 넘어온 이야기입니다', '기획자 김하나가 15초 브랜드 필름 한 편을 엽니다')
   add('u1', { kind: 'board.patch', fields: { title: '아침빵집 · 15초 브랜드 필름', scenario: SEED_SCENARIO } })
 
   mark('인물과 구도를 만듭니다', '인물마다 정면·3/4·측면… 구도가 따로 관리됩니다')
@@ -884,7 +899,7 @@ function seedBuild(opAt = null, tag = 'sd') {
     })
   }
 
-  mark('시나리오를 컷으로 나눕니다', '빈 줄이 컷 경계입니다. 씬으로 묶여 시간이 매겨집니다')
+  mark('이야기가 컷으로 나뉘어 올라옵니다', '컷은 씬으로 묶이고 순서대로 시간이 매겨집니다')
   const cuts = splitScenario(SEED_SCENARIO)
   let key = null
   cuts.forEach((cut, i) => {
@@ -1965,8 +1980,6 @@ function render() {
   renderMe()
   renderGpu()
   renderNav()
-  renderMine()
-  renderHist()
   renderTime()
   renderBoard()
   renderDetail()
@@ -2053,64 +2066,36 @@ function renderNav() {
     </button></li>`
   }).join(''))
 
-  byId('scriptBlock').hidden = viewChar !== null
+  /*
+   * 인물을 골랐을 때만 그 아래 설정 칸을 폅니다. 컷 보드를 보는 중에는 고칠 인물이
+   * 없습니다.
+   *
+   * 컷이 하나도 없으면 스토리보드 칸에 「어디서 만들어 오는지」를 적습니다. 예전에는 이
+   * 기둥에 「시나리오를 컷으로」 단추가 있어서 빈 목록도 다음 할 일을 가리켰습니다. 그
+   * 단추가 나갔으므로 그 말을 글로 남깁니다 — 빈 목록만 두면 화면이 고장난 것으로 보입니다.
+   */
+  byId('boardWhy').hidden = cutsOf(viewEp).length > 0
   byId('charMeta').hidden = viewChar === null
-  if (viewChar === null) {
-    const el = byId('scenario')
-    const ep = state.eps[viewEp]
-    if (document.activeElement !== el) el.value = (ep ? ep.scenario : state.board.scenario) || ''
-    renderBreakdown()
-  } else {
+  if (viewChar !== null) {
     const ch = state.chars[viewChar]
     if (document.activeElement !== byId('nameIn')) byId('nameIn').value = ch?.name || ''
     if (document.activeElement !== byId('briefIn')) byId('briefIn').value = ch?.brief || ''
   }
 }
 
-/*
- * 시나리오 칸 아래 안내를 살려 둔다.
- *
- * 붙여 넣은 것이 정형 대본이면 씬·컷·인물 수를 눌러 보기 전에 미리 보여준다. 눌러서
- * 컷이 쏟아진 다음에 「대본으로 읽었습니다」 라고 알려 주면 이미 늦다. 안 알아봤으면
- * 예전 문구 그대로 두고 빈 줄로 쪼갠다고 말한다 (core.js 의 splitScript).
- */
-function renderBreakdown() {
-  const hint = byId('breakdownHint')
-  const btn = byId('breakdown')
-  if (!hint || !btn) return
-  const got = splitScript(byId('scenario').value)
-  btn.textContent = got ? '대본을 컷으로' : '컷으로 분해'
-  if (!got) {
-    setHtml(hint, `빈 줄을 기준으로 컷을 나눕니다. 나눈 뒤 컷마다 화면 설명·대사·카메라를 고칠 수 있습니다.
-      이야기부터 만들려면 위의 <b>이야기 기획</b>을 씁니다.
-      <b>정형 대본</b>(S#·INT./EXT.·「이름: 대사」)을 붙이면 씬과 대사까지 알아서 갈라 붙입니다.`)
-    hint.dataset.script = '0'
-    return
-  }
-  const scenes = new Set(got.cuts.map((c) => c.scene)).size
-  const fresh = got.names.filter((n) => !charList().some((c) => c.name === n))
-  setHtml(hint, `<b>정형 대본으로 읽었습니다.</b>
-    씬 ${scenes}개 · 컷 ${got.cuts.length}개 · 인물 ${got.names.length}명${
-      fresh.length ? ` (새로 만들 사람 ${fresh.length}명)` : ''}
-    <br>씬 이름·지문·대사·등장인물·컷 길이를 갈라 붙입니다.
-    씬 이름은 <b>키비주얼</b> 화면과 같은 모양으로 맞추므로, 그 씬 그림이 곧바로 컷의 기반이 됩니다.`)
-  hint.dataset.script = '1'
-}
 
-function renderMine() {
-  const mine = Object.values(state.panels)
-    .filter((p) => p.assignee === me.id && p.status !== 'approved')
-    .sort((a, b) => (whereOf(a) + labelOf(a)).localeCompare(whereOf(b) + labelOf(b)))
-  byId('mineCount').textContent = mine.length ? mine.length : ''
-  setHtml(byId('mine'), mine.length
-    ? mine.map((p) => `
-        <li><button class="mine__item" data-goto="${p.id}">
-          <span class="mine__no">${esc(labelOf(p))}</span>
-          <span>${esc(STATUS[p.status].label)}</span>
-          <span class="mine__where">${esc(whereOf(p))}</span>
-        </button></li>`).join('')
-    : '<li class="mine--empty">넘어온 작업이 없습니다.</li>')
-}
+
+/*
+ * 「내 작업」은 왼쪽 기둥에서 뺐습니다.
+ *
+ * 내게 넘어온 것을 알려 주는 자리가 둘이었습니다 — 이 목록과 머리 띠의 알림입니다. 담당이
+ * 바뀌면 알림이 한 줄 오고(notifFor 의 assign), 그 줄을 누르면 그 컷으로 갑니다. 목록이
+ * 하는 일과 같은데 목록은 기둥의 아래쪽에 있어서, 컷을 고치는 동안에는 눈에 들어오지도
+ * 않았습니다. 셈은 알림 배지가 대신합니다.
+ *
+ * 상태가 approved 가 아닌 내 담당을 세는 계산 자체는 관리 창의 「기여도」 장에 있습니다
+ * (creditHtml 의 workload). 거기서는 나뿐 아니라 팀 전체를 같은 표로 봅니다.
+ */
 
 // ── 관리 ─────────────────────────────────────────────────────────────────────
 /*
@@ -2372,7 +2357,8 @@ function welcomePanel(viewChar) {
   return emptyHint({
     text: viewChar
       ? '구도가 없습니다. 아래 버튼으로 추가하시거나,'
-      : '컷이 없습니다. 왼쪽에 시나리오를 넣고 「컷으로 분해」를 누르시거나,',
+      // 「왼쪽에 시나리오를 넣고 컷으로 분해」였습니다. 그 칸과 단추가 나갔습니다
+      : '컷이 없습니다. 위의 「스토리 디벨롭」에서 이야기를 컷으로 나누시거나,',
     exampleLabel: '예시로 보기',
     onExample: () => runExample(),
     note: '예시 내용은 이 보드에 실제로 저장되고 같은 보드를 보는 사람에게도 보입니다. '
@@ -2416,15 +2402,23 @@ function runExample() {
 }
 
 /*
- * 코치마크 넉 장. 지금 화면에 실제로 있는 것만 가리킨다. 앵커가 없는 장은 coach.js 가
- * 조용히 건너뛴다. 그래서 비어 있을 때 열면 시나리오 칸과 탭만 나오고, 예시를 본
- * 뒤에 열면 컷과 상세까지 넉 장이 다 나온다.
+ * 코치마크 넉 장. 지금 화면에 실제로 있는 것만 가리킵니다. 앵커가 없는 장은 coach.js 가
+ * 조용히 건너뜁니다. 그래서 비어 있을 때 열면 왼쪽 기둥과 머리 띠만 나오고, 예시를 본
+ * 뒤에 열면 컷과 상세까지 넉 장이 다 나옵니다.
+ *
+ * spot 은 CSS 선택자가 아니라 data-coach 이름입니다. components/coachmark.js 의 targets 가
+ * `[data-coach="…"]` 로만 찾습니다 — app-walkthrough/guide.js 쪽은 선택자로도 찾아 주지만
+ * 여기는 아닙니다. 이름을 안 맞추면 그 장이 소리 없이 사라져서 알아채기 어렵습니다.
  */
 const BOARD_CARDS = [
   {
-    head: '왼쪽에서 이야기가 들어옵니다',
-    body: '시나리오를 붙이고 컷으로 분해합니다.\n빈 줄이 컷 경계입니다.\n이야기부터 만들려면 위의 이야기 기획을 씁니다.',
-    spot: ['scenario'],
+    /*
+     * 「이야기 기획」·「시나리오를 컷으로」 두 단추를 짚던 장입니다. 둘 다 화면에서
+     * 나갔으므로 이 장은 이제 왼쪽 기둥이 무엇으로 갈려 있는지만 말합니다.
+     */
+    head: '왼쪽은 「무엇을 볼지」입니다',
+    body: '위 칸은 스토리보드, 아래 칸은 인물입니다.\n둘은 아예 다른 것이라 고르면 오른쪽도 딴 것이 뜹니다.\n컷은 위 탭 바의 「스토리 디벨롭」에서 나눠 옵니다.',
+    spot: ['side-board', 'side-char'],
   },
   {
     head: '가운데가 보드입니다',
@@ -2433,13 +2427,17 @@ const BOARD_CARDS = [
   },
   {
     head: '오른쪽에서 한 컷을 다룹니다',
-    body: '고른 컷의 그림·대사·카메라·상태가 여기 있습니다.\n그림 위를 눌러 그 자리에 의견을 남길 수도 있습니다.',
+    body: '테를 두른 두 장이 여기서 하는 일입니다 — 1. 내용을 적고 2. 이미지를 만듭니다.\n적은 것이 그대로 생성 지시가 됩니다.\n아래 버전·메모·기록은 그 결과를 보는 자리이고, 승인은 맨 아래 띠에 늘 붙어 있습니다.',
     spot: ['detail'],
   },
   {
+    /*
+     * 「내 작업」과 「지나간 일」을 짚던 장입니다. 둘 다 왼쪽 기둥에서 뺐으므로 그것들이
+     * 지금 어디 있는지를 말합니다 — 없앤 것이 아니라 옮긴 것입니다.
+     */
     head: '넘어온 일과 지나간 일',
-    body: '내게 배정된 것은 왼쪽 아래 「내 작업」에 모입니다.\n누가 무엇을 했는지는 그 아래 「지나간 일」에 남습니다.',
-    spot: ['mine', 'histbox'],
+    body: '내게 배정된 것은 머리 띠의 「알림」으로 옵니다.\n누가 무엇을 했는지는 「관리」의 로그 장에 남습니다.',
+    spot: ['bell', 'admin'],
     next: '시작하기', skip: '다시 보지 않기',
   },
 ]
@@ -2452,40 +2450,18 @@ function openCoach() {
   coach.start({ cards: BOARD_CARDS, key: COACH_KEY, title: '스토리보드', onDone: render })
 }
 
-/* ══ 지나간 일 ═════════════════════════════════════ */
-
-let histMine = false
-
-/**
- * 히스토리. 「내 것만」으로 좁히면 이 화면에서 내가 등록한 목록이 되고, 줄을 누르면
- * 그 컷으로 갑니다. 이어서 하는 자리입니다.
+/*
+ * 「지나간 일」도 왼쪽 기둥에서 뺐습니다. 관리 창의 「로그」 장이 같은 목록입니다
+ * (logHtml · paintAdminLog).
+ *
+ * 두 곳이 같은 journal 을 같은 부품으로 그렸습니다(activity-log.js 의 entries·group +
+ * components/history-list.js). 다른 것은 폭과 「내 것만」 토글뿐이었고, 창 쪽은 사람마다
+ * 골라 볼 수 있어서 더 넓게 봅니다. 288px 기둥에서 40줄을 굴려 읽는 것이 이 기둥을
+ * 복잡하게 만든 가장 큰 덩이였습니다.
+ *
+ * 줄을 눌러 그 컷으로 가는 길도 창 쪽에 있습니다 — paintAdminLog 의 onPick 이 창을 닫고
+ * 그 컷을 엽니다. 여기 있던 것과 같은 동작입니다.
  */
-function renderHist() {
-  const box = byId('hist')
-  if (!box) return
-  const list = group(entries(journal, {
-    who: (id) => person(id),
-    actor: histMine ? me.id : null,
-    limit: 40,
-  }))
-  byId('histMine').setAttribute('aria-pressed', String(histMine))
-  paintList(box, list, {
-    showStep: true,
-    none: histMine ? '내가 등록한 것이 아직 없습니다.' : '아직 지나간 일이 없습니다.',
-    onPick: (e) => {
-      // 패널을 가리키는 줄만 컷으로 간다. 회차나 인물 id 를 패널로 찾으면 늘 없다
-      if (e.refKind && e.refKind !== 'panel') { announce('그 줄은 이어서 갈 컷이 없습니다.'); return }
-      const p = state.panels[e.ref]
-      if (!p) { announce('그 컷은 지금 보드에 없습니다.'); return }
-      viewChar = p.charId ?? null
-      if (!p.charId) viewEp = p.epId ?? null
-      selectedId = e.ref
-      save()
-      render()
-      byId('detail')?.scrollIntoView({ block: 'nearest' })
-    },
-  })
-}
 
 function renderBoard() {
   const board = byId('board')
@@ -2521,7 +2497,7 @@ function renderBoard() {
     } else {
       setHtml(board, viewChar
         ? '<div class="board--empty">구도가 없습니다. 아래 버튼으로 추가하세요.</div>'
-        : '<div class="board--empty">컷이 없습니다. 시나리오를 넣고 <b>컷으로 분해</b>를 누르거나 아래 버튼으로 추가하세요.</div>')
+        : '<div class="board--empty">컷이 없습니다. 위의 <b>스토리 디벨롭</b>에서 이야기를 컷으로 나누거나 아래 버튼으로 추가하세요.</div>')
     }
   }
 
@@ -2673,545 +2649,23 @@ function renderCursors() {
       </div>`).join(''))
 }
 
-let planStep = 'form'
-let planMsg = ''
-let planOut = null
-let planSpec = {
-  mode: 'new', prompt: '', genre: GENRES[0], tone: TONES[0],
-  secs: 30, cuts: 8, newChars: 2, useChars: true, center: null,
-}
-
-const hasStory = () => !!(state.board.scenario || '').trim() || Object.values(state.panels).some((p) => !p.charId)
-const planBase = () => planSpec.mode === 'new' && !hasStory()
-
-const planCtx = () => {
-  const ep = state.eps[viewEp]
-  return {
-    title: [state.board.title, ep?.title].filter(Boolean).join(' · '),
-    scenario: (ep ? ep.scenario : state.board.scenario) || '',
-    chars: charList().map((c) => ({ name: c.name, brief: c.brief })),
-    centerName: state.chars[planSpec.center]?.name || '',
-  }
-}
-
-function openPlan(on) {
-  const dlg = byId('plan')
-  if (on && !may('plan')) return
-  if (on && !dlg.open) dlg.showModal()
-  else if (!on && dlg.open) dlg.close()
-  byId('planBtn').setAttribute('aria-expanded', String(on))
-  if (on) renderPlan()
-}
-
-const planOpt = (list, now, label = (v) => v) => list
-  .map((v) => `<option value="${v}" ${String(v) === String(now) ? 'selected' : ''}>${esc(label(v))}</option>`).join('')
-
-const PLAN_HINT = {
-  new: '예: 새벽에 문 여는 동네 빵집. 첫 손님이 오기까지의 15초.',
-  next: '예: 옆 골목에 대형 프랜차이즈가 문을 연다. 단골이 줄어든다.',
-  spin: '예: 이 인물이 빵집을 그만두고 떠난 여행에서 벌어지는 일.',
-}
-
-function renderPlan() {
-  const body = byId('planBody')
-  if (planStep === 'busy') {
-    setHtml(body, `<div class="plan__wait"><span class="spin"></span><span>${esc(planMsg)}</span></div>`)
-    return
-  }
-  if (planStep === 'review' && planOut) return renderPlanReview(body)
-
-  const chars = charList()
-  const off = { next: !hasStory(), spin: !hasStory() || !chars.length }
-  setHtml(body, `
-    <p class="adm__lead">프롬프트 하나로 이야기·인물·컷을 짭니다.
-      <span class="adm__sep">·</span>개요를 먼저 보여드리고, 판에 붙이는 것은 그다음입니다.</p>
-
-    <div class="plan__modes" role="group" aria-label="기획 방식">
-      ${MODES.map((m) => `
-        <button class="plan__mode" data-mode="${m.id}" data-on="${planSpec.mode === m.id ? 1 : 0}"
-          ${off[m.id] ? `disabled title="${m.id === 'spin' && !chars.length ? '인물이 있어야 갈라 나올 수 있습니다' : '이어 붙일 이야기가 판에 없습니다'}"` : ''}>
-          <b>${esc(m.label)}</b><span>${esc(m.hint)}</span>
-        </button>`).join('')}
-    </div>
-
-    <label class="f">
-      <span class="f__label"><span class="mono">소재</span></span>
-      <textarea rows="4" id="planPrompt" placeholder="${esc(PLAN_HINT[planSpec.mode])}">${esc(planSpec.prompt)}</textarea>
-    </label>
-
-    <div class="plan__grid">
-      <label class="f"><span class="f__label"><span class="mono">장르</span></span>
-        <select id="planGenre">${planOpt(GENRES, planSpec.genre)}</select></label>
-      <label class="f"><span class="f__label"><span class="mono">톤</span></span>
-        <select id="planTone">${planOpt(TONES, planSpec.tone)}</select></label>
-      <label class="f"><span class="f__label"><span class="mono">러닝타임</span></span>
-        <select id="planSecs">${planOpt(LENGTHS, planSpec.secs, (v) => (v >= 60 ? `${v / 60}분` : `${v}초`))}</select></label>
-      <label class="f"><span class="f__label"><span class="mono">컷 수</span></span>
-        <select id="planCuts">${planOpt(CUTCOUNTS, planSpec.cuts, (v) => `${v}컷`)}</select></label>
-      <label class="f"><span class="f__label"><span class="mono">새 인물</span></span>
-        <select id="planNew">${planOpt([0, 1, 2, 3, 4], planSpec.newChars, (v) => (v ? `${v}명 만들기` : '만들지 않기'))}</select></label>
-      ${planSpec.mode === 'spin' && chars.length ? `
-        <label class="f"><span class="f__label"><span class="mono">중심 인물</span></span>
-          <select id="planCenter">${chars.map((c) => `<option value="${c.id}" ${planSpec.center === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>` : ''}
-    </div>
-
-    ${chars.length ? `<label class="plan__check">
-      <input type="checkbox" id="planKeep" ${planSpec.useChars ? 'checked' : ''}>
-      지금 판의 인물 ${chars.length}명을 그대로 씁니다</label>` : ''}
-
-    <div class="acts">
-      <button class="btn btn--solid" id="planGo">개요 만들기</button>
-      <button class="btn btn--line" id="planCancel">취소</button>
-    </div>
-    ${planMsg ? `<p class="why">${esc(planMsg)}</p>` : ''}
-    <p class="adm__note">${net?.plan
-      ? '개요는 10초쯤 걸립니다. 만들어진 뒤에 읽어보고 결정하세요.'
-      : '로컬 모드입니다. 모델이 없어 프롬프트를 잘라 뼈대만 만듭니다. 진짜 기획은 배포된 판에서 됩니다.'}</p>`)
-}
-
-function renderPlanReview(body) {
-  const news = planOut.chars
-  const secs = planOut.beats.reduce((s, b) => s + (Number(b.secs) || 0), 0)
-  setHtml(body, `
-    <p class="adm__lead"><b>${esc(planOut.title || '제목 없음')}</b>
-      <span class="adm__sep">·</span>${esc(MODES.find((m) => m.id === planSpec.mode).label)}
-      <span class="adm__sep">·</span>비트 ${planOut.beats.length}개 · ${clock(secs)}</p>
-    ${planOut.logline ? `<p class="plan__syn"><b>${esc(planOut.logline)}</b></p>` : ''}
-    ${planOut.synopsis ? `<p class="plan__syn">${esc(planOut.synopsis)}</p>` : ''}
-
-    ${news.length ? `
-      <span class="plan__meta">새로 만들 인물 ${news.length}명 · 각자 구도 ${POSES.length}칸이 함께 깔립니다</span>
-      <ul class="plan__chars">
-        ${news.map((c) => `<li><b>${esc(c.name)}</b>${esc(c.brief)}</li>`).join('')}
-      </ul>` : ''}
-
-    <span class="plan__meta" style="margin-top:12px">흐름</span>
-    <ul class="plan__beats">
-      ${planOut.beats.map((b, i) => `<li>
-        <span class="plan__meta">${i + 1}. ${esc(b.scene || `S${i + 1}`)} · ${clock(b.secs)}${b.cast.length ? ` · ${esc(b.cast.join(', '))}` : ''}</span>
-        ${esc(b.action)}</li>`).join('')}
-    </ul>
-
-    <div class="acts">
-      <button class="btn btn--solid" id="planApply">이대로 컷 ${planSpec.cuts}개 만들기</button>
-      <button class="btn btn--line" id="planAgain">개요 다시</button>
-      <button class="btn btn--line" id="planBack">옵션 고치기</button>
-    </div>
-    ${planMsg ? `<p class="why">${esc(planMsg)}</p>` : ''}
-    <p class="adm__note">${planBase()
-      ? '지금 판(본편)에 제목·이야기와 컷이 붙습니다.'
-      : '새 회차로 붙습니다. 지금 있는 컷은 그대로 남습니다.'}
-      팀 전원의 화면에 함께 생깁니다.</p>`)
-}
-
-async function runPlan(step) {
-  planStep = 'busy'
-  planMsg = step === 'outline'
-    ? '이야기 구조를 짜고 있습니다… 10초쯤 걸립니다.'
-    : `비트를 컷 ${planSpec.cuts}개로 펼치고 있습니다… 10초쯤 걸립니다.`
-  renderPlan()
-  try {
-    if (step === 'outline') {
-      planOut = await planOutline(net, planSpec, planCtx())
-      planStep = 'review'
-      planMsg = planOut.local ? '로컬 모드 예시입니다. 문장을 잘라 만든 뼈대입니다.' : ''
-    } else {
-      const cuts = await planCuts(net, planSpec, planOut)
-      if (!cuts.length) throw new Error('컷을 받지 못했습니다. 다시 시도해 주세요.')
-      applyPlan(planOut, cuts)
-      planStep = 'form'
-      planOut = null
-      planMsg = ''
-      openPlan(false)
-      return
-    }
-  } catch (err) {
-    console.warn('[plan]', err)
-    planStep = planOut && step === 'cuts' ? 'review' : 'form'
-    planMsg = err?.message || '기획에 실패했습니다. 다시 시도해 주세요.'
-  }
-  renderPlan()
-}
-
-function applyPlan(out, cuts) {
-  const ops = []
-  const scenario = [out.logline, '', out.synopsis].join('\n').trim()
-  let epId = null
-  let made = 0
-
-  if (planBase()) {
-    ops.push({ kind: 'board.patch', fields: { title: out.title || state.board.title, scenario } })
-  } else {
-    epId = uid()
-    ops.push({
-      kind: 'ep.add',
-      ep: {
-        id: epId,
-        epNo: planSpec.mode === 'spin'
-          ? epList().length + 2
-          : epList().filter((e) => !e.spinoff).length + 2,
-        title: out.title, spinoff: planSpec.mode === 'spin',
-        fromEp: viewEp || null,
-        centerChar: planSpec.mode === 'spin' ? (planSpec.center || null) : null,
-        logline: out.logline, synopsis: out.synopsis, scenario,
-      },
-    })
-  }
-
-  const byName = new Map(charList().map((c) => [c.name, c.id]))
-  let ck = charList().at(-1)?.orderKey ?? null
-  for (const c of out.chars) {
-    if (byName.has(c.name)) continue
-    const id = uid()
-    byName.set(c.name, id)
-    made += 1
-    ck = orderKeyBetween(ck, null)
-    ops.push({
-      kind: 'char.add',
-      char: {
-        id, name: c.name, brief: c.brief, seedNo: Math.floor(Math.random() * 900) + 20,
-        orderKey: ck, refPanelId: null, refN: null,
-      },
-    })
-    let pk = null
-    for (const pose of POSES) {
-      pk = orderKeyBetween(pk, null)
-      ops.push({
-        kind: 'panel.add',
-        panel: {
-          id: uid(), charId: id, pose, orderKey: pk,
-          action: '', status: 'draft', assignee: null, versions: [], current: -1, generating: false,
-        },
-      })
-    }
-  }
-
-  let key = cutsOf(epId).at(-1)?.orderKey ?? null
-  for (const c of cuts) {
-    key = orderKeyBetween(key, null)
-    ops.push({
-      kind: 'panel.add',
-      panel: {
-        id: uid(), charId: null, orderKey: key, ...(epId ? { epId } : {}), origin: 'plan',
-        scene: c.scene, secs: c.secs, action: c.action, dialogue: c.dialogue, camera: c.camera,
-        cast: c.cast.map((n) => byName.get(n)).filter(Boolean),
-        status: 'draft', assignee: null, versions: [], current: -1, generating: false,
-      },
-    })
-  }
-
-  emitMany(ops)
-  if (epId) setEp(epId)
-  else setView(null)
-  render()
-  /*
-   * 만든 것을 말로 알립니다. 인물을 같이 만들었으면 끝나는 말이 '명'이고 아니면 '개'라서
-   * 붙는 조사가 달라집니다. 그래서 josa 로 고릅니다.
-   *
-   * 부탁한 컷 수보다 적게 나오면 그 말도 같이 합니다. 모델이 비트를 덜 펼쳐 오는 일이
-   * 있는데, 예전에는 아무 말 없이 적은 수만 놓고 끝나서 사람이 세어 보고서야 알았습니다.
-   */
-  const what = `컷 ${cuts.length}개${made ? `와 인물 ${made}명` : ''}`
-  const short = cuts.length < planSpec.cuts
-    ? ` 부탁한 ${planSpec.cuts}개보다 ${planSpec.cuts - cuts.length}개 적습니다. 모자란 만큼은 컷을 손으로 더하거나 다시 만들어 보세요.`
-    : ''
-  announce(`${epId ? `${epLabel(state.eps[epId])}에 ` : ''}${what}${josa(what, '을', '를')} 만들었습니다.${short}`)
-  if (short) notice(`컷 ${cuts.length}개만 나왔습니다.${short}`, 'warn')
-}
-
-// ── 컷을 대본으로 ────────────────────────────────────────────────────────────
 /*
- * 대본화는 story.js 의 planScript 가 들고 있습니다. 지금까지 그 함수를 부르는 곳은
- * story-graph.html 하나였고, 그 화면은 자기 메모리에 들고 있는 컷만 봅니다. 그래서
- * 보드에서 손으로 고친 컷이나 「이야기 기획」으로 만든 컷은 대본이 될 길이 없었습니다.
- * 이 자리가 그 길입니다.
+ * ══ 여기 있던 것: 이야기 기획 · 컷을 대본으로 · 시나리오를 컷으로 · 대본 불러오기
  *
- * 보드는 컷을 넘기고 형식을 고르고 결과를 보여주기만 합니다. 대본을 쓰는 규칙(분량·
- * 지문·대사·씬 전환)은 story.js 에 그대로 둡니다. 대본화 화면과 같은 엔진이 돌아야
- * 두 화면의 대본이 같은 물건이 됩니다.
- */
-let scriptStep = 'form'
-let scriptMsg = ''
-let scriptOut = ''
-let scriptFmt = 'drama'
-
-/*
- * 대본화에 넘길 컷. 지금 보고 있는 회차의 컷만 봅니다.
+ * 네 창과 그 뒤의 판 약 560줄이 이 자리에 있었습니다. 다 지웠습니다. 넷 다 「이야기를
+ * 만드는 일」이고, 그 일을 하는 화면이 위 탭 바에 따로 있습니다(components/nav-tabs.js).
  *
- * cast 를 인물 id 에서 이름으로 바꿉니다. 보드는 id 로 들고 있고 planScript 는 이름을
- * 읽습니다(story.js 의 scriptFormatPrompt 가 cast.join 을 그대로 프롬프트에 넣습니다).
- * 안 바꾸면 대본에 "등장: char-1" 이 박힙니다.
+ *   이야기 기획 · 시나리오를 컷으로 → 스토리 디벨롭 (story-graph.html)
+ *   컷을 대본으로 · 대본 불러오기   → 대본화 (story-graph.html?tab=script)
  *
- * 키비주얼 화면이 붙인 씬 패널은 epId 가 없어서 본편 컷으로 함께 옵니다. 그림이 이미
- * 있는 씬이 대본에서도 한 씬으로 잡히는 것이 맞습니다.
- */
-const scriptCuts = () => cutsOf(viewEp).map((p) => ({
-  /*
-   * 씬 이름에서 번호를 뗀다. 대본 형식이 자기 번호를 다시 붙이기 때문에 그냥 넘기면
-   * 「S#1. S01 빵집 · 새벽」 처럼 번호가 두 번 나온다. 씬 묶음은 컷 순서로 정해지니
-   * 번호를 떼도 잃는 것이 없다 (core.js 의 sceneMeta).
-   */
-  scene: sceneMeta(p.scene).where || p.scene,
-  action: p.action, dialogue: p.dialogue, camera: p.camera, secs: p.secs,
-  cast: (p.cast || []).map((id) => state.chars[id]?.name).filter(Boolean),
-}))
-
-function openScript(on) {
-  const dlg = byId('script')
-  if (on && !may('plan')) return
-  if (on && !dlg.open) dlg.showModal()
-  else if (!on && dlg.open) dlg.close()
-  byId('scriptBtn').setAttribute('aria-expanded', String(on))
-  if (on) renderScript()
-}
-
-function renderScript() {
-  const body = byId('scriptBody')
-  const cuts = scriptCuts()
-  const secs = cuts.reduce((s, c) => s + (Number(c.secs) || 0), 0)
-  const said = cuts.filter((c) => (c.dialogue || '').trim()).length
-  const ep = state.eps[viewEp]
-
-  setHtml(body, `
-    <p class="adm__lead"><b>${esc(ep ? epLabel(ep) : (state.board.title || '본편'))}</b>
-      <span class="adm__sep">·</span>컷 ${cuts.length}개 · ${clock(secs)}
-      <span class="adm__sep">·</span>대사 있는 컷 ${said}개</p>
-
-    ${cuts.length ? `
-      <div class="plan__grid">
-        <label class="f"><span class="f__label"><span class="mono">대본 형식</span></span>
-          <select id="scFormat">${planOpt(Object.keys(SCRIPT_FORMATS), scriptFmt,
-            (v) => SCRIPT_FORMATS[v].label)}</select></label>
-      </div>
-      <div class="acts">
-        <button class="btn btn--solid" id="scGo" ${scriptStep === 'busy' ? 'disabled' : ''}>${
-          scriptOut ? '대본 다시 만들기' : '대본 만들기'}</button>
-        <button class="btn btn--line" id="scCancel">닫기</button>
-      </div>` : `
-      <p class="why">이 회차에 컷이 없습니다. 왼쪽 시나리오를 <b>컷으로 분해</b>하거나
-        <b>이야기 기획</b>으로 컷을 먼저 만들어 주세요.</p>`}
-
-    ${scriptStep === 'busy'
-      ? `<div class="plan__wait"><span class="spin"></span><span>${esc(scriptMsg)}</span></div>`
-      : (scriptMsg ? `<p class="why">${esc(scriptMsg)}</p>` : '')}
-
-    ${scriptOut ? `
-      <pre class="sc__text" id="scText">${esc(scriptOut)}</pre>
-      <div class="acts">
-        <button class="btn btn--line" id="scCopy">복사</button>
-        <button class="btn btn--line" id="scDown">다운로드</button>
-      </div>
-      ${/* 복사를 권하는 이유: 디벨롭 화면의 대본 칸이 이 텍스트를 그대로 받습니다 */ ''}
-      <p class="adm__note" id="scNote">${esc(scriptFileName(planCtx().title))} 으로 내려받습니다
-        (UTF-8 BOM). 복사해서 <b>스토리 디벨롭</b> 화면의 대본 칸에 붙이면 이 컷들로
-        관계 그래프를 뽑을 수 있습니다.</p>` : `
-      <p class="adm__note">${net?.plan
-        ? '컷의 지문·대사·카메라를 정식 대본 형식으로 폅니다. 컷 수에 따라 20초쯤 걸립니다.'
-        : '로컬 모드입니다. 모델이 없어 형식만 갖춘 뼈대가 나옵니다. 진짜 대본은 배포된 판에서 나옵니다.'}</p>`}`)
-}
-
-async function runScriptOut() {
-  const cuts = scriptCuts()
-  if (!cuts.length) return
-  scriptStep = 'busy'
-  scriptMsg = `컷 ${cuts.length}개를 대본으로 옮기고 있습니다… 20초쯤 걸립니다.`
-  scriptOut = ''
-  renderScript()
-  try {
-    // 제목과 인물은 기획이 쓰는 것과 같은 것을 씁니다. 두 기능이 같은 판을 봅니다
-    const ctx = planCtx()
-    scriptOut = await planScript(net, cuts, { format: scriptFmt, title: ctx.title, chars: ctx.chars })
-    scriptMsg = net?.plan ? '' : '로컬 모드 뼈대입니다. 형식만 맞춰 조합한 것입니다.'
-    // 「웹드라마」는 받침이 없어 「로」입니다. 형식이 셋이라 하나만 어긋나도 늘 보입니다
-    announce(`컷 ${cuts.length}개를 ${SCRIPT_FORMATS[scriptFmt].label}`
-      + `${josa(SCRIPT_FORMATS[scriptFmt].label, '으로', '로')} 옮겼습니다.`)
-  } catch (err) {
-    console.warn('[board] 대본화 실패', err)
-    scriptMsg = err?.message || '대본을 받지 못했습니다. 다시 시도해 주세요.'
-  }
-  scriptStep = 'form'
-  renderScript()
-}
-
-/* 뽑은 대본을 클립보드로. 안내 줄을 그 자리에서 바꿔 눌린 것이 보이게 합니다 */
-async function copyScript() {
-  const note = byId('scNote')
-  try {
-    await navigator.clipboard.writeText(scriptOut)
-    if (note) note.textContent = '대본을 클립보드에 복사했습니다. 스토리 디벨롭 화면의 대본 칸에 붙여 넣으세요.'
-  } catch (err) {
-    console.warn('[board] 복사 실패', err)
-    if (note) note.textContent = '복사가 막혔습니다. 대본을 직접 선택해 복사해 주세요.'
-  }
-}
-
-/* .txt 로 내려받습니다. BOM 은 scriptBlob 이 붙입니다 (BOM 없는 UTF-8 을 깨뜨리는 편집기가 있습니다) */
-function downScript() {
-  const url = URL.createObjectURL(scriptBlob(scriptOut))
-  const a = document.createElement('a')
-  a.href = url
-  a.download = scriptFileName(planCtx().title)
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
-// ── 대본을 시나리오로 불러오기 ───────────────────────────────────────────────
-/*
- * 대본화 화면(story-graph.html?tab=script)은 만든 대본을 어디에도 저장하지 않습니다.
- * 화면 안 변수에 들고 있다가 「복사」·「다운로드」로 사람 손에 넘깁니다. 로그에 남는 것은
- * 「대본으로 옮겼습니다」 한 줄이고 본문은 없습니다. 그래서 보드가 대본을 받는 길은 둘입니다.
- * 내려받은 파일을 고르는 것과, 복사한 것을 붙여 넣는 것입니다. 이 창이 그 둘을 받습니다.
+ * 보드는 만들어진 컷을 그리고 승인하는 곳입니다. 같은 일을 두 자리에서 할 수 있게 두면
+ * 어느 쪽이 진짜인지 아무도 모릅니다. 게다가 이 창들은 보드의 판을 직접 갈아 치웠으므로
+ * (applyPlan 이 panel.add 를 쏟아 넣었습니다), 탭에서 이야기를 다듬던 사람과 여기서 창을
+ * 연 사람의 결과가 서로를 덮었습니다.
  *
- * 받은 대본은 그대로 시나리오 칸에 넣지 않습니다. 시나리오 칸은 「무엇이 보이는가」를 씬
- * 순서대로 적는 짧은 글을 위한 자리라서, 대본 한 편을 통째로 넣으면 읽을 수도 고칠 수도
- * 없습니다. Bedrock 이 붙어 있으면 모델에 줄이게 하고, 없으면 core.js 의
- * scenarioFromScript 가 뼈대를 만듭니다. 어느 쪽이든 넣기 전에 창에서 손으로 고칠 수 있고,
- * 넣은 뒤에도 시나리오 칸에서 그대로 고칠 수 있습니다.
+ * 판의 시나리오 값(state.board.scenario · ep.scenario)은 그대로입니다. op 로 들어오면
+ * 받고 예시도 그것을 넣습니다(seedBuild). 보드가 그것을 그릴 칸만 없앴습니다.
  */
-let impRaw = ''
-let impName = ''
-let impOut = ''
-let impBusy = false
-let impMsg = ''
-
-/** 한 번에 모델에 넘기는 대본 길이 상한. 넘으면 앞부분만 줄인다 */
-const IMPORT_CHARS = 12000
-
-/*
- * 요약 지시. 나오는 모양을 scenarioFromScript 와 같게 맞춥니다. 그래야 모델이 있든
- * 없든 시나리오 칸에 들어오는 글의 모양이 같고, 「컷으로 분해」가 씬을 알아봅니다.
- */
-const scenarioPrompt = (text) => [
-  '아래 대본을 스토리보드 시나리오로 줄여라.',
-  '',
-  '규칙',
-  '- 씬 머리줄을 대본에 나온 순서대로 남긴다. 「S01 장소 · 시간」 모양으로 한 줄에 쓴다.',
-  '- 씬마다 한 문단. 화면에 보이는 것만 두세 문장으로 적는다. 문단 사이는 빈 줄로 나눈다.',
-  '- 대사는 씬을 여는 한 줄만 「」 로 감아 남긴다. 「이름: 대사」 모양은 쓰지 않는다.',
-  '- 대본에 없는 사건·인물을 만들지 않는다.',
-  '- 전체 1500자 이내. 머리말·설명·코드펜스 없이 시나리오만 출력한다. 한국어로 쓴다.',
-  '',
-  '대본:',
-  text.slice(0, IMPORT_CHARS),
-].join('\n')
-
-function openImport(on) {
-  const dlg = byId('imp')
-  if (on && !may('plan')) return
-  if (on && !dlg.open) dlg.showModal()
-  else if (!on && dlg.open) dlg.close()
-  byId('importBtn').setAttribute('aria-expanded', String(on))
-  if (on) renderImport()
-}
-
-/*
- * 붙여 넣은 대본이 어떻게 읽혔는지 한 줄로 말해 준다. 창을 다시 그리지 않고 이 줄만
- * 갈아 끼운다 (아래 input 처리). 타이핑 중에 창을 다시 그리면 커서가 앞으로 튄다.
- */
-function impMetaHtml() {
-  if (!impRaw) return '아직 대본이 없습니다.'
-  const got = splitScript(impRaw)
-  return `${impName ? `${esc(impName)} · ` : ''}${impRaw.length.toLocaleString('ko-KR')}자${
-    got ? ` · 씬 ${new Set(got.cuts.map((c) => c.scene)).size}개 · 인물 ${got.names.length}명`
-      : ' · 대본 형식으로는 안 읽힙니다'}${
-    impRaw.length > IMPORT_CHARS ? ` · 앞 ${IMPORT_CHARS.toLocaleString('ko-KR')}자만 씁니다` : ''}`
-}
-
-function renderImport() {
-  const box = byId('impBody')
-  if (!box) return
-  setHtml(box, `
-    <label class="adm__row"><span class="mono">대본화에서 내려받은 파일</span>
-      <input type="file" id="impFile" accept=".txt,.md,.fountain,.fdx" ${impBusy ? 'disabled' : ''}></label>
-    <p class="hint">대본화 화면의 <b>다운로드</b>로 받은 <span class="mono">*_대본.txt</span> 를 고르거나,
-      <b>복사</b>한 것을 아래에 붙여 넣습니다.</p>
-    <textarea id="impRaw" class="imp__raw" spellcheck="false" placeholder="대본 붙여넣기"
-      ${impBusy ? 'disabled' : ''}>${esc(impRaw)}</textarea>
-    <p class="plan__meta" id="impMeta">${impMetaHtml()}</p>
-    <div class="adm__row">
-      <button class="btn btn--solid" id="impGo" ${impBusy || !impRaw.trim() ? 'disabled' : ''}>
-        <span class="mono">시나리오로 요약</span></button>
-      <button class="btn btn--line" id="impCancel"><span class="mono">닫기</span></button>
-    </div>
-    ${impBusy ? '<div class="adm__note"><span class="spin"></span> 대본을 시나리오로 줄이고 있습니다… 20초쯤 걸립니다.</div>' : ''}
-    ${impMsg ? `<div class="adm__note">${esc(impMsg)}</div>` : ''}
-    ${impOut ? `
-      <h3 class="mono h" style="margin-top:14px">시나리오 (넣기 전에 고칠 수 있습니다)</h3>
-      <textarea id="impOut" class="imp__out" spellcheck="false">${esc(impOut)}</textarea>
-      <div class="adm__row">
-        <button class="btn btn--solid" id="impPut"><span class="mono">시나리오 칸에 넣기</span></button>
-        <span class="plan__meta">${impOut.length.toLocaleString('ko-KR')}자 · ${
-          impOut.split(/\n{2,}/).filter((s) => s.trim()).length}문단</span>
-      </div>` : ''}`)
-}
-
-/** 고른 파일을 읽는다. .fdx(Final Draft)는 story.js 의 scriptToText 가 평문으로 바꾼다 */
-async function readScriptFile(file) {
-  if (!file) return
-  try {
-    impRaw = scriptToText(await file.text(), file.name)
-    impName = file.name
-    impOut = ''
-    impMsg = impRaw.trim() ? '' : '파일에서 글자를 찾지 못했습니다.'
-  } catch (err) {
-    console.warn('[board] 대본 파일 읽기 실패', err)
-    impMsg = '파일을 읽지 못했습니다. 텍스트로 붙여 넣어 주세요.'
-  }
-  renderImport()
-}
-
-async function summarizeScript() {
-  const text = impRaw.trim()
-  if (!text) return
-  // 모델이 없으면 로컬 뼈대로 간다. 그 경우 대본으로 읽히지 않으면 줄일 수가 없다
-  if (!net?.plan) {
-    impOut = scenarioFromScript(text)
-    impMsg = impOut
-      ? '로컬 모드 뼈대입니다. 씬 머리줄과 지문만 남기고 대사를 한 줄로 줄였습니다.'
-      : '대본 형식(S#·INT./EXT.·「이름: 대사」)으로 읽히지 않아 줄일 수 없습니다. 직접 시나리오를 쓰거나 대본 형식으로 붙여 주세요.'
-    renderImport()
-    return
-  }
-  impBusy = true
-  impMsg = ''
-  impOut = ''
-  renderImport()
-  try {
-    const res = await net.plan({ prompt: scenarioPrompt(text), maxTokens: 2000, think: false })
-    impOut = String(res?.text ?? '').trim()
-    if (!impOut) throw new Error('빈 응답')
-    if (res?.stop === 'max_tokens') impMsg = '응답 상한에서 잘렸습니다. 뒷부분은 직접 이어 써 주세요.'
-    announce('대본을 시나리오로 줄였습니다.')
-  } catch (err) {
-    console.warn('[board] 시나리오 요약 실패', err)
-    // 모델이 안 되어도 손을 놓지 않는다. 로컬 뼈대라도 내놓는다
-    impOut = scenarioFromScript(text)
-    impMsg = impOut
-      ? '모델을 부르지 못해 로컬 뼈대로 줄였습니다. 필요하면 고쳐 쓰세요.'
-      : (err?.message || '요약에 실패했습니다. 다시 시도해 주세요.')
-  }
-  impBusy = false
-  renderImport()
-}
-
-/*
- * 시나리오 칸에 넣는다. 지금 보고 있는 회차의 시나리오다 (없으면 판 전체).
- * 이미 쓴 것이 있으면 덮어쓰기 전에 물어본다. 되돌리기는 없다.
- */
-function putScenario() {
-  const el = byId('impOut')
-  const text = (el ? el.value : impOut).trim()
-  if (!text) return
-  const cur = byId('scenario').value.trim()
-  if (cur && !confirm('시나리오 칸에 이미 쓴 글이 있습니다. 이 시나리오로 바꿀까요?')) return
-  byId('scenario').value = text
-  const ep = viewEp
-  if (ep) { state.eps[ep].scenario = text; emit({ kind: 'ep.patch', epId: ep, fields: { scenario: text } }) }
-  else { state.board.scenario = text; emit({ kind: 'board.patch', fields: { scenario: text } }) }
-  renderBreakdown()
-  openImport(false)
-  announce('시나리오 칸에 넣었습니다. 이어서 컷으로 분해할 수 있습니다.')
-}
 
 const myNotifs = () => state.notifs.filter((n) => n.to === me.id).sort((a, b) => b.ts - a.ts)
 const KIND = { comment: '메모', mention: '멘션', reply: '답글', status: '상태', assign: '담당', version: '이미지' }
@@ -3473,6 +2927,99 @@ function markRead(id) {
   if (n && !n.read) { n.read = true; readIds.add(id); saveRead() }
 }
 
+/*
+ * ── 오른쪽 판을 접는 자리 ─────────────────────────────────────────────────────
+ *
+ * 이 판에 여덟 덩이가 세로로 쌓여 있었습니다. 담당 · 컷 내용 · 이미지 만들기 · 자산 · 버전 ·
+ * 메모 · 기록, 그리고 바닥의 승인 띠입니다. 컷 하나에서 실제로 하는 일은 그중 하나인데
+ * 나머지 일곱이 다 펼쳐져 있어서, 승인하려고 열어도 「이미지 만들기」의 칩 스무 개와 안내
+ * 다섯 줄을 지나야 했습니다. 세로 길이가 화면의 세 배였습니다.
+ *
+ * 어느 줄도 지우지 않았습니다. 각각 실제로 쓰는 사람이 있고(아티스트는 생성 칸, 감독은
+ * 메모와 승인) 지웠으면 그 사람의 일이 없어집니다. 대신 「지금 이 컷에서 할 일」만 펴 두고
+ * 나머지는 제목만 남겨 접습니다.
+ *
+ * 접는 것으로는 부족했습니다. 접힌 덩이 여섯이 다 같은 실선 위에 같은 무게로 서 있어서,
+ * 제목만 읽으면 「내용」·「이미지 만들기」·「버전」·「메모」·「기록」이 나란한 목록이었습니다.
+ * 이 판을 처음 여는 사람에게는 무엇을 하러 온 자리인지가 그 목록 안에서 사라집니다.
+ *
+ * 그래서 「하는 일」과 「보는 것」을 모양으로 갈랐습니다. 앞의 둘만 종이 한 장으로 세워
+ * 번호를 답니다(section 의 step · board.html 의 .sec--step). 뒤의 넷은 그대로 접힌 줄입니다.
+ * 자세한 것은 renderDetail 안 setHtml 위의 머리글에 있습니다.
+ *
+ * <details> 를 씁니다. 처음 상태를 우리가 정하고 여닫는 것은 브라우저가 합니다.
+ *
+ * 접힌 상태는 판(op 로그)에 남기지 않습니다. 컷마다 보고 싶은 것이 다르고, 같은 컷을 둘이
+ * 열어 두었을 때 남이 접은 칸이 내 화면에서 접히면 그것이 고장으로 읽힙니다. 대신 화면이
+ * 살아 있는 동안은 사람이 손으로 여닫은 것을 기억합니다(secOpen). renderDetail 이 남의
+ * 편집 하나에도 다시 도는데, 그때 펴 둔 칸이 닫히면 글을 쓰던 칸이 눈앞에서 사라집니다.
+ *
+ * 기본값이 아니라 「사람이 정한 것」을 담습니다. Set 이 아니라 Map 인 이유가 그것입니다 —
+ * 처음부터 펴 두는 칸(내용)을 사람이 접었으면 그 접은 것도 기억해야 합니다.
+ */
+const secOpen = new Map()
+
+/**
+ * 접히는 한 덩이.
+ *
+ * @param {string} key - 기억할 이름. 사람이 여닫은 것을 secOpen 에 이 이름으로 남깁니다
+ * @param {string} title - 제목 줄
+ * @param {string} body - 안의 내용
+ * @param {object} [o]
+ * @param {boolean} [o.open] - 처음 상태. 지금 할 일인 덩이만 참입니다
+ * @param {number} [o.count] - 제목 옆의 숫자(메모 3, 버전 2). 접혀 있어도 몇 개인지는 보입니다
+ * @param {string} [o.lead] - 제목 옆의 한 줄. 접힌 채로 「안에 무엇이 있는지」를 말합니다
+ * @param {number} [o.step] - 「할 일」인 덩이의 번호(1 내용 · 2 이미지). 주면 종이 한 장으로
+ *   세우고 제목 앞에 그 번호가 붙습니다(board.html 의 .sec--step). 보는 덩이에는 주지
+ *   않습니다 — 여섯이 다 같은 무게로 쌓이면 어느 것이 할 일인지가 목록 안에서 사라집니다
+ */
+function section(key, title, body, { open = false, count = 0, lead = '', step = 0 } = {}) {
+  const on = secOpen.has(key) ? secOpen.get(key) : open
+  return `
+    <details class="sec${step ? ' sec--step' : ''}" data-sec="${esc(key)}"${on ? ' open' : ''}>
+      <summary class="sec__sum">
+        <span class="mono sec__t"${step ? ` data-step="${step}"` : ''}>${esc(title)}</span>
+        ${count ? `<span class="count">${count}</span>` : ''}
+        ${lead ? `<span class="sec__lead">${esc(lead)}</span>` : ''}
+      </summary>
+      <div class="sec__body">${body}</div>
+    </details>`
+}
+
+/**
+ * 「이 칸이 무엇인지」를 담는 접히는 줄.
+ *
+ * 이 판의 안내문(.why)이 열 줄을 넘었습니다. 하나씩은 다 필요한 말인데 — 기반 이미지가
+ * 무엇인지, 모델이 얼굴을 살리는지, 영상이 왜 승인 뒤인지 — 처음 한 번 읽으면 되는 말이라
+ * 늘 펴 두면 정작 누를 단추가 그 아래로 밀립니다. 한 줄로 접어 두고 궁금할 때 폅니다.
+ *
+ * 비어 있으면 아무것도 내지 않습니다. 빈 「자세히」를 눌러 보게 하면 안 됩니다.
+ */
+function tipBox(key, rows) {
+  const body = rows.filter(Boolean).join('')
+  if (!body.trim()) return ''
+  return `
+    <details class="tip" data-sec="${esc(key)}"${secOpen.get(key) ? ' open' : ''}>
+      <summary class="tip__sum">이 칸이 무엇인지</summary>
+      <div class="tip__body">${body}</div>
+    </details>`
+}
+
+/**
+ * 접힌 칸을 펴고 다시 그립니다.
+ *
+ * 밖에서 그 안의 칸에 초점을 주려는 때에 씁니다 — 컷에서 r 을 눌러 수정 요청으로 가면
+ * 메모 칸에 초점이 가야 하는데, 그 칸이 접혀 있으면 focus 가 조용히 아무 일도 하지
+ * 않습니다(닫힌 details 안은 화면에 없습니다). 이유를 말해 놓고 쓸 곳이 없는 셈입니다.
+ *
+ * @param {string} key - section 의 key
+ */
+function openSec(key) {
+  if (secOpen.get(key) === true) return
+  secOpen.set(key, true)
+  renderDetail()
+}
+
 function renderDetail() {
   const host = byId('detail')
   if (composing(host)) { imeMissed = true; return }
@@ -3553,13 +3100,22 @@ function renderDetail() {
   // 참조 자산이 들어가는 컷에는 「얼굴이 없다」를 말하지 않습니다 — 인물 자산이 그 얼굴입니다
   const noFace = !p.charId && (p.cast || []).length > 0 && !refs.some((r) => r.face) && !assetIds.length
   const keepModel = allModels().find((m) => m.strength === false)
-  const faceNote = noFace ? `
+  /*
+   * 얼굴 이야기는 둘로 갈라 둡니다.
+   *
+   * 앞은 「지금 없다」입니다 — 붙여 둔 인물의 얼굴이 없어서 칩이 안 나오는 것이라, 이것을
+   * 접어 두면 화면이 고장난 것으로 보입니다. 그대로 세웁니다.
+   *
+   * 뒤는 「지금 무엇을 참조한다」입니다. 한 번 읽으면 되는 말이라 아래 접히는 칸으로
+   * 보냅니다(tipBox).
+   */
+  const faceMiss = noFace ? `
     <p class="why">붙여 둔 인물에게 참조할 얼굴이 아직 없습니다. 인물 화면에서 마음에 드는 버전을
-      「이 버전을 기준으로」 잡거나 구도를 승인하면, 그 얼굴이 여기 칩으로 올라옵니다.</p>`
-    : !pickedRef?.face ? '' : `
+      「이 버전을 기준으로」 잡거나 구도를 승인하면, 그 얼굴이 여기 칩으로 올라옵니다.</p>` : ''
+  const faceNote = noFace || !pickedRef?.face ? '' : `
     <p class="why">${pickedRef.faces
-      ? `${esc(pickedRef.faces.map((f) => f.name).join(' · '))}의 얼굴을 한 장으로 붙여 참조합니다. 누가 누구인지는 위 지시문의 이름이 말해 줍니다.`
-      : `${esc(pickedRef.from?.name || '')}의 승인된 얼굴을 참조합니다. 컷이 바뀌어도 같은 인물로 나옵니다.`}${
+    ? `${esc(pickedRef.faces.map((f) => f.name).join(' · '))}의 얼굴을 한 장으로 붙여 참조합니다. 누가 누구인지는 위 지시문의 이름이 말해 줍니다.`
+    : `${esc(pickedRef.from?.name || '')}의 승인된 얼굴을 참조합니다. 컷이 바뀌어도 같은 인물로 나옵니다.`}${
   picked?.strength === true
     ? ` 다만 ${esc(picked.label)}은 기반 이미지를 지우고 다시 그립니다 — 얼굴을 그대로 살리려면 ${
       keepModel ? `위쪽 모델 칩에서 ${esc(keepModel.label)}을 고르세요.` : '얼굴을 조건으로 받는 모델이 필요합니다.'}`
@@ -3613,8 +3169,11 @@ function renderDetail() {
   /*
    * 자산 한 줄. 자산 자체는 「자산관리」 화면의 것이라 여기서는 이 컷에서 무엇이 뽑혔는지와
    * 그 화면으로 가는 길만 둡니다. 승인 전에는 「승인하면 뽑힌다」만 말합니다. 생성 칸
-   * (genBlock)과 달리 감독에게도 보입니다 — 승인을 누르는 사람이 감독이라 뽑는 진행도 그
+   * (genBody)과 달리 감독에게도 보입니다 — 승인을 누르는 사람이 감독이라 뽑는 진행도 그
    * 화면에 뜹니다.
+   *
+   * 접지 않습니다. 한 줄이고, 「승인하면 자산이 된다」는 것이 이 판에서 승인을 누르는 사람이
+   * 알아야 할 결과입니다. 접힌 제목 뒤에 두면 그 한 줄을 볼 이유가 없어집니다.
    */
   const assetsHref = navHref('assets', boardFromSearch())
   const assetLine = p.charId || !canGen ? '' : extracting ? `
@@ -3626,10 +3185,44 @@ function renderDetail() {
     : `승인은 됐지만 뽑은 자산이 없습니다.${extractWhy ? ` ${esc(extractWhy)}.` : ''}`}
       ${extractWhy ? '' : `<button type="button" class="mini" data-do="extract">${assetMine.length ? '다시 뽑기' : '자산으로 뽑기'}</button>`}</p>`
 
-  const genBlock = !may('art') ? `
-    <h2 class="mono h" style="margin-top:22px">이미지</h2>
+  /*
+   * 기반 이미지를 얼마나 살릴지. 모델이 그것을 어떻게 쓰는지에 따라 칸 자체가 없어집니다.
+   * 그 「왜 없는지」는 아래 tipBox 로 접습니다 — 없는 칸의 설명이 있는 칸보다 길면 안 됩니다.
+   *
+   * 슬라이더였습니다. 0.75~0.95 를 0.1 씩 밟는 range 였는데, 실제로 갈 수 있는 자리가 셋이고
+   * (morph 가 그 셋을 이름으로 부릅니다) 그 이름은 옆의 작은 글씨로만 보였습니다. 끌어야
+   * 값이 보이는 셋 중 하나 고르기입니다. 위의 기반 이미지 줄과 같은 칩으로 바꿉니다 —
+   * 고를 것이 이름으로 다 보이고, 지금 무엇인지도 색으로 보입니다.
+   */
+  const MORPHS = [0.75, 0.85, 0.95]
+  const morphRow = refKey === 'none' && !assetIds.length ? ''
+    : picked?.init === false || (connPick && picked.strength !== true) || picked?.strength === false ? '' : `
+      <div class="gen__row">
+        <span class="mono gen__lab">기반을 얼마나 살릴지</span>
+        ${MORPHS.map((v) => `<button class="chip" data-morph="${v}" data-on="${
+  Math.abs(o.strength - v) < 0.01 ? 1 : 0}" ${editable ? '' : noEdit}>${esc(morph(v))}</button>`).join('')}
+      </div>`
+
+  const morphWhy = refKey === 'none' && !assetIds.length ? '' : picked?.init === false ? `
+      <p class="why">${esc(picked.label)}은 기반 이미지를 받지 않습니다. ${connPick || !keepModelId()
+    ? '지시문만 보고 새로 그립니다.'
+    : `참조를 고른 이 컷은 ${esc(modelOf(keepModelId())?.label || '')}이 그립니다 — 그 모델이 그림을 조건으로 받습니다.`}</p>`
+    : connPick && picked.strength !== true ? `
+      <p class="why">${esc(picked.label)}은 기반 이미지를 참고해서 그립니다. 변형 정도를 받는 칸은 이 모델에 없습니다.</p>`
+      : picked && picked.strength === false ? `
+      <p class="why">${esc(picked.label)}은 기반 이미지를 지우고 다시 그리지 않습니다. 조건으로 받아서 인물을 그대로 살립니다. 그래서 변형 정도가 없습니다.</p>` : `
+      <p class="why">‘${esc(morph(0.75))}’는 올린 스케치를 거의 그대로 두고, ‘${esc(morph(0.95))}’는
+        구도까지 모델이 다시 잡습니다. 얼굴만 물려받고 구도는 이 컷의 것으로 하려면 ‘${esc(morph(0.95))}’입니다.</p>`
+
+  /*
+   * 이미지 만들기. 접히는 한 덩이입니다(section 의 머리글).
+   *
+   * 안의 순서가 바뀌었습니다. 예전에는 지시문 → 칩 → 안내 다섯 줄 → 단추였습니다. 여는
+   * 이유가 「생성」인데 그 단추가 맨 아래, 안내 뒤에 있었습니다. 이제 고를 것을 먼저 두고
+   * 단추를 바로 이어 붙이고, 안내는 그 아래 접히는 칸으로 내렸습니다.
+   */
+  const genBody = !may('art') ? `
     <p class="why">${esc(whyNot('art'))}. 필요한 그림이 있으면 아래 메모로 남겨주세요.</p>` : `
-    <h2 class="mono h" style="margin-top:22px">이미지 만들기</h2>
     <label class="f">
       <span class="f__label"><span class="mono">생성 지시</span>
         ${o.prompt !== null ? '<button class="mini" data-do="autofill">작업 내용으로 다시 채우기</button>' : ''}</span>
@@ -3650,31 +3243,10 @@ function renderDetail() {
     <div class="gen__row gen__row--top">
       <span class="mono gen__lab">참조 자산</span>
       <div class="alib alib--pick" ${editable ? '' : noEdit}>${assetPool.map((a) => assetCard(a, { pick: assetOn.has(a.id) })).join('')}</div>
-    </div>
-    <p class="why">${assetIds.length
-      ? `자산 ${assetIds.length}장을 참조로 보냅니다. 인물은 그 얼굴로, 배경은 그 장소로, 소품은 그 물건 그대로 새 구도를 그립니다.${
-        refKey === 'none' ? '' : ' 위에서 고른 기반 이미지도 뒤에 한 장 더 붙습니다.'}`
-      : '컷에 붙인 인물의 자산과 같은 씬의 배경은 저절로 들어갑니다. 소품은 그 물건이 나오는 컷에서 직접 고르세요.'}</p>` : ''}
-    ${faceNote}
-    ${refKey === 'keyvisual' ? `
-      <p class="why">${esc(sceneMeta(p.scene).no || '이 씬')}의 키 비주얼을 기반으로 잡아 두었습니다.
-        키비주얼 화면에서 그 씬 하나를 보고 그린 그림이라, 장소와 빛이 같은 씬의 다른 컷과 어긋나지 않습니다.</p>` : ''}
-    ${modelNote}
-    ${refKey === 'none' && !assetIds.length ? '' : picked?.init === false ? `
-      <p class="why">${esc(picked.label)}은 기반 이미지를 받지 않습니다. ${connPick || !keepModelId()
-        ? '지시문만 보고 새로 그립니다.'
-        : `참조를 고른 이 컷은 ${esc(modelOf(keepModelId())?.label || '')}이 그립니다 — 그 모델이 그림을 조건으로 받습니다.`}</p>`
-    : connPick && picked.strength !== true ? `
-      <p class="why">${esc(picked.label)}은 기반 이미지를 참고해서 그립니다. 변형 정도를 받는 칸은 이 모델에 없습니다.</p>`
-      : picked && picked.strength === false ? `
-      <p class="why">${esc(picked.label)}은 기반 이미지를 지우고 다시 그리지 않습니다. 조건으로 받아서 인물을 그대로 살립니다. 그래서 변형 정도가 없습니다.</p>` : `
-      ${/* 슬라이더는 readonly 를 받지 않습니다. 잠근 채 두고 data-nope 는 감싼 줄에 답니다 */ ''}
-      <div class="gen__row" ${editable ? '' : noEdit}>
-        <span class="mono gen__lab">변형 정도</span>
-        <input type="range" id="genStrength" min="0.75" max="0.95" step="0.1" value="${o.strength}" ${editable ? '' : 'disabled'}>
-        <span class="mono gen__val">${morph(o.strength)}</span>
-      </div>
-      <p class="why">‘선 그대로’는 올린 스케치를 거의 유지하고, ‘새로 그리기’는 구도까지 모델이 다시 잡습니다.</p>`}
+    </div>` : ''}
+    ${morphRow}
+    ${/* 지금 이 컷에서 어긋난 것만 칸 옆에 세워 둡니다. 나머지 설명은 아래로 접습니다 */ ''}
+    ${faceMiss}
     <div class="acts">
       <button class="btn btn--line" data-do="upload" ${editable ? '' : noEdit}>스케치 올리기</button>
       <button class="btn btn--solid" data-do="generate" ${!editable ? noEdit : busyBy ? 'disabled' : ''}>
@@ -3686,7 +3258,30 @@ function renderDetail() {
     </div>
     ${clipping ? `<p class="why">${esc(clipping)}</p>` : ''}
     ${p.genError ? `<p class="why why--bad">${esc(p.genError)}</p>` : hint ? `<p class="why">${esc(hint)}</p>` : ''}
-    ${clipRow}`
+    ${clipRow}
+    ${tipBox('gen.tip', [
+    assetPool.length ? `<p class="why">${assetIds.length
+      ? `자산 ${assetIds.length}장을 참조로 보냅니다. 인물은 그 얼굴로, 배경은 그 장소로, 소품은 그 물건 그대로 새 구도를 그립니다.${
+        refKey === 'none' ? '' : ' 위에서 고른 기반 이미지도 뒤에 한 장 더 붙습니다.'}`
+      : '컷에 붙인 인물의 자산과 같은 씬의 배경은 저절로 들어갑니다. 소품은 그 물건이 나오는 컷에서 직접 고르세요.'}</p>` : '',
+    faceNote,
+    refKey === 'keyvisual' ? `
+      <p class="why">${esc(sceneMeta(p.scene).no || '이 씬')}의 키 비주얼을 기반으로 잡아 두었습니다.
+        키비주얼 화면에서 그 씬 하나를 보고 그린 그림이라, 장소와 빛이 같은 씬의 다른 컷과 어긋나지 않습니다.</p>` : '',
+    modelNote,
+    morphWhy,
+  ])}`
+
+  /*
+   * 접힌 채로 「지금 무엇으로 그리는지」를 한 줄로 말합니다. 이 덩이를 접으면 모델 이름과
+   * 참조가 안 보이는데, 그것을 모르고 「생성」을 누르면 엉뚱한 얼굴이 나옵니다.
+   */
+  const genLead = !may('art') ? '만들 권한이 없습니다'
+    : busyBy ? `${busyBy.name} 생성 중`
+      : clipping ? '영상 만드는 중'
+        : [assetIds.length ? `자산 ${assetIds.length}장` : '',
+          refKey === 'none' ? '' : pickedRef?.label || '',
+          picked?.label || ''].filter(Boolean).join(' · ') || '지시문만으로 그립니다'
 
   const rmWhy = !ver ? '먼저 이미지가 있어야 합니다'
     : !ver.vid ? '옛 캐시의 버전입니다. 새로고침하면 지울 수 있습니다'
@@ -3713,7 +3308,6 @@ function renderDetail() {
   }).join('')
 
   const poseFields = `
-    <h2 class="mono h" style="margin-top:20px">기준 이미지</h2>
     <div class="anchor">
       ${anchor ? `<img src="${anchor.src}" alt="">
         <span class="anchor__txt"><b>${esc(anchor.pose || '구도')} v${anchor.n}</b><br>이 인물의 모든 구도 생성이 이 이미지를 참조합니다.</span>`
@@ -3735,46 +3329,119 @@ function renderDetail() {
     </label>
     ${lostRow(p.id, 'action')}`
 
+  /*
+   * ══ 1. 컷 내용 적기
+   *
+   * 여섯 칸이 다 같은 크기로 세로로 늘어서 있었습니다 — 씬·길이(한 줄), 화면 설명, 대사,
+   * 카메라, 등장 인물입니다. 이 판을 여는 사람이 실제로 쓰는 것은 그중 앞의 셋인데
+   * (무엇이 보이는지, 누가 무엇을 말하는지, 누가 나오는지) 여섯이 한 무게로 서 있어서
+   * 어디부터 채우는지가 보이지 않았습니다.
+   *
+   * 두 층으로 갈랐습니다.
+   *
+   *   쓰는 칸   화면 설명 · 대사 · 등장 인물. 사람이 글로 적는 것이고 그대로 생성 지시가
+   *             됩니다(autoPrompt). 그래서 위에 크게 둡니다
+   *   메타 한 줄 씬 · 길이 · 카메라. 셋 다 낱말 하나짜리 값이고 대개 스토리 디벨롭·
+   *             키비주얼에서 이미 채워져 옵니다. 고칠 일이 드물어 한 줄로 눕힙니다
+   *
+   * 카메라를 글 칸에서 고르는 칸으로 바꿨습니다. 값이 실은 정해진 낱말이고(domain/panels.js
+   * 의 CAMERAS) 그 목록을 아는 자리가 프롬프트를 만드는 쪽이었습니다 — 「MS」를 모르는
+   * 사람에게 빈 글 칸을 내밀면 아무것도 적지 못하거나 「미디엄샷」처럼 적어서, 영상
+   * 프롬프트의 카메라 움직임 표가 그것을 못 알아봅니다(domain/mcp.js 의 CAM_MOVE).
+   */
   const cutFields = `
-    <div class="f--row">
-      <label class="f">
-        <span class="f__label"><span class="mono">씬</span>${lockNote('scene')}</span>
-        <input type="text" data-field="scene" value="${esc(p.scene || '')}" placeholder="씬 1 · 새벽 거리" ${dis()}>
-      </label>
-      <label class="f f--narrow">
-        <span class="f__label"><span class="mono">길이(초)</span>${lockNote('secs')}</span>
-        <input type="number" data-field="secs" min="0" step="0.5" value="${p.secs ?? ''}" ${dis()}>
-      </label>
-    </div>
-    ${lostRow(p.id, 'scene')}
-    <p class="why">같은 씬 이름을 붙인 이웃한 컷이 한 씬으로 묶입니다. 길이는 타임라인 폭이 됩니다.</p>
-
-    <label class="f">
-      <span class="f__label"><span class="mono">등장 인물</span></span>
-      <div class="cast">
-        ${charList().length
-          ? charList().map((c) => `<button class="cast__chip" data-cast="${c.id}" data-on="${(p.cast || []).includes(c.id) ? 1 : 0}" ${editable ? '' : noEdit}>${esc(c.name)}</button>`).join('')
-          : '<span class="anchor__none">인물을 먼저 만들면 컷에 붙일 수 있습니다.</span>'}
-      </div>
-    </label>
-
     <label class="f">
       <span class="f__label"><span class="mono">화면 설명</span>${lockNote('action')}</span>
-      <textarea rows="3" data-field="action" ${dis()}>${esc(p.action)}</textarea>
+      <textarea rows="3" data-field="action" placeholder="이 컷에 무엇이 보이는지" ${dis()}>${esc(p.action)}</textarea>
     </label>
     ${lostRow(p.id, 'action')}
 
     <label class="f">
       <span class="f__label"><span class="mono">대사 / 자막</span>${lockNote('dialogue')}</span>
-      <textarea rows="2" data-field="dialogue" ${dis()}>${esc(p.dialogue || '')}</textarea>
+      <textarea rows="2" data-field="dialogue" placeholder="없으면 비워 둡니다" ${dis()}>${esc(p.dialogue || '')}</textarea>
     </label>
     ${lostRow(p.id, 'dialogue')}
 
     <label class="f">
-      <span class="f__label"><span class="mono">카메라</span>${lockNote('camera')}</span>
-      <input type="text" data-field="camera" value="${esc(p.camera || '')}" ${dis()}>
+      <span class="f__label"><span class="mono">등장 인물</span></span>
+      <div class="cast">
+        ${charList().length
+    ? charList().map((c) => `<button class="cast__chip" data-cast="${c.id}" data-on="${(p.cast || []).includes(c.id) ? 1 : 0}" ${editable ? '' : noEdit}>${esc(c.name)}</button>`).join('')
+    : '<span class="anchor__none">아래 인물 칸에서 인물을 먼저 만들면 컷에 붙일 수 있습니다.</span>'}
+      </div>
     </label>
-    ${lostRow(p.id, 'camera')}`
+
+    ${/* 대개 채워져 오는 값 셋. 한 줄로 눕혀 위의 쓰는 칸과 무게를 가릅니다 */ ''}
+    <div class="f--row f--meta">
+      <label class="f">
+        <span class="f__label"><span class="mono">씬</span>${lockNote('scene')}</span>
+        <input type="text" data-field="scene" value="${esc(p.scene || '')}" placeholder="씬 1 · 새벽 거리" ${dis()}>
+      </label>
+      <label class="f f--narrow">
+        <span class="f__label"><span class="mono">카메라</span>${lockNote('camera')}</span>
+        ${/* select 은 readonly 를 받지 않습니다. 잠근 채 두고 data-nope 는 감싼 칸에 답니다 */ ''}
+        <select data-field="camera" ${editable ? '' : `disabled ${noEdit}`}>
+          ${CAMERAS.map((c) => `<option value="${esc(c)}"${(p.camera || 'MS') === c ? ' selected' : ''}>${esc(c)}</option>`).join('')}
+        </select>
+      </label>
+      <label class="f f--tiny">
+        <span class="f__label"><span class="mono">초</span>${lockNote('secs')}</span>
+        <input type="number" data-field="secs" min="0" step="0.5" value="${p.secs ?? ''}" ${dis()}>
+      </label>
+    </div>
+    ${lostRow(p.id, 'scene')}
+    ${lostRow(p.id, 'camera')}
+    ${tipBox('cut.tip', [
+    '<p class="why">화면 설명·대사·등장 인물이 그대로 아래 「이미지 만들기」의 생성 지시가 됩니다.</p>',
+    '<p class="why">같은 씬 이름을 붙인 이웃한 컷이 한 씬으로 묶입니다. 초는 타임라인 폭이 됩니다.</p>',
+    '<p class="why">카메라는 영상으로 만들 때 움직임이 됩니다 — TRACKING 은 따라가고, PAN 은 좌우로 돕니다.</p>',
+  ])}`
+
+  /*
+   * 접힌 채로 「이 컷이 무슨 컷인지」 한 줄. 화면 설명의 앞머리입니다.
+   *
+   * 접힌 제목이 「1. 컷 내용 적기」뿐이면 펴 보기 전에는 안이 빈지 찬지 모릅니다. 컷 여러
+   * 개를 지나며 훑을 때 그것을 매번 펴야 하는 것이 이 판에서 가장 손이 많이 가는 일이었습니다.
+   */
+  const cutLead = (p.action || p.dialogue || '').trim().replace(/\s+/g, ' ')
+    || '아직 비어 있습니다'
+
+  /*
+   * 버전 덩이의 두 단추. 덩이 안 맨 위에 섭니다.
+   *
+   * 제목 줄(summary)에는 넣지 않습니다. 그 줄을 누르는 일이 여닫는 일이라, 안에 단추를
+   * 두면 「크게 보기」를 누른 것이 덩이를 접는 일이 됩니다.
+   *
+   * 접으면 이 둘도 같이 접힙니다. 「크게 보기」가 그래도 되는 것은 컷 카드에 같은 것이
+   * 하나 더 있기 때문입니다(renderBoard 의 .cut__zoom). 접힌 판에서 그림을 크게 보고
+   * 싶으면 오른쪽 판을 펴는 대신 왼쪽 컷 위의 그것을 누릅니다.
+   */
+  const verBtns = `
+    <button class="mini" data-do="viewer" ${ver ? '' : 'disabled'}
+      title="${ver ? '' : '먼저 이미지가 있어야 합니다'}">크게 보기 · 핀 메모</button>
+    <button class="mini" data-do="rmver" ${rmWhy ? 'disabled' : ''}
+      title="${esc(rmWhy || `v${cur.i + 1}을 보드에서 지웁니다`)}">이 버전 지우기</button>`
+
+  const verBody = live.length ? `<ul class="vers">${p.versions.map((v, i) => deadVer(p, v) ? '' : `
+    <li><button class="ver" data-ver="${i}" data-current="${i === cur?.i ? 1 : 0}">
+      ${media(srcOf(v), 'class="ver__thumb" alt="" loading="lazy"')}
+      <span>v${i + 1} · ${esc(person(v.author)?.name || '알 수 없음')}
+        <br><span class="ver__meta">${esc(v.gen ? `${v.gen.model} · seed ${v.gen.seed} · ${(v.gen.ms / 1000).toFixed(1)}초` : v.name || fmtWhen(v.ts))}</span></span>
+      <span class="ver__src">${VER_SRC[v.source] || '업로드'}</span>
+    </button></li>`).join('')}</ul>`
+    : `<p class="why">${p.versions?.length ? '이미지를 모두 지웠습니다. 다시 만들면 v번호는 이어서 붙습니다.' : '아직 이미지가 없습니다.'}</p>`
+
+  const logBody = logs.length ? `<ul class="log">${logs.map((e) => `
+    <li>${new Date(e.ts).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+    · <b>${esc(person(e.actor)?.name || '?')}</b> ${esc(STATUS[e.from]?.label || e.from)} → ${esc(STATUS[e.to]?.label || e.to)}</li>`).join('')}</ul>`
+    : '<p class="why">아직 기록이 없습니다.</p>'
+
+  /*
+   * 새 메모가 있으면 메모 덩이를 펴 둡니다. 「내가 이 판을 마지막으로 본 뒤에 남이 달고
+   * 아직 안 닫힌 것」이 기준입니다(lastVisit · loadVisit). 남이 남긴 말이 접힌 제목 뒤에
+   * 숨으면, 그 말을 보라고 담당을 넘긴 사람 쪽에서는 아무 반응이 없는 것으로 보입니다.
+   */
+  const cmtFresh = cmts.some((c) => !c.resolved && c.author !== me.id && c.ts > lastVisit)
 
   setHtml(host, `
     <div class="detail">
@@ -3794,43 +3461,78 @@ function renderDetail() {
       ${editable ? '' : `<p class="why why--why">${esc(whyNotEdit(p))}.${
   p.status === 'approved' ? '' : ' 의견은 아래 메모로 남겨주세요.'}</p>`}
 
-      ${/* select 은 readonly 를 받지 않습니다. 잠근 채 두고 data-nope 는 감싼 칸에 답니다 */ ''}
-      <label class="f" ${may('assign') ? '' : nope(whyNot('assign'))}>
+      ${/*
+        * 담당. 접지 않습니다. 한 줄이고, 「이 컷이 지금 누구 손에 있는가」는 무엇을 하든
+        * 먼저 봐야 하는 것입니다.
+        *
+        * select 은 readonly 를 받지 않습니다. 잠근 채 두고 data-nope 는 감싼 칸에 답니다
+        */ ''}
+      <label class="f f--tight" ${may('assign') ? '' : nope(whyNot('assign'))}>
         <span class="f__label"><span class="mono">담당</span></span>
         <select data-field="assignee" ${may('assign') ? '' : 'disabled'}>
           ${assignOpts(p.assignee)}
         </select>
       </label>
 
-      ${ch ? poseFields : cutFields}
+      ${/*
+        * ══ 여기서 하는 일 둘, 그리고 그 결과를 보는 자리 넷
+        *
+        * 덩이 여섯이 다 같은 실선 위에 같은 무게로 쌓여 있었습니다. 제목만 읽으면 「내용」·
+        * 「이미지 만들기」·「버전」·「메모」·「기록」이 다 나란한 목록이라, 이 판을 처음 여는
+        * 사람에게는 무엇을 하러 온 자리인지가 보이지 않았습니다.
+        *
+        * 실제로 이 판에서 하는 일은 둘뿐입니다.
+        *
+        *   1. 내용    무엇을 그릴지 글로 적는 일
+        *   2. 이미지  그 글로 그림을 만드는 일
+        *
+        * 이 둘만 종이 한 장으로 세워 번호를 답니다(step). 순서가 그대로 일의 순서입니다 —
+        * 적은 것이 생성 지시의 바탕이 되므로(autoPrompt) 1 이 2 의 입력입니다.
+        *
+        * 나머지 넷은 결과를 보거나 넘기는 자리라 실선 위의 접힌 줄로 둡니다. 버전은 2 가
+        * 만들어 낸 것이고, 메모와 기록은 남이 한 일이고, 바닥 띠는 다음 사람에게 넘기는
+        * 일입니다.
+        *
+        * 처음 펴 두는 것:
+        *   1  폅니다. 이 판을 여는 사람이 가장 많이 고치는 칸입니다
+        *   2  컷은 폅니다. 인물 구도는 접습니다 — 여섯 벌을 차례로 돌리는 자리라 기준
+        *      이미지가 먼저입니다
+        *   버전 그림이 둘 이상일 때만. 하나뿐이면 고를 것이 없습니다
+        *   메모 안 읽은 것이 있을 때만
+        *   기록 늘 접습니다. 지난 일이라 지금 하는 일에 필요한 것이 아닙니다
+        */ ''}
+      ${ch
+    ? section('pose', '기준 이미지', poseFields, { step: 1, open: true, lead: '이 인물의 얼굴을 정합니다' })
+    : section('cut', '컷 내용 적기', cutFields, {
+      step: 1, open: true, lead: cutLead,
+    })}
 
-      ${genBlock}
-      ${assetLine}
+      ${section('gen', ch ? '구도 그리기' : '이미지 만들기', genBody, {
+    step: 2, open: !ch, lead: genLead,
+  })}
+      ${/*
+        * 자산 한 줄은 덩이 밖입니다. 감싸 두는 이유는 이것이 없으면 아래 덩이의 윗선에
+        * 붙어서 「버전」에 딸린 말처럼 읽히기 때문입니다.
+        */ ''}
+      ${assetLine ? `<div class="sec__note">${assetLine}</div>` : ''}
 
-      <h2 class="mono h" style="margin-top:22px">버전 ${live.length ? `<span class="count">${live.length}</span>` : ''}
-        <button class="mini" data-do="viewer" ${ver ? '' : 'disabled'}
-          title="${ver ? '' : '먼저 이미지가 있어야 합니다'}">크게 보기 · 핀 메모</button>
-        <button class="mini" data-do="rmver" ${rmWhy ? 'disabled' : ''}
-          title="${esc(rmWhy || `v${cur.i + 1}을 보드에서 지웁니다`)}">이 버전 지우기</button></h2>
-      ${live.length ? `<ul class="vers">${p.versions.map((v, i) => deadVer(p, v) ? '' : `
-        <li><button class="ver" data-ver="${i}" data-current="${i === cur?.i ? 1 : 0}">
-          ${media(srcOf(v), 'class="ver__thumb" alt="" loading="lazy"')}
-          <span>v${i + 1} · ${esc(person(v.author)?.name || '알 수 없음')}
-            <br><span class="ver__meta">${esc(v.gen ? `${v.gen.model} · seed ${v.gen.seed} · ${(v.gen.ms / 1000).toFixed(1)}초` : v.name || fmtWhen(v.ts))}</span></span>
-          <span class="ver__src">${VER_SRC[v.source] || '업로드'}</span>
-        </button></li>`).join('')}</ul>`
-      : `<p class="why">${p.versions?.length ? '이미지를 모두 지웠습니다. 다시 만들면 v번호는 이어서 붙습니다.' : '아직 이미지가 없습니다.'}</p>`}
+      ${section('ver', '버전', `
+        ${/* 목록보다 위입니다. 지금 보는 버전에 대고 하는 일이라 고를 것보다 먼저 옵니다 */ ''}
+        <div class="sec__aside">${verBtns}</div>
+        ${verBody}`, {
+    open: live.length > 1, count: live.length,
+    lead: live.length ? `v${(cur?.i ?? 0) + 1} 보는 중` : '아직 없습니다',
+  })}
 
-      <h2 class="mono h" style="margin-top:22px">메모 ${cmts.length ? `<span class="count">${cmts.length}</span>` : ''}</h2>
-      ${cmts.length ? threadHtml(cmts, p) : ''}
-      ${composerHtml('cmtInput', cmts)}
-      <p class="why" id="cmtWhy"></p>
+      ${section('cmt', '메모', `
+        ${cmts.length ? threadHtml(cmts, p) : ''}
+        ${composerHtml('cmtInput', cmts)}
+        <p class="why" id="cmtWhy"></p>`, {
+    open: cmtFresh, count: cmts.length,
+    lead: cmts.length ? (cmtFresh ? '새 메모가 있습니다' : '') : '아직 없습니다',
+  })}
 
-      <h2 class="mono h" style="margin-top:22px">기록</h2>
-      ${logs.length ? `<ul class="log">${logs.map((e) => `
-        <li>${new Date(e.ts).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
-        · <b>${esc(person(e.actor)?.name || '?')}</b> ${esc(STATUS[e.from]?.label || e.from)} → ${esc(STATUS[e.to]?.label || e.to)}</li>`).join('')}</ul>`
-      : '<p class="why">아직 기록이 없습니다.</p>'}
+      ${section('log', '기록', logBody, { count: logs.length })}
 
       ${/* 바닥에 붙는 띠입니다. 스크롤과 무관하게 늘 보입니다 (board.html 의 .detail__foot) */ ''}
       <div class="detail__foot">
@@ -3872,16 +3574,14 @@ function renderMe() {
   byId('meName').textContent = me.name
   byId('meRole').textContent = ROLES[me.role] || me.role
   lock(byId('adminBtn'), 'admin', () => { if (adminTab !== 'perm') openAdmin(false) })
-  lock(byId('planBtn'), 'plan', () => openPlan(false))
-  // 관계 그래프 화면(story-graph.html)은 따로 뜨는 페이지다. 기획 권한과 같이 다룬다.
-  // 이 판을 들고 가야 그 화면이 같은 프로젝트를 연다(?board=)
-  const gr = byId('graphBtn')
-  gr.href = navHref('develop', boardFromSearch())
-  lock(gr, 'plan')
-  // 대본화도 모델을 부른다. 기획과 같은 권한으로 묶는다
-  lock(byId('scriptBtn'), 'plan', () => openScript(false))
-  // 대본 불러오기도 요약에 모델을 쓴다. 같은 권한으로 묶는다
-  lock(byId('importBtn'), 'plan', () => openImport(false))
+  /*
+   * 'plan' 권한으로 잠그던 단추 넷이 여기 있었습니다 — 이야기 기획 · 시나리오를 컷으로 ·
+   * 컷을 대본으로 · 대본 불러오기입니다. 넷 다 화면에서 나갔습니다(위 탭 바의 스토리
+   * 디벨롭·대본화가 그 일을 합니다).
+   *
+   * 'plan' 권한 자체는 그대로 둡니다. 그 화면들이 같은 것을 봅니다(services/perm.js).
+   * 여기서 잠글 단추만 없습니다.
+   */
 }
 
 function renderGpu() {
@@ -4079,7 +3779,6 @@ function navClick(e) {
 byId('charNav').addEventListener('click', navClick)
 byId('boardNav').addEventListener('click', navClick)
 byId('newChar').addEventListener('click', addChar)
-byId('histMine').addEventListener('click', () => { histMine = !histMine; renderHist() })
 
 const laterChar = debounceBy(160)
 const patchChar = (field, value) => {
@@ -4093,132 +3792,14 @@ const patchChar = (field, value) => {
 byId('nameIn').addEventListener('input', (e) => patchChar('name', e.target.value))
 byId('briefIn').addEventListener('input', (e) => patchChar('brief', e.target.value))
 
-let scenTimer = null
-byId('scenario').addEventListener('input', (e) => {
-  const text = e.target.value
-  const epId = viewEp
-  const target = epId ? state.eps[epId] : state.board
-  if (!target) return
-  target.scenario = text
-  // 붙여 넣는 순간 대본으로 알아봤는지 보여준다. 파싱은 줄 훑기라 타이핑마다 돌려도 된다
-  renderBreakdown()
-  clearTimeout(scenTimer)
-  scenTimer = setTimeout(() => emit(epId
-    ? { kind: 'ep.patch', epId, fields: { scenario: text } }
-    : { kind: 'board.patch', fields: { scenario: text } }), 200)
-})
-
 /*
- * 컷으로 분해.
+ * 시나리오 칸의 input 처리와 「컷으로 분해」 처리 약 130줄이 여기 있었습니다. 칸과 단추가
+ * 화면에서 나갔으므로 같이 나갔습니다(위 「여기 있던 것」 머리글).
  *
- * 붙여 넣은 것이 정형 대본이면 대본으로 읽는다 (core.js 의 splitScript). 그러면 씬 이름·
- * 지문·대사·등장인물·컷 길이가 다 갈라져 나오고, 대본에 있던 사람은 인물 카드까지 함께
- * 생긴다 — 「이야기 기획」이 하는 것과 같다. 대본으로 안 읽히면 예전처럼 빈 줄로 쪼갠다.
- *
- * 산문 쪽 컷 모양은 건드리지 않는다. scene·secs·origin 은 대본 쪽에만 붙인다. 산문에는
- * 씬이라는 것이 없으니 빈 값을 박아 넣으면 씬 묶음(sceneGroups)에 없던 칸이 생긴다.
- *
- * 묻는 창이 세 갈래인 이유. 예전에는 「뒤에 추가합니다. 계속할까요?」 하나였다. 잘못
- * 나눈 사람이 다시 누르면 컷이 3개에서 6개로 늘기만 하고 되돌릴 자리가 없었다. 그리고
- * 산문은 12개에서 조용히 잘렸다 — 문단 30개를 붙여도 컷 12개가 나오고 아무 말이 없었다.
- * 지금은 몇 개가 되고 몇 개가 빠지는지 먼저 보여주고, 덧붙일지 갈아치울지 고르게 한다.
+ * 컷을 만드는 길은 이제 셋입니다. 스토리 디벨롭 탭에서 나눠 오는 것, 키비주얼 화면에서
+ * 씬 그림을 보드에 붙이는 것(pages/key-visual.js 의 panel.add), 그리고 가운데 판 맨 뒤의
+ * 「+ 컷 추가」입니다.
  */
-byId('breakdown').addEventListener('click', async () => {
-  if (viewChar) return
-  const text = byId('scenario').value
-  const script = splitScript(text)
-  // 산문도 대본과 같은 상한을 쓴다. 자르기 전의 수를 여기서 세는 이유는 「몇 개 중 몇 개」를
-  // 사람에게 말해 주려면 부르는 쪽이 상한을 들고 있어야 하기 때문이다
-  const all = script ? script.cuts : splitScenario(text, Infinity)
-  const cuts = all.slice(0, CUT_MAX)
-  const dropped = all.length - cuts.length
-  if (!cuts.length) return notice('시나리오를 먼저 넣어주세요.')
-
-  // 대본에 있는데 판에 없는 사람. 이 사람들의 인물 카드를 함께 만든다
-  const byName = new Map(charList().map((c) => [c.name, c.id]))
-  const fresh = (script?.names || []).filter((n) => !byName.has(n))
-
-  const had = cutsOf(viewEp)
-  let wipe = false
-  if (had.length || dropped) {
-    const ans = await confirmAsk({
-      title: script ? '대본을 컷으로 옮깁니다' : '시나리오를 컷으로 나눕니다',
-      body: had.length ? '이미 있는 컷 뒤에 붙일지, 그것을 지우고 갈아치울지 고릅니다.' : '',
-      list: [
-        `새 컷 ${cuts.length}개${fresh.length ? ` · 새 인물 ${fresh.length}명` : ''}`,
-        ...(dropped ? [`상한 ${CUT_MAX}개를 넘은 ${dropped}개는 컷이 되지 않습니다`] : []),
-        ...(had.length ? [`이 회차에 이미 있는 컷 ${had.length}개`] : []),
-      ],
-      yes: had.length ? '뒤에 덧붙이기' : '컷으로 나누기',
-      alt: had.length ? `있는 컷 ${had.length}개를 지우고 갈아치우기` : '',
-    })
-    if (!ans) return
-    wipe = ans === 'alt'
-  }
-
-  const ops = []
-  // 갈아치우기. 컷에 달린 메모도 함께 사라진다(panel.remove 리듀서). 인물 구도는 컷이
-  // 아니라서 건드리지 않는다
-  if (wipe) for (const p of had) ops.push({ kind: 'panel.remove', panelId: p.id })
-  let ck = charList().at(-1)?.orderKey ?? null
-  for (const name of fresh) {
-    const id = uid()
-    byName.set(name, id)
-    ck = orderKeyBetween(ck, null)
-    // brief 는 비워 둔다. 대본은 사람의 생김새를 말해 주지 않는다. 인물 화면에서 채운다
-    ops.push({
-      kind: 'char.add',
-      char: {
-        id, name, brief: '', seedNo: Math.floor(Math.random() * 900) + 20,
-        orderKey: ck, refPanelId: null, refN: null,
-      },
-    })
-    let pk = null
-    for (const pose of POSES) {
-      pk = orderKeyBetween(pk, null)
-      ops.push({
-        kind: 'panel.add',
-        panel: {
-          id: uid(), charId: id, pose, orderKey: pk,
-          action: '', status: 'draft', assignee: null, versions: [], current: -1, generating: false,
-        },
-      })
-    }
-  }
-
-  let key = wipe ? null : cutsOf(viewEp).at(-1)?.orderKey ?? null
-  let firstNew = null
-  for (const cut of cuts) {
-    key = orderKeyBetween(key, null)
-    const cutId = uid()
-    firstNew ??= cutId
-    ops.push({
-      kind: 'panel.add',
-      panel: {
-        id: cutId, charId: null, orderKey: key, ...(viewEp ? { epId: viewEp } : {}),
-        ...(script ? { origin: 'script', scene: cut.scene, secs: cut.secs } : {}),
-        action: cut.action, dialogue: cut.dialogue, camera: cut.camera,
-        cast: script ? (cut.cast || []).map((n) => byName.get(n)).filter(Boolean) : [],
-        status: 'draft', assignee: null, versions: [], current: -1, generating: false,
-      },
-    })
-  }
-  /*
-   * 만든 첫 컷을 골라 둔다. 예전에는 아무것도 골라지지 않아서, 컷이 쏟아진 뒤에도 오른쪽
-   * 판(폭의 4분의 1)이 「구도나 컷을 선택하면…」 한 줄로 비어 있었다. 다음에 할 일이
-   * 그 판에서 컷을 고치는 것이라 첫 컷을 열어 두는 것이 그 자리의 답이다.
-   *
-   * emitMany 보다 먼저 적는다. 그것이 op 를 판에 넣고 다시 그리므로, 그때 이미 골라져
-   * 있어야 한 번에 그려진다
-   */
-  if (firstNew) selectedId = firstNew
-  emitMany(ops)
-  // 「개」에는 받침이 없고 「명」에는 있다. 붙는 조사가 갈리므로 josa 로 고른다
-  const made = `컷 ${cuts.length}개${fresh.length ? `와 인물 ${fresh.length}명` : ''}`
-  notice(`${script ? '대본을' : '시나리오를'} ${made}${josa(made, '으로', '로')} ${
-    wipe ? '갈아치웠습니다' : '나눴습니다'}${
-    dropped ? ` · ${dropped}개는 상한을 넘어 빠졌습니다` : ''}`, 'ok')
-})
 
 const board = byId('board')
 board.addEventListener('click', (e) => {
@@ -4271,6 +3852,8 @@ board.addEventListener('keydown', (e) => {
   selectCut(card.dataset.id)
   const p = state.panels[card.dataset.id]
   if (act === 'request_changes') {
+    // 메모 덩이가 접혀 있으면 그 안의 칸은 화면에 없어서 focus 가 조용히 안 듭니다
+    openSec('cmt')
     byId('cmtInput')?.focus()
     announce('수정 요청에는 이유가 필요합니다. 메모를 적고 수정 요청을 눌러주세요.')
     return
@@ -4338,23 +3921,26 @@ pane.addEventListener('mousemove', (e) => {
 })
 pane.addEventListener('mouseleave', () => { cursor = null; beat() })
 
-byId('mine').addEventListener('click', (e) => {
-  const btn = e.target.closest('[data-goto]')
-  if (btn) goTo(btn.dataset.goto)
-})
-
 const detail = byId('detail')
 const laterField = debounceBy(140)
+
+/*
+ * 사람이 접거나 편 것을 기억합니다. toggle 은 details 자기 자신에서 나고 위로 올라오지
+ * 않으므로(버블링을 안 합니다) 캡처로 받습니다.
+ *
+ * 다시 그리지 않습니다. 브라우저가 이미 여닫아 놓았고, 여기서 renderDetail 을 부르면 방금
+ * 편 칸의 애니메이션이 끊기고 초점도 튑니다. 다음번 그림에서 이 값이 쓰입니다(section).
+ */
+detail.addEventListener('toggle', (e) => {
+  const key = e.target.dataset?.sec
+  if (key) secOpen.set(key, e.target.open)
+}, true)
 
 detail.addEventListener('input', (e) => {
   const p = state.panels[selectedId]
   if (!p) return
   if (e.target.id === 'genPrompt') { optsFor(p).prompt = e.target.value; return }
-  if (e.target.id === 'genStrength') {
-    optsFor(p).strength = Number(e.target.value)
-    e.target.parentElement.querySelector('.gen__val').textContent = `${Math.round(e.target.value * 100)}%`
-    return
-  }
+  // #genStrength 슬라이더를 받던 자리입니다. 칩 셋으로 바뀌어 아래 click 이 받습니다(data-morph)
   if (!e.target.dataset.field) return
   if (e.target.tagName === 'SELECT') return
   const field = e.target.dataset.field
@@ -4375,7 +3961,23 @@ detail.addEventListener('change', (e) => {
    */
   if (e.target.id === 'clipSecs') { clipOpts.secs = Number(e.target.value); renderDetail(); return }
   if (e.target.id === 'clipQuality') { clipOpts.quality = e.target.value; renderDetail(); return }
-  if (e.target.dataset.field !== 'assignee') return
+  const field = e.target.dataset.field
+  if (!field) return
+  /*
+   * 담당 말고도 고르는 칸이 하나 더 있습니다 — 카메라입니다. 정해진 낱말 목록이라
+   * 글 칸이 아니라 select 입니다(위 cutFields 의 CAMERAS).
+   *
+   * select 은 input 처리를 지나가지 않습니다(그쪽이 SELECT 를 걸러 냅니다). 그래서
+   * 여기서 판에 남깁니다. 글 칸과 달리 뜸을 들일 이유가 없습니다 — 한 번 고르면 끝이고,
+   * 그 값이 컷 카드의 카메라 표시와 영상 프롬프트에 바로 쓰입니다.
+   */
+  if (field === 'camera') {
+    p.camera = e.target.value
+    renderBoard()
+    emit({ kind: 'panel.patch', panelId: p.id, fields: { camera: e.target.value } })
+    return
+  }
+  if (field !== 'assignee') return
   emit({ kind: 'panel.patch', panelId: p.id, fields: { assignee: e.target.value || null } })
 })
 
@@ -4400,6 +4002,7 @@ detail.addEventListener('click', async (e) => {
   const castId = e.target.closest('[data-cast]')?.dataset.cast
   const refKey = e.target.closest('[data-ref]')?.dataset.ref
   const assetId = e.target.closest('[data-asset]')?.dataset.asset
+  const morphPick = e.target.closest('[data-morph]')?.dataset.morph
 
   const lostBtn = e.target.closest('[data-lost]')
   if (lostBtn) {
@@ -4414,6 +4017,18 @@ detail.addEventListener('click', async (e) => {
   }
 
   if (refKey) { optsFor(p).ref = refKey; renderDetail(); return }
+  /*
+   * 기반을 얼마나 살릴지. 슬라이더였던 것을 칩 셋으로 바꿨습니다(위 morphRow).
+   *
+   * 판에 남기지 않습니다. genOpts 는 「지금 한 번 그릴 때의 선택」이고 컷의 성질이
+   * 아닙니다 — 남이 그리는 것까지 이 값이 따라가면 안 됩니다.
+   */
+  if (morphPick) {
+    if (!mayEdit(p)) { notice(whyNotEdit(p)); return }
+    optsFor(p).strength = Number(morphPick)
+    renderDetail()
+    return
+  }
   /*
    * 참조 자산을 켜고 끕니다. 처음 누르는 순간 autoAssets 의 값이 실제 값으로 굳습니다 —
    * 그 뒤로 인물을 붙여도 저절로 늘지 않습니다. 사람이 손댄 목록은 사람의 것입니다.
@@ -4453,8 +4068,17 @@ detail.addEventListener('click', async (e) => {
     if (act === 'request_changes') {
       const input = byId('cmtInput')
       if (!input.value.trim()) {
+        /*
+         * 접힌 메모 덩이를 먼저 폅니다. 닫힌 details 안은 화면에 없어서 focus 가 조용히
+         * 아무 일도 하지 않습니다 — 「메모를 먼저 적어주세요」를 읽고도 적을 칸이 어디인지
+         * 안 보이는 셈입니다.
+         *
+         * 펴면 renderDetail 이 돌아 판이 새로 그려집니다. 그래서 이유와 초점은 그 뒤에
+         * 답니다. 순서가 뒤면 방금 넣은 글이 다시 그리는 것에 지워집니다.
+         */
+        openSec('cmt')
         byId('actWhy').textContent = '수정 요청에는 이유가 필요합니다. 메모를 먼저 적어주세요.'
-        input.focus()
+        byId('cmtInput')?.focus()
         return
       }
       const note = input.value.trim()
@@ -4669,7 +4293,8 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && viewing) return closeViewer()
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return
-  if (byId('admin').open || byId('plan').open) return
+  // 「이야기 기획」 창(#plan)도 같이 보던 자리입니다. 그 창이 화면에서 나갔습니다
+  if (byId('admin').open) return
   if (e.key === '?') { byId('keys').showModal(); return }
   if (e.key === 'i' || e.key === 'I') {
     e.preventDefault()
@@ -4740,86 +4365,6 @@ admin.addEventListener('change', (e) => {
 })
 
 admin.addEventListener('focusout', () => setTimeout(renderAdmin))
-
-const planDlg = byId('plan')
-byId('planBtn').addEventListener('click', () => openPlan(true))
-byId('planClose').addEventListener('click', () => openPlan(false))
-planDlg.addEventListener('close', () => byId('planBtn').setAttribute('aria-expanded', 'false'))
-
-planDlg.addEventListener('input', (e) => {
-  const t = e.target
-  if (t.id === 'planPrompt') planSpec.prompt = t.value
-  else if (t.id === 'planGenre') planSpec.genre = t.value
-  else if (t.id === 'planTone') planSpec.tone = t.value
-  else if (t.id === 'planSecs') planSpec.secs = Number(t.value)
-  else if (t.id === 'planCuts') planSpec.cuts = Number(t.value)
-  else if (t.id === 'planNew') planSpec.newChars = Number(t.value)
-  else if (t.id === 'planCenter') planSpec.center = t.value
-  else if (t.id === 'planKeep') planSpec.useChars = t.checked
-})
-
-planDlg.addEventListener('click', (e) => {
-  const mode = e.target.closest('[data-mode]')?.dataset.mode
-  if (mode) {
-    planSpec.mode = mode
-    if (mode === 'spin' && !planSpec.center) planSpec.center = charList()[0]?.id ?? null
-    if (mode !== 'new') planSpec.useChars = true
-    planMsg = ''
-    renderPlan()
-    return
-  }
-  if (e.target.closest('#planCancel')) return openPlan(false)
-  if (e.target.closest('#planBack')) { planStep = 'form'; planMsg = ''; renderPlan(); return }
-  if (e.target.closest('#planAgain')) return runPlan('outline')
-  if (e.target.closest('#planApply')) return runPlan('cuts')
-  if (e.target.closest('#planGo')) {
-    if (planSpec.prompt.trim().length < 8) {
-      planMsg = '소재를 한 줄이라도(8자 이상) 적어주세요. 모델이 지어낼 밑동이 필요합니다.'
-      return renderPlan()
-    }
-    runPlan('outline')
-  }
-})
-
-const scriptDlg = byId('script')
-byId('scriptBtn').addEventListener('click', () => openScript(true))
-byId('scriptClose').addEventListener('click', () => openScript(false))
-scriptDlg.addEventListener('close', () => byId('scriptBtn').setAttribute('aria-expanded', 'false'))
-// 형식만 바꿀 때는 다시 그리지 않는다. 셀렉트는 브라우저가 이미 바꿔 놨다
-scriptDlg.addEventListener('input', (e) => { if (e.target.id === 'scFormat') scriptFmt = e.target.value })
-scriptDlg.addEventListener('click', (e) => {
-  if (e.target.closest('#scCancel')) return openScript(false)
-  if (e.target.closest('#scGo')) return runScriptOut()
-  if (e.target.closest('#scCopy')) return copyScript()
-  if (e.target.closest('#scDown')) return downScript()
-})
-
-const impDlg = byId('imp')
-byId('importBtn').addEventListener('click', () => openImport(true))
-byId('impClose').addEventListener('click', () => openImport(false))
-impDlg.addEventListener('close', () => byId('importBtn').setAttribute('aria-expanded', 'false'))
-/*
- * 붙여 넣는 칸은 다시 그리지 않고 값만 받아 둔다. 글자마다 다시 그리면 커서가 앞으로
- * 튄다. 대신 문단 수·씬 수를 세는 줄은 요약을 누를 때 새로 그린다.
- */
-impDlg.addEventListener('input', (e) => {
-  if (e.target.id === 'impRaw') {
-    impRaw = e.target.value
-    impName = ''
-    setHtml(byId('impMeta'), impMetaHtml())
-    // 붙여 넣기 전에는 요약할 것이 없어 잠가 두었다. 글이 들어왔으니 푼다
-    byId('impGo').disabled = impBusy || !impRaw.trim()
-  }
-  if (e.target.id === 'impOut') impOut = e.target.value
-})
-impDlg.addEventListener('change', (e) => {
-  if (e.target.id === 'impFile') readScriptFile(e.target.files?.[0])
-})
-impDlg.addEventListener('click', (e) => {
-  if (e.target.closest('#impCancel')) return openImport(false)
-  if (e.target.closest('#impGo')) return summarizeScript()
-  if (e.target.closest('#impPut')) return putScenario()
-})
 
 byId('print').addEventListener('click', () => window.print())
 
@@ -4904,6 +4449,10 @@ function pickMe() {
   })
 }
 
+function isSafeObjectKey(key) {
+  return key !== '__proto__' && key !== 'constructor' && key !== 'prototype'
+}
+
 function pickView() {
   const savedView = sessionStorage.getItem('sb.view')
   viewChar = savedView === null ? (charList()[0]?.id ?? null) : (savedView || null)
@@ -4913,7 +4462,7 @@ function pickView() {
   selectedId = viewPanels().find((p) => p.status === 'changes_requested')?.id ?? viewPanels()[0]?.id ?? null
 
   const linked = location.hash.startsWith('#cut=') && location.hash.slice(5)
-  if (linked && state.panels[linked]) {
+  if (linked && isSafeObjectKey(linked) && state.panels[linked]) {
     const p = state.panels[linked]
     viewChar = p.charId ?? null
     if (!p.charId) viewEp = p.epId ?? null

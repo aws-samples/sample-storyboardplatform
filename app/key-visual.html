@@ -120,6 +120,16 @@ main{padding:20px;min-width:0}
 .btn--line{border-color:var(--line);color:var(--ink)}
 .btn--line:hover:not(:disabled){background:var(--fill)}
 .btn--wide{width:100%}
+/*
+  다음 단계로 넘어가는 단추. 한 카드에 하나만 씁니다.
+
+  이 화면의 단추가 다 같은 크기였습니다. 그래서 「보드에 붙이기」와 「이 씬만 다시 생성」이
+  같은 무게로 서 있었고, 네 단계를 끝낸 사람이 어디를 눌러야 이어지는지 카드를 다시
+  읽어야 했습니다. 다음 걸음만 크게 둡니다(스토리 디벨롭의 .btn--lg 와 같은 값입니다).
+*/
+.btn--lg{padding:14px 20px;font-size:15.5px;border-radius:8px}
+/* 다른 화면으로 데려가는 자리는 <a> 라야 새 탭·주소 복사가 남습니다 */
+a.btn{display:inline-block;text-align:center;text-decoration:none}
 
 .warn{
   display:flex;gap:10px;align-items:center;margin-bottom:16px;padding:10px 13px;
@@ -154,6 +164,9 @@ main{padding:20px;min-width:0}
 }
 .pr{padding:11px 0;border-top:1px solid var(--line-2)}
 .pr:first-of-type{border-top:0}
+/* 3단계의 「프롬프트 수정」으로 온 줄. 어느 씬을 고치러 왔는지 눈으로 보여줍니다 */
+.pr--on{background:var(--blue-w);box-shadow:inset 3px 0 0 var(--blue);
+  padding-left:10px;margin:0 -10px 0 -13px;border-radius:0 var(--r) var(--r) 0}
 .pr__top{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
 .pr__top b{font-size:12.5px;font-weight:600}
 .pr__cast{font-size:11px;color:var(--ink-3)}
@@ -198,6 +211,13 @@ main{padding:20px;min-width:0}
   display:grid;grid-template-columns:34px minmax(0,1fr) 62px auto;gap:9px;
   align-items:center;padding:8px 10px;background:#fff;
 }
+/*
+  줄 끝의 단추 둘. 「다시」와 「프롬프트 수정」입니다.
+
+  한 칸(auto)에 둘을 넣습니다. 그리드 칸을 하나 더 늘리지 않은 이유는, 프롬프트가 없는
+  줄에는 「다시」가 서지 않아서 칸이 비고 그러면 줄마다 단추 자리가 어긋나기 때문입니다.
+*/
+.q__act{display:flex;gap:5px;justify-content:flex-end;flex:none}
 .q__id{font:600 11px/1 var(--m);color:var(--ink-3)}
 .q__mid{min-width:0;display:grid;gap:1px}
 .q__mid b{font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

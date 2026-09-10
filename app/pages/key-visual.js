@@ -84,6 +84,12 @@ const S = {
   pick: null,
   blk: 0,
   posted: false,
+  /*
+   * 붙인 패널 중 첫 번째의 id. 4단계의 「스토리보드로 이어가기」가 이것으로 주소를 만듭니다
+   * (boardLinkFor). 머리 띠의 링크에서 다시 읽어 오지 않고 상태에 둡니다 — 그림 그리는
+   * 함수가 자기 화면의 DOM 을 되읽으면, 링크를 못 맞춘 판에서 조용히 엉뚱한 곳으로 갑니다.
+   */
+  postedCut: null,
   me: null,
   net: null,
   peers: new Map(),     // actorId → { id, name, role, at, seen }
@@ -516,13 +522,42 @@ async function ensureBackground() {
  * 물음은 저장된 qa 를 그대로 씁니다. 모델을 다시 부르지 않습니다 — 사람이 고치려는 것은
  * 자기가 넣은 답이고, 물음이 매번 달라지면 지난번 답이 어느 칸의 것인지 알 수 없습니다.
  * 저장된 qa 가 비어 있으면(옛 모양이거나 덧붙임만 있는 배경) 준비해 둔 물음으로 갑니다.
+ *
+ * 왜 · 보기글을 준비해 둔 물음에서 되살립니다. 저장되는 qa 에는 답만 남습니다
+ * (domain/story-background.js 의 answered 가 why · hint 를 떼어 냅니다 — 프롬프트에
+ * 들어가는 것은 답이라서 그것만 남기는 것이 맞습니다). 그런데 그 상태로 창을 다시 세우면
+ * 물음만 덩그러니 있고, Tab 으로 보기글을 받는 길(components/background-ask.js)도
+ * 고칠 때는 없는 것이 됩니다. id 가 맞는 것만 붙여 옵니다.
+ *
+ * 그리고 지난번에 비워 둔 물음을 되돌려 놓습니다. 빈 칸은 저장되지 않으므로 그대로 두면
+ * 한 번 건너뛴 물음은 다시 답할 자리가 없습니다 — 「나중에 시대를 정하면 넣겠다」는
+ * 사람이 그럴 곳이 없었습니다. 모델이 만든 물음이 섞인 배경에는 붙이지 않습니다. 그
+ * 대본을 읽고 나온 물음들 사이에 준비해 둔 일반 물음을 끼우면 무엇을 묻는 창인지 흐려집니다.
  */
 async function editBackground() {
-  const had = S.bg?.qa?.length
-    ? S.bg.qa.map((q) => ({ id: q.id, ask: q.ask, why: '', hint: '', answer: q.answer }))
+  const saved = S.bg?.qa?.length ? S.bg.qa : []
+  const known = new Map(FALLBACK_QUESTIONS.map((q) => [q.id, q]))
+  const had = saved.length
+    ? saved.map((q) => ({
+      id: q.id,
+      ask: q.ask,
+      why: known.get(q.id)?.why || '',
+      hint: known.get(q.id)?.hint || '',
+      answer: q.answer,
+    }))
     : FALLBACK_QUESTIONS.map((q) => ({ ...q }))
+  const allKnown = saved.length > 0 && saved.every((q) => known.has(q.id))
+  if (allKnown) {
+    const has = new Set(saved.map((q) => q.id))
+    for (const q of FALLBACK_QUESTIONS) if (!has.has(q.id)) had.push({ ...q })
+  }
+  /*
+   * 창 위의 한 줄이 「방금 대본을 읽고 만든 물음」이라고 말합니다. 저장된 qa 가 있다는
+   * 것만으로 그렇게 말하면 안 됩니다 — 준비해 둔 물음으로 답한 배경도 qa 가 있습니다.
+   * 아는 id 만으로 되어 있으면 모델이 만든 것이 아닙니다.
+   */
   const out = await askBackground({
-    questions: had, byAi: !!S.bg?.qa?.length, note: S.bg?.note || '',
+    questions: had, byAi: saved.length > 0 && !allKnown, note: S.bg?.note || '',
     keep: S.bgKept, canKeep: mayKeep(), canSkip: false, yes: '이 배경으로 고칩니다',
   })
   if (!out || out.skipped) return
@@ -965,10 +1000,21 @@ function pushVersion(s, j) {
  *
  * app.js 의 pickView() 는 #cut=<panelId> 가 있으면 그 패널의 뷰(viewChar · viewEp)로
  * 맞추고 그 패널을 고른다. 그 계약에 링크를 얹는다.
+ *
+ * ?board= 도 같이 답니다. 이것을 빼면 보드가 기본 보드로 떨어져서, 방금 붙인 패널이
+ * 없는 판이 열립니다 — 「붙였는데 없다」로 보이는 자리가 여기였습니다(routes.js 의 navHref).
+ *
+ * @param {string} panelId - 붙인 패널 중 첫 번째
+ * @returns {string} 맞춰 놓은 주소. 4단계의 「스토리보드로 이어가기」도 이것을 씁니다
  */
+function boardLinkFor(panelId) {
+  const base = navHref('board', boardFromSearch())
+  return panelId ? `${base}#cut=${panelId}` : base
+}
+
 function aimBoardLink(panelId) {
   const a = $('#toBoard')
-  if (a && panelId) a.href = `/board.html#cut=${panelId}`
+  if (a && panelId) a.href = boardLinkFor(panelId)
 }
 
 async function postToBoard() {
@@ -990,6 +1036,7 @@ async function postToBoard() {
   wire('u', `publishOp × ${ops.length}  보드에 씬 패널로 남깁니다`)
   note(`키 비주얼 ${ops.length}장을 보드에 붙였습니다`)
   S.posted = true
+  S.postedCut = ops[0].panel.id
   aimBoardLink(ops[0].panel.id)
   paint()
   say(`${ops.length}장을 보드에 붙였습니다`)
@@ -1095,13 +1142,55 @@ function paintQueue() {
         : j.status === 'running' ? '그리는 중'
           : j.status === 'queued' ? '대기'
             : j.status === 'failed' ? '실패' : '-'))
-    const b = el('button', 'mini', j.status === 'done' ? '다시' : '이 씬만')
-    b.type = 'button'
-    b.disabled = !!S.busy || !s.prompt || !mayGen()
-    b.onclick = () => runBatch([s.id])
-    r.append(b)
+    /*
+     * 줄 끝의 단추 둘.
+     *
+     * 「다시」 옆에 「프롬프트 수정」을 답니다. 다시 그려도 프롬프트가 그대로면 거의 같은
+     * 그림이 나옵니다(seed 를 고정해 두었으면 완전히 같습니다). 그림이 마음에 안 들어
+     * 이 줄을 보고 있는 사람이 실제로 해야 하는 일은 그 씬의 지시를 고치는 것인데, 그
+     * 칸은 2단계에 있어서 위 탭으로 올라가 스무 줄 중에서 이 씬을 다시 찾아야 했습니다.
+     *
+     * 프롬프트가 없는 줄에도 답니다 — 그 줄이야말로 고쳐 넣어야 하는 줄입니다. 「다시」는
+     * 그때 서지 않으므로(프롬프트가 없으면 보낼 것이 없습니다) 이 단추만 남습니다.
+     */
+    const acts = el('div', 'q__act')
+    if (s.prompt) {
+      const b = el('button', 'mini', j.status === 'done' ? '다시' : '이 씬만')
+      b.type = 'button'
+      b.disabled = !!S.busy || !mayGen()
+      b.onclick = () => runBatch([s.id])
+      acts.append(b)
+    }
+    const ed = el('button', 'mini', '프롬프트 수정')
+    ed.type = 'button'
+    // 생성 중에는 막습니다. 지금 그리고 있는 프롬프트를 고치면 나온 그림과 화면의 글이
+    // 어긋나고, 어느 쪽이 그려진 것인지 말해 줄 자리가 없습니다
+    ed.disabled = !!S.busy
+    ed.onclick = () => editPrompt(s.id)
+    acts.append(ed)
+    r.append(acts)
     box.append(r)
   }
+}
+
+/**
+ * 그 씬의 프롬프트 칸으로 데려갑니다. 2단계로 넘기고 그 줄에 초점을 둡니다.
+ *
+ * 단계만 넘기지 않는 이유는 씬이 스무 개일 수 있다는 것입니다. 2단계를 열어 주고 「이제
+ * 그 줄을 찾으세요」로 두면 대기열에서 짚은 것을 사람이 다시 짚어야 합니다.
+ *
+ * @param {string} id - 씬 id
+ */
+function editPrompt(id) {
+  S.step = 2
+  S.pick = id
+  paint()
+  const ta = $(`#main [data-prompt="${id}"]`)
+  if (!ta) return
+  ta.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  ta.focus()
+  // 커서를 글 끝에 둡니다. 전체가 선택된 채로 두면 다음에 누른 글자가 프롬프트를 다 지웁니다
+  try { ta.setSelectionRange(ta.value.length, ta.value.length) } catch { /* 초점만으로 충분합니다 */ }
 }
 
 function paintBoard() {
@@ -1321,7 +1410,9 @@ function step2() {
         : 'aws-config.js 가 비어 있어 문장 모델이 없습니다. 프롬프트를 직접 써주세요.',
     'prompts')
   for (const s of S.scenes) {
-    const r = el('div', 'pr')
+    // 3단계에서 「프롬프트 수정」으로 온 줄을 표시해 둡니다(editPrompt). 초점만 주면
+    // 스무 줄 가운데 어디에 커서가 갔는지 눈으로는 잘 보이지 않습니다
+    const r = el('div', 'pr' + (S.pick === s.id ? ' pr--on' : ''))
     const top = el('div', 'pr__top')
     top.append(el('span', 'sc__id', s.id))
     top.append(el('b', null, `${s.place}${s.time ? ' · ' + s.time : ''}${s.weather ? ' · ' + s.weather : ''}`))
@@ -1329,6 +1420,7 @@ function step2() {
     r.append(top)
     if (s.beat) r.append(el('p', 'pr__beat', s.beat))
     const ta = el('textarea', 'pr__in')
+    ta.dataset.prompt = s.id       // editPrompt 가 이 줄을 찾는 열쇠입니다
     ta.value = s.prompt
     ta.placeholder = S.busy === 'prompt' ? '생성중…' : '영어로 씁니다. 공간·빛·인물·프레이밍.'
     ta.spellcheck = false
@@ -1595,13 +1687,33 @@ function step4() {
     b.append(d)
   }
 
-  const post = el('button', 'btn btn--go btn--wide',
+  /*
+   * 붙이기 전에는 이것이 다음 걸음이라 크게 세웁니다. 붙인 뒤에는 아래 「보드로」가
+   * 다음 걸음이 되므로 이 단추는 「붙였습니다 ✓」라는 표시로만 남습니다 — 그때 둘을 다
+   * 크게 두면 끝난 일과 할 일이 같은 무게가 됩니다.
+   */
+  const post = el('button', 'btn btn--go btn--wide' + (S.posted ? '' : ' btn--lg'),
     S.posted ? '보드에 붙였습니다 ✓' : `보드에 붙이기 · ${doneJobs().length}장`)
   post.type = 'button'
   post.disabled = !doneJobs().length || S.posted || !mayGen()
   post.onclick = () => postToBoard()
   b.append(post)
   b.append(el('p', 'note', '씬 패널로 남습니다. 컷 패널과 같은 모양이라 새로고침을 견디고, 보드를 열어 둔 사람에게 바로 갑니다.'))
+
+  /*
+   * 붙인 다음에 하는 일은 보드입니다.
+   *
+   * 머리 띠에 「보드로」가 있었지만 흐린 잔글씨라(.ghost) 네 단계를 끝낸 사람이 마지막으로
+   * 보는 자리에서 멀었습니다. 붙이자마자 여기에 세웁니다. 주소는 postToBoard 가 aimBoardLink
+   * 로 맞춰 둔 것과 같은 규칙입니다 — #cut=<id> 를 달아 방금 붙인 패널이 실제로 보이는
+   * 뷰로 엽니다(보드가 마지막으로 보던 회차를 기억하기 때문입니다).
+   */
+  if (S.posted) {
+    const to = el('a', 'btn btn--go btn--wide btn--lg', '스토리보드로 이어가기 →')
+    to.href = boardLinkFor(S.postedCut)
+    b.append(to)
+    b.append(el('p', 'note', '붙인 씬 패널이 보이는 자리로 엽니다. 거기서 컷마다 대사·카메라를 고치고 승인을 받습니다.'))
+  }
   w.append(b)
   return w
 }
@@ -1857,6 +1969,14 @@ async function boot() {
    * 또 눌러야 했고, 머리글 없는 글이면 그것이 Bedrock 왕복 한 번이었다.
    */
   await restoreAssets()
+
+  /*
+   * 머리 띠의 「보드로」에 프로젝트를 달아 둡니다. html 에는 /board.html 만 적혀 있어서,
+   * 그대로 누르면 지금 보고 있는 프로젝트가 아니라 기본 보드가 열렸습니다. 붙인 뒤에는
+   * aimBoardLink 가 #cut= 까지 얹어 다시 맞춥니다.
+   */
+  const bl = $('#toBoard')
+  if (bl) bl.href = boardLinkFor(null)
 
   // 보드에 붙기 전에 한 번 그린다. 연결이 오래 걸리거나 실패해도 화면은 이미 있고,
   // 실시간 기능만 나중에 붙는다. 아래 connect() 가 유일한 렌더 관문이면 안 된다.
