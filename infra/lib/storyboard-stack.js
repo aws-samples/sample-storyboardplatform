@@ -162,10 +162,14 @@ class StoryboardStack extends Stack {
      * 주의(2026-09-09): 실서비스 API 에는 이 두 리졸버가 CLI 로 손수 만들어져 있습니다(스키마도
      * start-schema-creation 으로 갱신). 대본이 사라지던 것을 cdk deploy 없이 고치려고 그랬습니다 —
      * deploy 는 GPU 인스턴스의 UserData 를 바꿔 재시작을 부릅니다. 다음 cdk deploy 전에 그 둘을
-     * 먼저 지워야 「Only one resolver is allowed per field」로 스택이 뒤집히지 않습니다:
-     *   aws appsync delete-resolver --api-id <id> --type-name Mutation --field-name putAsset
-     *   aws appsync delete-resolver --api-id <id> --type-name Query --field-name listAssets
+     * 먼저 지워야 「Only one resolver is allowed per field」로 스택이 뒤집히지 않습니다. 손으로 만든 것(2026-09-10 기준):
+     *   Mutation: putAsset · gpuPower · putImage · deleteProject · navigate
+     *   Query:    listAssets · navigateResult
+     *   for f in putAsset gpuPower putImage deleteProject navigate; do aws appsync delete-resolver --api-id <id> --type-name Mutation --field-name $f; done
+     *   for f in listAssets navigateResult; do aws appsync delete-resolver --api-id <id> --type-name Query --field-name $f; done
      * publishOp 리졸버는 update-resolver 로 코드만 갈았으므로 그냥 deploy 하면 같은 코드로 덮입니다.
+     * GraphFn·ConnFn 코드와 ConnFn 의 env(GPU_INSTANCE)·EC2 권한, GpuOff 스케줄 DISABLED 도 손으로 맞춰 둔 상태라
+     * deploy 가 같은 값으로 덮습니다(충돌 없음).
      */
     js(ops, 'PutAsset', 'Mutation', 'putAsset', 'putAsset.js')
     js(ops, 'ListAssets', 'Query', 'listAssets', 'listAssets.js')
