@@ -228,13 +228,13 @@ async function pollGpu() {
     const resident = draw.some((m) => m.id === j.modelId) ? j.modelId : null
     // 다른 모델의 실패 사유는 이 화면의 것이 아닙니다. 스틸은 참조 모델(klein)로 가므로
     // krea 가 못 올라온 사유를 빨간 불로 보이면 되는 일을 안 되는 것으로 읽습니다
-    const mine = draw.find((m) => m.strength === false && m.init !== false)?.id ?? 'klein'
+    const mine = j.ref || draw.find((m) => m.strength === false && m.init !== false)?.id ?? 'klein'
     const err = j.error && (!j.errorModel || j.errorModel === mine) ? j.error : null
     S.gpu = {
       state: err ? 'error' : j.loading || !j.warm ? 'loading' : j.busy ? 'busy' : 'ready',
       text: err ? `생성 서버: ${err}` : j.loading || !j.warm ? `모델을 올리는 중${j.wait ? ` · 약 ${Math.round(j.wait)}초` : ''}`
         : j.busy ? '다른 그림을 그리는 중' : resident ? `${j.model} 준비됨` : '그림 모델 대기',
-      models: draw, resident, wait: j.wait || 0, err, default: j.default,
+      models: draw, resident, wait: j.wait || 0, err, default: j.default, ref: j.ref || null,
     }
   } catch {
     S.gpu = { state: 'down', text: gpuDownHint(), models: [] }
@@ -246,7 +246,8 @@ async function pollGpu() {
  * 참조를 조건으로 받는 모델. 스틸은 자산 여러 장을 조건으로 받아야 하므로 klein 계열이어야 합니다.
  * img2img 갈래(chroma·sd3)는 그림을 지우고 다시 그려 얼굴이 바뀌고, krea 는 그림을 받지 않습니다.
  */
-const refModel = () => S.gpu.models.find((m) => m.strength === false && m.init !== false)?.id ?? 'klein'
+const refModel = () => (S.gpu.ref && S.gpu.models.some((m) => m.id === S.gpu.ref) ? S.gpu.ref
+  : S.gpu.models.find((m) => m.strength === false && m.init !== false)?.id ?? 'klein')
 
 /** 503 이면 모델이 올라올 때까지 기다린 뒤 한 번 다시 보냅니다 */
 async function askPatient(body, tick) {

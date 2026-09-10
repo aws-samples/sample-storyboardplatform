@@ -1148,6 +1148,7 @@ const canGen = !!cfg.genUrl
 
 let gpu = { state: 'unknown', text: '생성 서버 확인 중' }
 let gpuModels = []
+let gpuRef = null   // 서버가 참조 생성에 쓰라는 모델(/health 의 ref). 9B 가 있으면 9B, 없으면 4B
 /*
  * 커넥터로 붙은 밖의 모델. 관리자가 홈의 「모델 커넥터」에서 API 키를 넣으면 여기 들어옵니다.
  * GPU 목록과 한 배열에 섞지 않는 이유는 /health 폴링입니다. 그쪽은 응답마다 gpuModels 를
@@ -1637,7 +1638,8 @@ function whyNotExtract(panel) {
  * 합니다. img2img 갈래(chroma·sd3)는 그림을 지우고 다시 그려서 다른 사람이 나옵니다.
  * 화면이 고른 모델과 상관없이 이것으로 뽑습니다. 목록에 없으면 서버 기본(klein)에 맡깁니다.
  */
-const keepModelId = () => gpuModels.find((m) => m.strength === false && m.init !== false)?.id ?? null
+const keepModelId = () => (gpuRef && gpuModels.some((m) => m.id === gpuRef) ? gpuRef
+  : gpuModels.find((m) => m.strength === false && m.init !== false)?.id ?? null)
 
 /*
  * 이 요청을 실제로 그릴 모델. 고른 모델이 그림을 받지 않으면(Krea 2 Turbo — /health 의
@@ -1745,6 +1747,7 @@ async function pollGpu() {
      * 기다립니다. 대신 그 칸은 vinfo 로 따로 받습니다 — 길이·화질 목록이 거기 있습니다.
      */
     gpuModels = (j.models || []).filter((m) => !m.video)
+    gpuRef = j.ref || null
     vinfo = j.video || null
     /*
      * 영상 모델이 올라와 있으면 이 화면에는 「올라온 그림 모델이 없다」와 같습니다. 그대로

@@ -70,6 +70,7 @@ them before the box can download the weights.
 | `krea` | [Krea 2 Turbo](https://huggingface.co/krea/Krea-2-Turbo) | the default: 8 steps, realistic, text only | none · a shot with references is routed to `klein` |
 | `chroma` | [Chroma1-Flash](https://huggingface.co/lodestones/Chroma1-Flash) 8.9B | 12 steps, ~15 s, the best pencil-storyboard texture | img2img · keeps the layout, redraws the face |
 | `klein` | [FLUX.2 klein 4B](https://huggingface.co/black-forest-labs/FLUX.2-klein-4B) | same character in a new shot; 8 steps, ~4 s | condition · keeps the face, takes several images |
+| `klein9` | [FLUX.2 klein 9B](https://huggingface.co/black-forest-labs/FLUX.2-klein-9B) (gated) | the bigger klein: stills and reference shots when its weights are on disk (`/health` → `ref`) | condition · same pipeline, several images |
 | `hd` | [Chroma1-HD](https://huggingface.co/lodestones/Chroma1-HD) 8.9B | Flash before distillation: 26 steps, for a final pass | img2img · keeps the layout, redraws the face |
 
 The reference-image column is the reason there are several. `chroma`/`hd` paint over the image with
