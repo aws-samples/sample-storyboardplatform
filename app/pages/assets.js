@@ -83,6 +83,7 @@ const S = {
   sel: [],            // 고른 자산 id. 순서가 참조 순서입니다
   prompt: '',
   make: null,         // { type, prompt, n } — 「AI로 만들기」 칸이 열려 있으면
+  makeModel: null,    // 「AI로 만들기」로 고른 모델 id. 칸을 닫고 다시 열어도 남게 make 밖에 둡니다
   drafts: {},         // 후보. id → { id, type, name, src, prompt, refs?, gen, ts }. 저장한 것만 자산이 됩니다
   queue: [],          // 일감. { job, kind:'asset'|'still', type, prompt, name, refs, v, of, status:'todo'|'run', at }
   paused: '',         // 큐가 멈춘 이유(서버에 못 닿음 등). 「이어서 만들기」로 다시 돕니다
@@ -243,17 +244,41 @@ async function pollGpu() {
 }
 
 /*
- * 참조를 조건으로 받는 모델. 스틸은 자산 여러 장을 조건으로 받아야 하므로 klein 계열이어야 합니다.
- * img2img 갈래(chroma·sd3)는 그림을 지우고 다시 그려 얼굴이 바뀌고, krea 는 그림을 받지 않습니다.
+ * ══ 이 화면의 모델이 둘로 갈립니다 ═══════════════════════════════════════════
+ *
+ * 자산 하나하나를 만드는 일(왼쪽 「AI로 만들기」)은 고를 수 있습니다. 인물 한 명·배경 한
+ * 장·소품 하나를 글로 그리는 일이라 무엇으로 그릴지가 취향입니다 — 글만 보고 빠르게 그리는
+ * 것과 참조 이미지를 받아 기존 자산을 살리는 것이 다른 결과를 냅니다.
+ *
+ * 자산 여러 장을 한 장으로 합치는 일(오른쪽 「실사 스틸」)은 못 고릅니다. 늘 FLUX 계열입니다.
+ * 고르는 것이 아니라 그것만 되는 일입니다 — 스틸은 자산 N장을 조건으로 받아야 하고, 그림
+ * 목록을 조건으로 받는 갈래가 flux2 뿐입니다. img2img 갈래(chroma·sd3)는 한 장만 받고 그
+ * 그림을 지우고 다시 그려서 얼굴이 바뀌고, krea 는 그림을 아예 받지 않습니다(server.py 의
+ * refs_of · MODELS 의 init). 목록에 내 두고 고르게 하면 고른 사람은 참조가 말없이 버려진
+ * 그림을 받습니다. 서버도 같은 판단을 겹으로 합니다(pick_for).
+ *
+ * 그래서 스틸 칸은 모델 줄을 「FLUX.2 klein · 고정」으로 적고 고르는 칸을 내지 않습니다.
  */
+
 /* 「AI로 만들기」가 쓸 모델. 고른 것이 없으면 올라와 있는 것, 그것도 없으면 서버 기본 */
 const makeModelId = () => {
   const ids = S.gpu.models.map((m) => m.id)
-  if (S.make?.model && ids.includes(S.make.model)) return S.make.model
+  if (S.makeModel && ids.includes(S.makeModel)) return S.makeModel
   return [S.gpu.resident, S.gpu.default].find((id) => ids.includes(id)) || ids[0] || null
 }
+/*
+ * 스틸이 쓸 모델. 서버가 말해 주는 것(j.ref → ref_model)을 그대로 씁니다 — 9B 가중치가
+ * 디스크에 있으면 그것이고 없으면 4B 라, 화면이 다시 셈하면 두 곳이 갈라집니다. 못 물어본
+ * 사이(GPU 가 꺼져 있을 때)는 목록에서 조건으로 받는 것을 찾고, 그것도 없으면 klein 입니다.
+ */
 const refModel = () => (S.gpu.ref && S.gpu.models.some((m) => m.id === S.gpu.ref) ? S.gpu.ref
   : S.gpu.models.find((m) => m.strength === false && m.init !== false)?.id ?? 'klein')
+/*
+ * 그 모델의 사람이 읽는 이름. 목록이 아직 없으면(GPU 가 꺼져 있으면) 갈래 이름으로 적습니다 —
+ * 「klein」은 id 라 화면에 그대로 내면 무엇인지 모릅니다. 어느 판(4B·9B)인지는 켜진 뒤에
+ * 정해지므로(server.py 의 ref_model), 그때까지는 갈래까지만 말하는 것이 맞습니다.
+ */
+const refLabel = () => S.gpu.models.find((m) => m.id === refModel())?.label || 'FLUX.2 klein'
 
 /** 503 이면 모델이 올라올 때까지 기다린 뒤 한 번 다시 보냅니다 */
 async function askPatient(body, tick) {
@@ -630,7 +655,16 @@ function paintGrid() {
     <div class="make">
       <textarea id="makeText" placeholder="${esc(MAKE_PLACEHOLDER[S.cat] || '')}" ${S.busy ? 'disabled' : ''}>${esc(S.make.prompt)}</textarea>
       <div style="display:grid;gap:6px">
-        <label class="nsel"><span class="mono">모델</span><select id="makeModel" ${S.busy ? 'disabled' : ''}>${S.gpu.models.map((m) => `<option value="${esc(m.id)}"${makeModelId() === m.id ? ' selected' : ''}>${esc(m.label)}${m.init === false ? ' · 글만' : ' · 이미지 입력'}</option>`).join('')}</select></label>
+        ${/*
+          * 모델을 고르는 칸. 자산 하나하나를 만드는 일에만 있습니다(위 makeModelId 머리글).
+          *
+          * GPU 가 꺼져 있으면 서버에 물어본 목록이 없어서 option 이 한 줄도 없는 빈 select 가
+          * 섰습니다 — 「모델」이라 적힌 빈 칸을 눌러 보고 아무것도 안 나오면 고장으로 읽힙니다.
+          * 그때는 칸 대신 지금 무엇을 기다리는지 한 줄을 냅니다. 켜지면 목록이 옵니다(pollGpu).
+          */''}
+        ${S.gpu.models.length ? `
+          <label class="nsel"><span class="mono">모델</span><select id="makeModel" ${S.busy ? 'disabled' : ''}>${S.gpu.models.map((m) => `<option value="${esc(m.id)}"${makeModelId() === m.id ? ' selected' : ''}>${esc(m.label)}${m.init === false ? ' · 글만' : ' · 이미지 입력'}</option>`).join('')}</select></label>`
+    : `<p class="note note--no">${esc(S.gpu.text)} · 모델 목록은 GPU 가 켜진 뒤에 옵니다</p>`}
         <label class="nsel"><span class="mono">장수</span><select id="makeN" ${S.busy ? 'disabled' : ''}>${COUNTS.map((c) => `<option value="${c}"${S.make.n === c ? ' selected' : ''}>${c}</option>`).join('')}</select></label>
         <button class="btn btn--go" id="makeGo" ${S.busy || !S.make.prompt.trim() ? 'disabled' : ''}>${S.busy ? (S.busyKind === 'make' ? '만드는 중…' : '다른 작업 중…') : `후보 ${S.make.n}장 만들기`}</button>
         ${S.busy && S.busyKind === 'make' ? `<button class="btn" id="makeStop" ${S.stop ? 'disabled' : ''}>${S.stop ? '멈추는 중' : '그만'}</button>`
@@ -639,12 +673,21 @@ function paintGrid() {
       <p class="note ${S.busy && S.busyKind === 'make' ? 'note--busy' : ''}">${S.busy && S.busyKind === 'make' ? `${esc(S.busy)}${S.stop ? ' — 지금 장은 끝나면 후보로 남고, 다음 장부터 만들지 않습니다.' : ''}`
     : `지시문 뒤에 「${esc(MAKE_HINT[S.cat])}」이 붙어 사진 룩의 ${esc(typeName(S.cat))} 후보로 나옵니다. 저장한 것만 자산이 됩니다.`}</p>
       ${(() => {
-        // 고른 모델이 이미지를 받는지. klein 이면 오른쪽에서 고른 자산이 입력으로 같이 들어갑니다
+        /*
+         * 고른 모델이 무엇을 하는지 한 줄. 이름만으로는 두 모델의 차이가 안 보입니다 —
+         * 하나는 글만 보고 그리고 하나는 참조 이미지를 받습니다. 그 차이가 이 화면에서
+         * 하는 일을 가릅니다(고른 자산이 입력으로 가는지 아닌지).
+         *
+         * 오른쪽 스틸 칸과 갈라 두는 말도 여기 한 번 답니다. 같은 화면에 「고르는 모델」과
+         * 「고정된 모델」이 둘 다 있어서, 어느 쪽이 무엇인지 말해 주지 않으면 여기서 고른
+         * 것이 스틸에도 갈 것으로 읽힙니다.
+         */
         const m = S.gpu.models.find((x) => x.id === makeModelId())
         if (!m) return ''
-        if (m.init === false) return `<p class="note">${esc(m.label)}은 글만 보고 그립니다. 참조 이미지를 넣으려면 모델을 FLUX.2 klein 으로 바꾸세요.</p>`
+        const still = `<span class="note"> 자산 여러 장을 한 장으로 합치는 오른쪽 「실사 스틸」은 늘 ${esc(refLabel())}입니다 — 여기서 고른 것과 무관합니다.</span>`
+        if (m.init === false) return `<p class="note">${esc(m.label)}은 글만 보고 그립니다. 고른 자산을 참조로 넣으려면 이미지 입력을 받는 모델로 바꾸세요.${still}</p>`
         const n = picked().length
-        return `<p class="note note--busy">${esc(m.label)}은 참조 이미지를 받습니다. ${n ? `오른쪽에서 고른 자산 ${n}장이 입력으로 들어가 그 얼굴·장소·물건을 살립니다.` : '오른쪽 「실사 스틸」 칸에서 자산을 고르면 그 그림이 입력으로 들어갑니다. 안 고르면 글만으로 그립니다.'}</p>`
+        return `<p class="note note--busy">${esc(m.label)}은 참조 이미지를 받습니다. ${n ? `오른쪽에서 고른 자산 ${n}장이 입력으로 들어가 그 얼굴·장소·물건을 살립니다.` : '오른쪽 「실사 스틸」 칸에서 자산을 고르면 그 그림이 입력으로 들어갑니다. 안 고르면 글만으로 그립니다.'}${still}</p>`
       })()}
     </div>` : ''
   /*
@@ -689,7 +732,7 @@ function paintGrid() {
   $('makeClose')?.addEventListener('click', () => { S.make = null; paintGrid() })
   $('makeGo')?.addEventListener('click', makeAsset)
   $('makeN')?.addEventListener('change', (e) => { S.make.n = Number(e.target.value); paintGrid() })
-  $('makeModel')?.addEventListener('change', (e) => { S.make.model = e.target.value; paintGrid() })
+  $('makeModel')?.addEventListener('change', (e) => { S.makeModel = e.target.value; paintGrid() })
   $('makeStop')?.addEventListener('click', stopNow)
   $('makeText')?.addEventListener('input', (e) => { S.make.prompt = e.target.value; const g = $('makeGo'); if (g) g.disabled = !e.target.value.trim() })
   back()
@@ -729,7 +772,6 @@ function paintStill() {
   const refs = picked()
   const led = { ready: 'ready', busy: 'busy', loading: 'busy', down: 'down', error: 'down', none: 'down' }[S.gpu.state] || ''
   const genNo = !canGen() ? '이 배포에는 생성 서버가 없습니다' : mayGen() ? '' : denyReason('gen', role())
-  const model = S.gpu.models.find((m) => m.id === refModel())
   const stills = list().filter((a) => a.type === 'still' && src(a)).slice(0, 4)
   setHtml($('still'), `
     <div>
@@ -742,7 +784,13 @@ function paintStill() {
     : '<div class="empty">왼쪽 격자에서 자산을 눌러 고르세요.</div>'}</div>
     <textarea id="stillText" placeholder="장면 설명 (선택) · 예: 새벽 카페 창가, 손에 든 콜드브루를 바라본다" ${S.busy ? 'disabled' : ''}>${esc(S.prompt)}</textarea>
     <dl class="kv">
-      <dt>모델</dt><dd>${esc(model?.label || 'FLUX.2 klein')} · 참조 ${refs.length}장 <span class="note">— 참조 이미지를 받는 모델로 만듭니다</span></dd>
+      ${/*
+        * 고르는 칸이 아닙니다. 자산 여러 장을 한 장으로 합치는 일은 늘 FLUX 계열이라(위
+        * makeModelId 머리글) 「고정」을 글로 박습니다. 왼쪽 「AI로 만들기」에는 고르는 칸이
+        * 있어서, 여기에도 있을 것으로 읽히는 것을 막아야 합니다.
+        */''}
+      <dt>모델</dt><dd>${esc(refLabel())} <b class="fix">고정</b> · 참조 ${refs.length}장
+        <span class="note">— 자산 여러 장을 조건으로 받는 모델이라야 얼굴·장소·물건이 그대로 들어갑니다. 자산 하나하나를 만들 때는 왼쪽 「AI로 만들기」에서 모델을 고릅니다</span></dd>
       <dt>크기</dt><dd>1920 × 1088 · 실사</dd>
       <dt>서버</dt><dd><span class="led led--${led}"></span>${esc(S.gpu.text)}${conn && allowed('power', role()) ? (S.gpu.state === 'down'
     ? ' <button class="mini mini--go" id="gpuOn" type="button">GPU 켜기</button>'

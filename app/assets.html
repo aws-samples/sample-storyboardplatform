@@ -131,6 +131,9 @@ header{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.92);backdro
 .still textarea:focus{background:#fff;border-color:var(--blue);outline:none}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:11.5px;color:var(--ink-2)}
 .kv dt{color:var(--ink-3);font-family:var(--m);font-size:10.5px;padding-top:1px}
+/* 「고정」표. 왼쪽 「AI로 만들기」에는 모델을 고르는 칸이 있어서, 여기에도 있을 것으로 읽히는
+   것을 이 한 낱말이 막습니다. 값이 아니라 그 값에 붙는 표라서 테를 두른 잔글씨입니다 */
+.fix{font:600 9px/1.4 var(--m);letter-spacing:.06em;color:var(--ink-3);border:1px solid var(--line);border-radius:7px;padding:0 4px;vertical-align:1px;white-space:nowrap}
 .led{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--ink-3);margin-right:6px;vertical-align:1px}
 .led--ready{background:var(--ok)}.led--busy{background:var(--wait);animation:pulse 1.1s ease-in-out infinite}.led--down{background:var(--no)}
 @keyframes pulse{50%{opacity:.28}}

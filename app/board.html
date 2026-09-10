@@ -137,6 +137,24 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .menu button[data-model] { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
 .menu button[data-on="1"] { background: var(--paper-2); font-weight: 600; }
 .menu button[data-model] .mono { font-size: 10px; color: var(--pencil); font-weight: 400; flex: none; }
+/*
+ * GPU 켜고 끄는 줄. 모델 줄과 같은 모양으로 눕히고, 뒤에 붙는 잔글씨는 회색입니다.
+ *
+ * 「GPU 끄기」와 「팀 전원의 생성이 멈춥니다」가 같은 빨강이었습니다. [data-danger] 가 색을
+ * 주고 안의 .mono 에는 색 규칙이 없어서 물려받은 것입니다. 그래서 두 글이 한 문장처럼
+ * 읽혔고 — 「GPU 끄기 팀 전원의 생성이 멈춥니다」 — 어디까지가 단추 이름인지 몰랐습니다.
+ * 이름만 빨강으로 두고 그 뒤는 설명이라 회색으로 내립니다.
+ */
+.menu button[data-power] { display: flex; align-items: baseline; gap: 8px; }
+.menu button[data-power] .mono {
+  font-size: 10px; color: var(--pencil); font-weight: 400;
+  margin-left: auto; text-align: right;
+}
+/*
+ * 이름 옆의 주의표시. 글자가 아니라 표시라서 aria-hidden 이고, 읽는 기계에는 아래
+ * confirmAsk 의 「팀 전원의 …이 멈춥니다」가 그대로 갑니다.
+ */
+.menu button[data-power] .warn { flex: none; font-size: 11px; line-height: 1; }
 .menu__note {
   border-top: 1px solid var(--paper-2); margin: 5px 0 0; padding: 8px 9px 4px;
   font-size: 11.5px; line-height: 1.5; color: var(--pencil);
@@ -318,9 +336,23 @@ dialog#keys::backdrop { background: rgba(17,19,24,.5); }
 /* 탭 바 자리. 모양은 nav-tabs.js 가 두 화면에 같이 넣어 줍니다 */
 #navMount { flex: 0 0 auto; }
 .pane { min-height: 0; overflow: auto; }
+/*
+ * 왼쪽 기둥. 기둥 자체는 구르지 않고(overflow:hidden) 안의 두 칸이 각자 굽니다.
+ *
+ * 예전에는 이 기둥 하나가 통째로 굴렀습니다. 컷이 서른 개쯤 되면 스토리보드 목록이 기둥을
+ * 다 먹고 인물 칸이 스크롤 한참 아래로 내려갔습니다 — 컷을 훑다가 인물을 보려면 기둥을
+ * 끝까지 굴려야 했고, 굴린 뒤에는 컷 목록이 화면 위로 사라졌습니다. 둘 다 늘 보여야 하는
+ * 목록이라 반반으로 나누고 각자에게 스크롤을 줍니다.
+ *
+ * 1fr 1fr 이라 컷이 몇 개든 인물 칸의 자리는 그대로입니다. minmax(0,1fr) 인 이유는 grid
+ * 칸의 기본 최소 높이가 min-content 라서 — 그것 없이는 목록이 길 때 칸이 늘어나 버려
+ * 안의 overflow 가 걸리지 않습니다.
+ */
 .pane--script {
   background: var(--table-deep); color: var(--ink);
   padding: 18px 16px; border-right: 1px solid var(--edge);
+  overflow: hidden;
+  display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: 16px;
 }
 .pane--detail {
   background: var(--paper-2); border-left: 1px solid var(--edge);
@@ -342,14 +374,22 @@ dialog#keys::backdrop { background: rgba(17,19,24,.5); }
  *
  * 그래서 각각을 종이 한 장으로 세워 테를 두르고 사이를 띄웁니다. 기둥의 배경이 어두운
  * 쪽이라(--table-deep) 밝은 종이 두 장이 뜨는 것으로 「둘」이 눈에 먼저 들어옵니다.
+ *
+ * 칸 하나의 안은 「제목 · 구르는 몸」입니다. 제목이 같이 구르면 반쯤 굴린 칸이 무슨
+ * 목록인지 알 수 없습니다. 목록만 굴리고 제목은 붙여 둡니다.
  */
 .side {
   background: var(--paper-2); border: 1px solid var(--edge); border-radius: var(--r);
   padding: 13px 12px 12px;
+  min-height: 0; display: flex; flex-direction: column; overflow: hidden;
 }
-.side + .side { margin-top: 14px; }
 /* 칸 안에서는 제목이 맨 위 줄이라 위쪽 여백이 필요 없습니다 */
-.side .h { margin-top: 0; }
+.side > .h { margin-top: 0; flex: 0 0 auto; }
+.side__body {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  /* 구르는 칸의 오른쪽에 막대가 서므로 그만큼 띄워 글이 막대 밑에 깔리지 않게 합니다 */
+  padding-right: 4px; margin-right: -4px;
+}
 /* 목록이 마지막이면 그 아래 여백은 칸의 padding 이 냅니다 */
 .side .nav:last-child { margin-bottom: 0; }
 
@@ -590,20 +630,21 @@ a.btn--wide[hidden] { display: none; }
  *
  * 접는 것만으로는 부족했습니다. 실선 하나로만 갈라 두었더니 덩이 여섯이 다 같은 무게로
  * 쌓여서, 「무엇을 하러 여기 왔는지」가 목록 안에서 사라졌습니다. 사람이 이 판에서 하는
- * 일은 딱 둘입니다 — 컷의 내용을 적는 일과 그림을 만드는 일. 나머지 넷(버전·메모·기록,
- * 그리고 바닥의 승인 띠)은 그 둘의 결과를 보거나 넘기는 자리입니다.
+ * 일은 그림을 만드는 일이고(인물 구도는 기준 이미지를 잡는 일이 하나 더 앞섭니다), 나머지
+ * 넷(버전·메모·기록, 그리고 바닥의 승인 띠)은 그 결과를 보거나 넘기는 자리입니다.
  *
- * 그래서 앞의 둘만 종이 한 장으로 세웁니다(.sec--step). 테를 두르고 사이를 띄우고 번호를
- * 답니다. 뒤의 넷은 지금처럼 실선 위의 접힌 줄로 둡니다. 여섯 중 어느 것이 「할 일」이고
- * 어느 것이 「본 것」인지가 그 차이로 갈립니다.
+ * 그래서 할 일만 종이 한 장으로 세웁니다. 테를 두르고 사이를 띄웁니다. 인물 구도는 그 장이
+ * 둘이라 접히고 번호가 붙고(.sec--step), 컷은 하나라 접지 않습니다(.do). 나머지 넷은
+ * 지금처럼 실선 위의 접힌 줄로 둡니다. 어느 것이 「할 일」이고 어느 것이 「본 것」인지가
+ * 그 차이로 갈립니다.
  */
 .sec { border-top: 1px solid var(--edge); margin-top: 4px; }
 .sec:first-of-type { border-top: 0; margin-top: 12px; }
 
 /*
- * 할 일 두 장. 첫째가 「내용」(무엇을 그릴지 적는 일), 둘째가 「이미지」(그것을 그리는 일)
- * 입니다. 순서가 그대로 일의 순서라 번호를 답니다 — 접혀 있어도 둘 중 어디가 먼저인지
- * 제목을 읽지 않고 압니다.
+ * 할 일 두 장. 인물 구도가 씁니다 — 첫째가 「기준 이미지」(이 인물의 얼굴을 정하는 일),
+ * 둘째가 「구도 그리기」입니다. 순서가 그대로 일의 순서라 번호를 답니다 — 접혀 있어도 둘 중
+ * 어디가 먼저인지 제목을 읽지 않고 압니다. 컷은 할 일이 하나라 아래 .do 를 씁니다.
  */
 .sec--step {
   border: 1px solid var(--edge); border-radius: var(--r);
@@ -623,6 +664,22 @@ a.btn--wide[hidden] { display: none; }
   content: attr(data-step) ". ";
   color: var(--tape); font-weight: 600;
 }
+
+/*
+ * 접지 않는 「할 일」 한 장. 컷이 씁니다.
+ *
+ * 컷에서 하는 일은 그리는 것 하나입니다. 예전에는 「1. 컷 내용 적기」와 「2. 이미지 만들기」
+ * 둘이라 번호를 달고 접었는데, 적는 칸이 스토리 디벨롭으로 간 뒤로는 한 장뿐입니다. 하나에
+ * 「1.」을 붙이면 뒤에 안 보이는 2 가 있는 것으로 읽히고, 하나뿐인 것을 접게 두면 접힌 판에
+ * 할 일이 아무것도 안 보입니다. 그래서 .sec--step 의 모양만 물려받고 제목과 번호를 뺍니다.
+ */
+.do {
+  border: 1px solid var(--pencil-2); border-radius: var(--r);
+  background: var(--paper); margin-top: 14px; padding: 12px;
+}
+/* 안의 첫 줄은 위 여백을 내지 않습니다. 이 장의 padding 이 이미 그것을 들고 있습니다.
+   단추 줄이 첫 줄이지만, 그릴 권한이 없으면 그 줄 대신 이유 한 줄이 옵니다 */
+.do > .acts:first-child, .do > .why:first-child { margin-top: 0; }
 
 .sec__sum {
   display: flex; align-items: center; gap: 8px; cursor: pointer;
@@ -650,7 +707,7 @@ a.btn--wide[hidden] { display: none; }
 /* 편 칸의 아래 여백. 접힌 덩이 사이는 제목 줄의 padding 만으로 붙습니다 */
 .sec__body { padding-bottom: 14px; }
 /* 첫 칸의 위 여백은 제목 줄이 이미 들고 있습니다. .f 의 margin-top 을 뺍니다 */
-.sec__body > .f:first-child, .sec__body > .f--row:first-child { margin-top: 0; }
+.sec__body > .f:first-child { margin-top: 0; }
 /*
  * 덩이 안 맨 위에 서는 작은 단추 줄(버전의 「크게 보기 · 핀 메모」). 아래 목록과 달리
  * 「지금 보는 것」에 대고 하는 일이라 갈라 둡니다.
@@ -751,12 +808,8 @@ a.btn--wide[hidden] { display: none; }
 .anchor__txt { font-size: 12px; line-height: 1.5; min-width: 0; }
 .anchor__txt b { font-weight: 600; }
 .anchor__none { color: var(--pencil); font-size: 12px; }
-.cast { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
-.cast__chip {
-  font-size: 11.5px; background: var(--paper); border: 1px solid var(--edge);
-  border-radius: 12px; padding: 3px 10px 2px; cursor: pointer; color: var(--pencil);
-}
-.cast__chip[data-on="1"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+/* 컷에 인물을 붙이는 칩 줄(.cast · .cast__chip)이 여기 있었습니다. 등장 인물을 이 판에서
+   고치지 않게 되면서 같이 나갔습니다(board.js 의 renderDetail 「여기 있던 것」 머리글) */
 
 .gen__row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .gen__lab { color: var(--pencil); flex: 0 0 auto; }
@@ -776,28 +829,9 @@ a.btn--wide[hidden] { display: none; }
 .chip:hover:not(:disabled) { border-color: var(--pencil); color: var(--ink); }
 .chip[data-on="1"] { background: var(--stamp-blue); border-color: var(--stamp-blue); color: #fff; }
 .chip:disabled { opacity: .45; cursor: not-allowed; }
-/* ── 참조 자산 칩. 자산관리 화면(assets.html)에 쌓인 인물·배경·소품을 컷 생성의 참조로 고릅니다.
- * 그림이 곧 이름이라 글자보다 그림을 크게 둡니다. 자산의 이름·삭제는 그 화면의 일입니다.
- */
-.alib { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; list-style: none; padding: 0; margin: 6px 0 0; }
-.asset {
-  display: flex; flex-direction: column; width: 100%; padding: 0; margin: 0; overflow: hidden;
-  background: var(--paper); border: 1px solid var(--edge); border-radius: var(--r);
-  color: var(--ink); font: inherit; text-align: left; cursor: pointer;
-}
-.asset:hover { border-color: var(--pencil); }
-.asset img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; background: var(--paper-2); }
-.asset__cap {
-  display: block; padding: 4px 6px 5px; margin: 0; font-size: 11px; line-height: 1.3; color: var(--pencil);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.asset__cap b { font-size: 10px; letter-spacing: .06em; color: var(--pencil); margin-right: 4px; font-weight: 600; }
-/* 참조로 켠 자산. 켜진 칩(.chip[data-on="1"])과 같은 파랑입니다 */
-.asset--pick[data-on="1"] { border-color: var(--stamp-blue); box-shadow: 0 0 0 1px var(--stamp-blue); }
-.asset--pick[data-on="1"] .asset__cap { color: var(--sb-accent-ink, var(--ink)); }
-.asset--pick[data-on="1"] .asset__cap b { color: var(--stamp-blue); }
-.alib--pick { flex: 1 1 100%; margin: 0; }
-.gen__row--top { align-items: flex-start; }
+/* 참조 자산 칩 판(.alib · .asset · .asset__cap · .asset--pick)이 여기 있었습니다. 컷마다
+   자산을 켜고 끄는 줄이었는데, 무엇을 참조할지는 autoAssets 가 잡습니다. 자산을 눈으로 보고
+   고르는 일은 자산관리 화면의 것이라 그 판도 그쪽에만 있습니다(assets.html) */
 .why--busy { color: var(--stamp-blue); }
 .why .mini { margin-left: 6px; }
 .menu__tag {
@@ -936,24 +970,11 @@ a.btn--wide[hidden] { display: none; }
 .attach b { color: var(--ink); }
 .tag--at { color: var(--stamp-blue); border-color: var(--sb-accent-line); }
 
-.f--row { display: flex; gap: 8px; }
-.f--row .f { flex: 1; min-width: 0; }
-.f--row .f--narrow { flex: 0 0 96px; }
-.f--row .f--tiny { flex: 0 0 62px; }
+/* 칸 여럿을 한 줄에 눕히던 .f--row 와 그 안의 폭 셋(.f--narrow · .f--tiny)이 여기
+   있었습니다. 씬·카메라·초를 한 줄에 세우던 것이라 그 칸들과 함께 나갔습니다 */
 
-/*
- * 「대개 채워져 오는」 값들의 줄. 컷 내용의 씬·카메라·초입니다(renderDetail 의 cutFields).
- *
- * 위의 쓰는 칸들과 같은 크기로 서 있으면 여섯 칸이 한 무게가 되어 어디부터 채우는지가
- * 보이지 않습니다. 잔글씨로 눕히고 위에 금을 그어 「고칠 일이 드문 것」으로 갈라 둡니다.
- */
-.f--meta { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--edge); }
-.f--meta .f__label { font-size: 9.5px; }
-.f--meta input, .f--meta select { font-size: 12px; }
-.f input[type=number] {
-  width: 100%; background: var(--paper); border: 1px solid var(--edge);
-  border-radius: var(--r); padding: 8px 9px; font-size: 13px;
-}
+/* 「대개 채워져 오는」 값들의 줄(.f--meta)과 숫자 칸 규칙이 여기 있었습니다. 씬·카메라·초를
+   잔글씨로 눕혀 두던 것이라 그 칸들과 함께 나갔습니다 */
 .cut__sec { font-family: var(--mono); font-size: 9.5px; color: var(--stamp-blue); border: 1px solid var(--sb-accent-line); padding: 1px 4px; }
 /* 그림 위에 겹쳐 앉는 버튼이라, 그림이 밝든 어둡든 읽히도록 어두운 판을 깐다 */
 .cut__zoom {
@@ -1200,7 +1221,18 @@ dialog.adm::backdrop { background: rgba(17,19,24,.5); }
   .pane { overflow: visible; }
   .pane--board { order: -2; }
   .pane--detail { order: -1; border-left: 0; border-top: 1px solid var(--edge); }
-  .pane--script { border-right: 0; border-top: 1px solid var(--edge); }
+  /*
+   * 세로로 세우면 반반 나누기를 풉니다. 화면 전체가 구르는 판이라(body overflow:auto) 두
+   * 칸에 각자 스크롤을 주면 한 화면 안에 구르는 상자가 셋이 됩니다 — 넓은 화면에서는 기둥의
+   * 높이가 정해져 있어서 그것이 답이지만, 여기서는 그냥 위아래로 늘어서는 것이 맞습니다.
+   */
+  .pane--script {
+    border-right: 0; border-top: 1px solid var(--edge);
+    display: block; overflow: visible;
+  }
+  .side { overflow: visible; display: block; }
+  .side + .side { margin-top: 14px; }
+  .side__body { overflow: visible; padding-right: 0; margin-right: 0; }
   .vw__body { grid-template-columns: 1fr; }
 }
 
@@ -1329,26 +1361,34 @@ dialog.adm::backdrop { background: rgba(17,19,24,.5); }
     <!-- data-coach 는 코치마크가 짚는 이름입니다. board.js 의 BOARD_CARDS 가 씁니다 -->
     <section class="side" data-side="board" data-coach="side-board">
       <h2 class="mono h">스토리보드</h2>
-      <ul class="nav" id="boardNav"></ul>
-      <p class="side__why" id="boardWhy" hidden>컷이 아직 없습니다. 위의 <b>스토리 디벨롭</b>에서
-        이야기를 컷으로 나누면 여기 올라옵니다.</p>
+      <!--
+        제목 아래는 따로 구릅니다(.side__body). 컷이 많아져도 이 칸이 기둥을 다 먹지 않고
+        칸 안에서만 굴러서, 아래 인물 칸이 늘 같은 자리에 있습니다.
+      -->
+      <div class="side__body">
+        <ul class="nav" id="boardNav"></ul>
+        <p class="side__why" id="boardWhy" hidden>컷이 아직 없습니다. 위의 <b>스토리 디벨롭</b>에서
+          이야기를 컷으로 나누면 여기 올라옵니다.</p>
+      </div>
     </section>
 
     <section class="side" data-side="char" data-coach="side-char">
       <h2 class="mono h">인물 <span class="count" id="charCount"></span></h2>
-      <ul class="nav" id="charNav"></ul>
-      <button class="btn btn--ghost btn--wide" id="newChar">+ 인물 추가</button>
-      <p class="side__why">컷에 쓸 얼굴을 만드는 곳입니다. 인물을 고르면 구도 여섯 벌이 보드에 뜹니다.</p>
+      <div class="side__body">
+        <ul class="nav" id="charNav"></ul>
+        <button class="btn btn--ghost btn--wide" id="newChar">+ 인물 추가</button>
+        <p class="side__why">컷에 쓸 얼굴을 만드는 곳입니다. 인물을 고르면 구도 여섯 벌이 보드에 뜹니다.</p>
 
-      <div id="charMeta" hidden>
-        <label class="f">
-          <span class="f__label"><span class="mono">이름</span></span>
-          <input type="text" id="nameIn" placeholder="인물 이름">
-        </label>
-        <label class="f">
-          <span class="f__label"><span class="mono">설정</span></span>
-          <textarea id="briefIn" rows="4" spellcheck="false" placeholder="나이 · 옷 · 분위기. 구도 생성의 입력이 됩니다"></textarea>
-        </label>
+        <div id="charMeta" hidden>
+          <label class="f">
+            <span class="f__label"><span class="mono">이름</span></span>
+            <input type="text" id="nameIn" placeholder="인물 이름">
+          </label>
+          <label class="f">
+            <span class="f__label"><span class="mono">설정</span></span>
+            <textarea id="briefIn" rows="4" spellcheck="false" placeholder="나이 · 옷 · 분위기. 구도 생성의 입력이 됩니다"></textarea>
+          </label>
+        </div>
       </div>
     </section>
   </aside>

@@ -38,9 +38,9 @@ export const CAPS = {
     group: '컷 내용',
     // 기본값을 domain/panels.js 에서 되읽습니다. 여기에 역할 이름을 다시 적으면 두 곳이 갈라집니다
     roles: Object.keys(ROLES).filter((r) => canEditContent(r, { status: 'draft' })),
-    note: '작업 내용·대사·카메라. 승인된 컷은 역할과 무관하게 잠깁니다',
+    note: '구도 이름·작업 지시, 그림 만들기. 승인된 컷은 역할과 무관하게 잠깁니다',
   },
-  art: { label: '이미지 만들기', group: '컷 내용', roles: ART_ROLES, note: '스케치 올리기, AI 생성, 모델 고르기' },
+  art: { label: '이미지 만들기', group: '컷 내용', roles: ART_ROLES, note: '컷·구도 그리기, 스케치 올리기, 모델 고르기' },
   plan: { label: '기획 도구', group: '도구', roles: PLAN_ROLES, note: '이야기 기획, 컷을 대본으로, 대본 불러오기, 관계 그래프' },
   admin: { label: '관리 화면', group: '도구', roles: ADMIN_VIEW_ROLES, note: '로그와 기여도' },
   grant: { label: '역할 바꾸기', group: '도구', roles: ['admin'], note: '팀원의 역할을 다른 역할로 바꿉니다' },
