@@ -9,7 +9,7 @@
 import { GRAPH_SCHEMA } from './graph-schema.js'
 import { CAMERAS } from './panels.js'
 import { PROBES } from './graph-probes.js'
-import { numOr } from '../lib/guards.js'
+import { asList, numOr } from '../lib/guards.js'
 
 export const MODES = [
   { id: 'new', label: '새 스토리', hint: '프롬프트 하나로 이야기·인물·컷을 처음부터' },
@@ -508,3 +508,108 @@ export function freeDirectionPrompt(userInput, seed, contextPack, existingGraph)
 }
 
 /** 이름으로 와도 노드를 찾는다. 역기입 엣지의 s·o 는 이름으로 오는 경우가 많다 */
+
+/* ── 씨앗의 제목과 순서를 묻는 자리 ─────────────────────────────────────────── */
+/*
+ * 탐지기는 무엇을 찾았는지만 알고, 그것을 카드의 제목으로 옮기는 표는 seed-text.js 에
+ * 탐지기마다 한 벌씩 있다. 그래서 같은 탐지기가 씨앗 셋을 찾으면 제목 셋이 같은 틀로
+ * 찍혔고, 목록에서 「치르지 않은 대가」 카드 셋을 가릴 수 없었다. 순서도 손으로 적어 둔
+ * 가중치(PROBES 의 weight)에서 나왔다.
+ *
+ * 그 둘만 모델에게 묻는다. 제목은 한 번에 다 묻고(씨앗마다 부르면 열두 번 왕복이다),
+ * 순서는 점수 상위 몇 개만 묻는다. 받은 답을 걸러 쓰는 것은 domain/seed-refine.js 이고
+ * 부르는 것은 services/planner.js 의 refineSeeds 다. 실패하면 전과 똑같이 돈다.
+ */
+
+/** 제목 응답 토큰 상한. 열두 줄짜리 짧은 JSON 이라 이만큼이면 넉넉하다 */
+export const SEED_TITLE_TOKENS = 1200
+/** 순위 응답 토큰 상한. 한 줄 이유가 붙어 제목보다 조금 길다 */
+export const SEED_RANK_TOKENS = 1400
+/** 소재 한 줄에 붙이는 설명 상한 */
+const SEED_DESC = 90
+
+/**
+ * 작가가 그대로 읽는 글에서 막는 말. 제목과 순위 이유는 씨앗 카드에 그대로 찍힌다.
+ * 여기서 한 번 막고, 받은 뒤에 seed-refine.js 의 hasJargon 이 한 번 더 걸러낸다.
+ */
+const NO_JARGON = '- 작가가 화면에서 그대로 읽는 글이다. 프로그래밍 용어와 그래프 데이터베이스 용어'
+  + '(노드·엣지·그래프·술어·식별자·속성 같은 것), 영문 관계어(loves, mentor_of, targets, conceals 같은 것),'
+  + ' t=0 같은 시점 표기, 코드 변수명이나 JSON 의 키 이름을 쓰지 않는다. 인물과 사건의 말로만 쓴다.'
+
+/**
+ * 씨앗 목록을 프롬프트의 본문으로. 번호는 1부터고 응답의 n 이 이 번호를 가리킨다.
+ * 탐지기 유형은 대괄호에 적어 둔다 — 화면에서도 태그로 따로 서므로 제목에 옮기지 말라고
+ * 규칙에서 못 박는다.
+ */
+const seedLines = (seeds, store) => asList(seeds).map((s, i) => {
+  const label = PROBES[s?.probe]?.label || '이야기 소재'
+  const focus = (s?.focus || [])
+    .map((id) => (store?.getNode ? nm(store, id) : String(id)))
+    .filter(Boolean)
+  return `${i + 1}. [${label}] ${focus.join(', ') || '(관련 인물·사건 없음)'}`
+    + `\n   ${oneLine(s?.desc, SEED_DESC) || oneLine(s?.title, SEED_DESC) || '(설명 없음)'}`
+}).join('\n')
+
+/**
+ * 씨앗 여러 개의 제목을 한 번에 짓는 프롬프트.
+ *
+ * @param {Array<Object>} seeds - findSeeds 가 준 씨앗 배열
+ * @param {Object} store - GraphStore. 초점 노드의 이름을 풀어 적는 데만 쓴다
+ * @returns {string} Bedrock 에 그대로 넣는 프롬프트. 길이는 PROMPT_MAX 이하가 보장된다
+ */
+export function seedTitlesPrompt(seeds, store) {
+  const n = asList(seeds).length
+  return withBody(
+    [
+      `아래는 한 작품에서 찾아낸 이야기 소재 ${n}개다. 소재마다 어울리는 제목을 하나씩 짓는다.`,
+      '이 제목은 작가가 무엇을 쓸지 고르는 목록에 그대로 찍힌다.',
+      '',
+    ],
+    seedLines(seeds, store),
+    [
+      '',
+      JSON_ONLY,
+      '{"titles":[{"n":1,"title":"제목"}]}',
+      '',
+      '규칙',
+      `- 소재 ${n}개 모두에 제목을 붙인다. n 은 위 소재 번호를 그대로 쓴다.`,
+      '- 제목은 10자 이내로 짧게, 작가가 눌러 보고 싶어지는 말로 짓는다.',
+      '- 등장인물의 이름이나 사건의 이름을 제목에 넣는다.',
+      '- 대괄호 안의 유형 이름은 제목에 옮기지 않는다. 그 말은 화면에 태그로 따로 선다.',
+      `- ${n}개의 제목이 서로 겹치지 않게 한다. 같은 유형이라도 다른 제목이어야 한다.`,
+      NO_JARGON,
+      '- 한국어로 쓴다.',
+    ],
+  )
+}
+
+/**
+ * 씨앗들을 드라마적 매력도 순으로 다시 세우는 프롬프트. 점수 상위 몇 개만 넣어 부른다.
+ *
+ * @param {Array<Object>} seeds - 점수 순으로 자른 씨앗 배열 (RANK_MAX 개까지)
+ * @param {Object} store - GraphStore. 초점 노드의 이름을 풀어 적는 데만 쓴다
+ * @returns {string} Bedrock 에 그대로 넣는 프롬프트. 길이는 PROMPT_MAX 이하가 보장된다
+ */
+export function seedRankPrompt(seeds, store) {
+  const n = asList(seeds).length
+  return withBody(
+    [
+      '아래 이야기 소재들을 드라마적 매력도 순으로 정렬한다.',
+      '판단 기준: 관객이 다음 회가 궁금해지는 정도, 캐릭터 갈등의 깊이, 반전 가능성.',
+      '',
+    ],
+    seedLines(seeds, store),
+    [
+      '',
+      JSON_ONLY,
+      '{"ranking":[{"n":1,"rank":1,"why":"이 순위인 이유 한 줄"}]}',
+      '',
+      '규칙',
+      `- 소재 ${n}개에 1위부터 ${n}위까지 빠짐없이 매긴다. 같은 순위를 두 번 쓰지 않는다.`,
+      '- n 은 위 소재 번호를 그대로 쓰고, rank 에 순위를 적는다.',
+      '- why 는 30자 이내의 한 줄이다. 왜 그 자리인지만 적는다.',
+      NO_JARGON,
+      '- 한국어로 쓴다.',
+    ],
+  )
+}

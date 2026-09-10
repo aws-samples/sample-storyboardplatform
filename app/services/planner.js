@@ -8,7 +8,8 @@ import { deriveEdges } from '../domain/graph-schema.js'
 import { normalizeGraph, validateAgainstCanon } from '../domain/graph-rules.js'
 import { normalizePlan } from '../domain/panels.js'
 import { asList } from '../lib/guards.js'
-import { PROMPT_SAFE, chunkText, SUMMARY_CHARS, summarizePrompt, extractGraphPrompt, CTX_BUDGET, contextPackPrompt, BRANCH_TOKENS, branchPrompt, freeDirectionPrompt, outlinePrompt, perBeat, BATCH, HARD_MAX, cutsPrompt } from '../domain/prompts.js'
+import { PROMPT_SAFE, chunkText, SUMMARY_CHARS, summarizePrompt, extractGraphPrompt, CTX_BUDGET, contextPackPrompt, BRANCH_TOKENS, branchPrompt, freeDirectionPrompt, outlinePrompt, perBeat, BATCH, HARD_MAX, cutsPrompt, SEED_TITLE_TOKENS, SEED_RANK_TOKENS, seedTitlesPrompt, seedRankPrompt } from '../domain/prompts.js'
+import { RANK_MAX, TITLE_ASK_MAX, applySeedTitles, applySeedRank } from '../domain/seed-refine.js'
 import { finishStory, localBranches, localOutline, localCuts, BRANCH_OUTLINE_TOKENS, branchOutlinePrompt, localBranchOutline } from '../domain/local-fallback.js'
 import { parseJson } from '../domain/json-repair.js'
 import { isDenied } from '../domain/permissions.js'
@@ -378,3 +379,84 @@ export async function planScript(net, cuts, options = {}) {
  * @param {boolean} [options.whole=true] 작품 전체인지. false 면 FADE IN/OUT 을 붙이지 않는다
  * @returns {string} 대본 텍스트. 컷이 없으면 빈 문자열
  */
+
+/* ── 씨앗 다듬기 ─────────────────────────────────────────────────────────────── */
+/*
+ * 탐지는 그대로 두고 제목과 순서만 모델에게 묻습니다. 탐지기(graph-probes.js)가 찾은 것과
+ * 수학 스코어는 여전히 1차입니다 — 여기서 하는 일은 그 위에 한 겹 얹는 것뿐입니다.
+ *
+ * 호출은 두 번입니다. 씨앗마다 부르면 열두 번 왕복이 되므로 제목은 한 번에 다 묻고, 순서는
+ * 점수 상위 RANK_MAX 개만 묻습니다. 두 물음은 서로를 기다릴 이유가 없어 나란히 보냅니다.
+ * 한쪽이 실패해도 다른 쪽은 적용됩니다(Promise.allSettled) — 실패한 쪽만 전과 같이 돕니다.
+ *
+ * 답을 걸러 쓰는 규칙은 domain/seed-refine.js 에 있습니다. 기술 용어가 섞인 제목·이유는
+ * 거기서 버려지고 탐지기 제목이 그대로 남습니다.
+ */
+
+/**
+ * 씨앗 제목을 모델이 지어 준 것으로 바꾼다. 순서는 건드리지 않는다.
+ *
+ * @param {Object} net - net.plan 을 가진 객체. 없으면 받은 배열을 그대로 돌려준다
+ * @param {Array<Object>} seeds - findSeeds 가 준 씨앗 배열
+ * @param {Object} store - GraphStore
+ * @param {Object} [opts]
+ * @param {string} [opts.model] 쓸 모델. 없으면 리졸버 기본값
+ * @returns {Promise<Array<Object>>} 제목을 입힌 배열. 못 쓸 답이면 원래 제목이 남는다
+ */
+export async function nameSeeds(net, seeds, store, opts = {}) {
+  const list = asList(seeds)
+  if (!list.length || !net?.plan) return list
+  return applySeedTitles(list, await seedTitlesRaw(net, list.slice(0, TITLE_ASK_MAX), store, opts))
+}
+
+/**
+ * 씨앗 순서를 모델이 매긴 순위로 다시 세운다. 점수 상위 RANK_MAX 개만 물어본다.
+ *
+ * @param {Object} net - net.plan 을 가진 객체. 없으면 받은 배열을 그대로 돌려준다
+ * @param {Array<Object>} seeds - 점수 내림차순으로 정렬된 씨앗 배열
+ * @param {Object} store - GraphStore
+ * @param {Object} [opts]
+ * @param {string} [opts.model] 쓸 모델. 없으면 리졸버 기본값
+ * @returns {Promise<Array<Object>>} 다시 세운 배열. 못 쓸 답이면 점수 순서가 남는다
+ */
+export async function rankSeeds(net, seeds, store, opts = {}) {
+  const list = asList(seeds)
+  if (list.length < 2 || !net?.plan) return list
+  return applySeedRank(list, await seedRankRaw(net, list.slice(0, RANK_MAX), store, opts))
+}
+
+const seedTitlesRaw = (net, seeds, store, opts) =>
+  ask(net, seedTitlesPrompt(seeds, store), SEED_TITLE_TOKENS, { model: opts?.model })
+
+const seedRankRaw = (net, seeds, store, opts) =>
+  ask(net, seedRankPrompt(seeds, store), SEED_RANK_TOKENS, { model: opts?.model })
+
+/**
+ * 제목과 순서를 한 번에 다듬는다. 화면(pages/story-graph.js)이 부르는 자리다.
+ *
+ * 던지지 않는다. 씨앗 목록은 이미 화면에 그려져 있고, 이것은 그 위에 얹는 일이라
+ * 실패가 화면을 멈출 이유가 없다. 무엇이 실패했는지는 콘솔에만 남긴다.
+ *
+ * @param {Object} net - net.plan 을 가진 객체. 없으면(로컬 모드) 받은 배열을 그대로 돌려준다
+ * @param {Array<Object>} seeds - findSeeds 가 준 씨앗 배열 (점수 내림차순)
+ * @param {Object} store - GraphStore
+ * @param {Object} [opts]
+ * @param {string} [opts.model] 쓸 모델. 화면에서 고른 것을 그대로 넘긴다
+ * @returns {Promise<Array<Object>>} 제목·순서를 다듬은 배열. 길이는 그대로다
+ */
+export async function refineSeeds(net, seeds, store, opts = {}) {
+  const list = asList(seeds)
+  if (!list.length || !net?.plan) return list
+  const [titles, rank] = await Promise.allSettled([
+    seedTitlesRaw(net, list.slice(0, TITLE_ASK_MAX), store, opts),
+    list.length > 1 ? seedRankRaw(net, list.slice(0, RANK_MAX), store, opts) : null,
+  ])
+  let out = list
+  if (titles.status === 'fulfilled') out = applySeedTitles(out, titles.value)
+  else console.warn('[story] 씨앗 제목을 받지 못했다. 탐지기 제목을 그대로 쓴다', titles.reason?.message)
+  // 순위는 제목을 입힌 뒤에 적용한다. 두 응답의 n 은 둘 다 처음 받은 순서를 가리키고
+  // applySeedTitles 는 순서를 건드리지 않으므로, 이 차례로 겹쳐도 서로 어긋나지 않는다
+  if (rank.status === 'fulfilled') { if (rank.value) out = applySeedRank(out, rank.value) }
+  else console.warn('[story] 씨앗 순서를 받지 못했다. 점수 순서를 그대로 쓴다', rank.reason?.message)
+  return out
+}

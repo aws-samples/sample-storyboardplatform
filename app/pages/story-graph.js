@@ -17,8 +17,10 @@
 // 조회는 전부 graph-engine.js 의 GraphStore 를 거친다. 배포에서는 같은 저장소가
 // Neptune 을 사실로 두고 돈다 (hasGraph). 이 화면이 아는 차이는 save·flush 뿐이다.
 import { createGraphStore, loadGraphStore, DEFAULT_PROJECT } from '../services/graph-store.js'
-import { findSeeds, PROBES } from '../domain/graph-probes.js'
-import { planGraph, planBranches, planFreeBranches, planBranchOutline, planCuts, planScript } from '../services/planner.js'
+// PROBES(탐지기 이름·힌트)는 여기서 더 쓰지 않습니다. 카드에서 이름표를 뺐고, 모델에게
+// 보내는 글이 그 이름을 쓰는 자리는 domain/prompts.js 한 곳입니다
+import { findSeeds } from '../domain/graph-probes.js'
+import { planGraph, planBranches, planFreeBranches, planBranchOutline, planCuts, planScript, refineSeeds } from '../services/planner.js'
 import { localBranches, branchToSpec } from '../domain/local-fallback.js'
 import { scriptToText, scriptBlob, scriptFileName, SCRIPT_FORMATS } from '../domain/script-format.js'
 import { applyWriteback, validateWritebackBeforeApply } from '../domain/graph-writeback.js'
@@ -135,6 +137,8 @@ let EXPAND = null       // 분기 → 대본 흐름의 상태. null 이면 분�
 let EPISODES = []       // 이 화면에서 만든 회차. 대본화 탭이 여기서 컷을 가져온다
 let SCRIPT = { ep: 0, format: 'drama', text: '', busy: false, err: '' }
 let NEW_SEEDS = new Set() // 역기입 뒤에 새로 나온 씨앗의 키. 카드에 NEW 뱃지를 붙인다
+let SEED_BUSY = false   // 씨앗 제목·순서를 모델에게 묻고 있는 중. 목록 위에 한 줄로 적는다
+let SEED_GEN = 0        // 그 물음의 세대. 판이 바뀌면 앞의 응답은 버린다 (refreshSeedText)
 let NAV = null           // 상단 기능 탭. mountNav 가 만든다
 let LAST_DEV_TAB = 'seeds' // 상단 [스토리 디벨롭] 으로 돌아왔을 때 열어 줄 안쪽 탭
 /**
@@ -309,6 +313,62 @@ function build(store, { keepSeeds = null } = {}) {
   renderFreeOnly(SEEDS.length
     ? '씨앗을 골라 스토리를 생성합니다. 방향이 이미 있다면 아래에 바로 적어도 됩니다.'
     : '탐지된 씨앗이 없습니다. 방향을 직접 주면 그래프 전체를 컨텍스트로 분기를 만듭니다.')
+  // 카드는 이미 다 그려졌습니다. 제목과 순서를 다듬는 것은 그 위에 얹는 일이라 기다리지 않습니다
+  refreshSeedText()
+}
+
+/*
+ * 씨앗 카드의 제목과 순서를 모델에게 물어 다듬습니다 (services/planner.js 의 refineSeeds).
+ *
+ * 기다리지 않고 부릅니다. 탐지는 브라우저에서 끝나 카드가 이미 서 있으므로, 왕복이 끝나면
+ * 그 자리의 제목과 순서만 바뀝니다. 실패하면 아무것도 바뀌지 않고 탐지기 제목과 점수
+ * 순서가 그대로 남습니다.
+ *
+ * 부르지 않는 자리가 넷입니다.
+ *   로컬 모드          모델이 없습니다. 카드는 탐지기 제목으로 그대로 섭니다
+ *   목 씨앗(?seeds=mock) 그 제목으로 안내가 짜여 있습니다. 뒤에서 갈아 끼우면 안내와 어긋납니다
+ *   예시·안내 재생 중   짚어 둔 카드를 다시 그리면 안내가 가리키던 자리가 사라집니다
+ *   기획 권한이 없을 때 서버가 어차피 튕깁니다. 왕복하지 않고 조용히 지나갑니다
+ */
+/**
+ * 다듬은 씨앗을 원래 순서로 되돌려 놓습니다. 다듬어진 제목만 살립니다.
+ *
+ * @param {Array<Object>} was - 물어보기 전의 씨앗 배열 (점수 순서)
+ * @param {Array<Object>} now - 제목·순서를 다듬은 배열. 같은 씨앗들이 순서만 다릅니다
+ * @returns {Array<Object>} was 의 순서로 선 배열
+ */
+function sameOrder(was, now) {
+  const by = new Map(now.map((s) => [seedKey(s), s]))
+  return was.map((s) => by.get(seedKey(s)) || s)
+}
+
+async function refreshSeedText() {
+  if (!NET || !SEEDS.length) return
+  if (SEED_SRC === 'mock' || guiding() || demoActive()) return
+  if (configured && !allowed('plan', myRole())) return
+  const gen = ++SEED_GEN
+  const asked = SEEDS
+  SEED_BUSY = true
+  renderSeeds()
+  try {
+    const next = await refineSeeds(NET, asked, STORE, { model: MODEL() })
+    // 그 사이에 판을 다시 짓거나 역기입을 했으면 이 답은 다른 씨앗의 것입니다
+    if (gen !== SEED_GEN || SEEDS !== asked) return
+    /*
+     * 기다리는 사이에 카드를 고른 사람이 있으면 순서는 건드리지 않습니다. 고른 카드도
+     * 만들어 둔 스토리도 목록의 몇 번째인지로만 잡혀 있어서(CUR.seed · STORIES), 목록이
+     * 다시 서면 같은 번호가 다른 카드를 가리킵니다. 제목은 그 자리에 그대로 얹습니다.
+     */
+    SEEDS = CUR.seed < 0 ? next : sameOrder(asked, next)
+  } catch (err) {
+    // 던지지 않는 함수지만(refineSeeds) 프롬프트를 짓다 걸릴 수 있습니다. 화면은 그대로 둡니다
+    console.warn('[story-graph] 씨앗 제목·순서를 다듬지 못했다', err?.message)
+  } finally {
+    if (gen === SEED_GEN) {
+      SEED_BUSY = false
+      renderSeeds()
+    }
+  }
 }
 
 // ── 그래프 그리기 ─────────────────────────────────────────────────────────────
@@ -402,8 +462,20 @@ function showNode(id) {
 
 const hideNode = () => { $('nodeCard').hidden = true }
 
-// ── 씨앗 ─────────────────────────────────────────────────────────────────────
-const probeLabel = (id) => PROBES[id]?.label || id
+/*
+ * ── 씨앗 ─────────────────────────────────────────────────────────────────────
+ *
+ * 카드에서 탐지기 이름표(「치르지 않은 대가」 · 「같은 것을 원하는 자들」 …)를 뺐습니다.
+ * 그 자리에 모델이 붙인 제목(s.title)만 남습니다.
+ *
+ * 이름표는 탐지기가 무엇을 찾았는지를 말했지만 카드마다 제목과 두 줄로 겹쳐 서서,
+ * 읽는 사람은 먼저 온 이름표를 제목으로 읽었습니다. 열두 종의 이름은 이 도구를 만든
+ * 사람의 말이고 기획자가 고를 때 쓰는 말이 아닙니다.
+ *
+ * 탐지기 값(s.probe)은 그대로 둡니다. 카드 머리의 파스텔 색(PROBE_TINT)이 그것으로
+ * 갈리고, 모델에게 보내는 글(domain/prompts.js)과 씨앗을 알아보는 키(seedKey)도
+ * 이것을 씁니다. UI 에서만 안 보입니다.
+ */
 
 /**
  * 씨앗 하나를 알아보는 키. 탐지기 + 초점 노드다 (graph-probes.js 의 trim 이 쓰는 것과 같다).
@@ -426,13 +498,13 @@ function renderSeeds() {
     <div class="seed-card ${i === CUR.seed ? 'on' : ''}${fresh ? ' is-new' : ''}" style="${tint(s.probe)}">
       ${fresh ? '<div class="seed-new-tag">세계관 업데이트 후 새로 발견</div>' : ''}
       <div class="seed-head">
-        <span class="probe-tag">${esc(probeLabel(s.probe))}</span>
+        <div class="seed-title" data-focus="${i}">${esc(s.title)}</div>
         ${fresh ? '<span class="new-badge">NEW</span>' : ''}
         <span class="seed-score">▲${Number(s.score).toFixed(2)}</span>
       </div>
       <div class="seed-body">
-        <div class="seed-title" data-focus="${i}">${esc(s.title)}</div>
         <div class="seed-rationale">${esc(s.desc)}</div>
+        ${s.why ? `<div class="seed-why">${esc(s.why)}</div>` : ''}
         <div class="seed-focus">초점: ${esc((s.focus || []).map((id) => STORE.getNode(id)?.name || id).join(', '))}</div>
         <button class="btn btn--wide" data-seed="${i}">스토리 생성</button>
       </div>
@@ -444,7 +516,12 @@ function renderSeeds() {
     ? `<button class="btn btn--line btn--wide" id="moreSeeds">더 보기 (+${SEEDS.length - shown.length}${
       hiddenNew ? `, NEW ${hiddenNew}개` : ''})</button>`
     : ''
-  list.innerHTML = cards + more
+  // 제목과 순서를 묻는 사이에도 카드는 그대로 씁니다. 무엇이 바뀔지만 한 줄로 알려 줍니다
+  const busy = SEED_BUSY
+    ? '<div class="hint" style="margin:0 0 12px"><span class="spin"></span>'
+      + ' 소재마다 제목을 붙이고 눈길이 가는 순서로 고르고 있습니다…</div>'
+    : ''
+  list.innerHTML = busy + cards + more
   list.querySelectorAll('[data-seed]').forEach((b) => {
     b.onclick = () => pickSeed(Number(b.dataset.seed))
   })
@@ -761,7 +838,7 @@ function renderStory() {
   $('storyPanel').innerHTML = `
     <div class="story-content">
       ${seed ? `<div class="seed-info" style="${tint(seed.probe)}">
-        <span class="probe-tag">${esc(probeLabel(seed.probe))}</span>
+        <span class="seed-name">${esc(seed.title)}</span>
         <span class="seed-score">▲${Number(seed.score).toFixed(2)}</span>
         <span>초점: ${esc((seed.focus || []).map((id) => STORE.getNode(id)?.name || id).join(', '))}</span>
       </div>` : '<div class="seed-info">씨앗 없이 기획자의 방향으로 만든 분기입니다.</div>'}
@@ -1230,6 +1307,8 @@ async function applyToBoard() {
   // 판을 다시 그린 다음이어야 표시가 남는다 (render 가 표시를 지운다)
   VIS?.markNew(x.delta)
   renderSeeds()
+  // 새로 나온 씨앗도 제목을 지어 줍니다. NEW 뱃지는 초점으로 가리므로 제목이 바뀌어도 남습니다
+  refreshSeedText()
   renderExpand()
   // 기록 목록도 작가·PD 가 읽는 자리다. 개수는 종류별로 갈라 사람의 말로 적는다
   const said = writebackCountsKo(x.applied.changes, { done: true })
@@ -1884,6 +1963,93 @@ function toggleInput(hide) {
 }
 $('inputToggle').onclick = () => toggleInput(true)
 $('inputShow').onclick = () => toggleInput(false)
+
+/*
+ * ── 오른쪽 판 너비 ───────────────────────────────────────────────────────────
+ *
+ * 판(.sidebar)의 왼쪽 경계에 손잡이(#sideGrip)가 붙어 있고, 그것을 끌면 판이 왼쪽으로
+ * 넓어집니다. 갈리는 값은 --side-w 하나입니다. 판의 줄이 `1fr var(--side-w)` 이라
+ * 넓어진 만큼 그래프 자리가 좁아지고, 그래프는 자기 크기를 스스로 다시 잡습니다
+ * (components/graph-canvas.js 의 ResizeObserver). 여기서 부를 것이 없습니다.
+ *
+ * 넓힐 일이 실제로 있습니다. 이 판에 대본이 통째로 들어오고(pre.script) 분기 비교 표는
+ * 칸이 분기 수만큼 늘어납니다. 468px 에서는 대본이 열 자마다 줄바꿈되고 표는 가로로
+ * 잘렸는데, 정작 그래프는 다 보고 나면 한동안 쳐다볼 일이 없습니다.
+ *
+ * 최소 300px · 최대 화면의 70%. 아래로 더 좁히면 통계 넷(.stats-bar)이 서로를 밀고,
+ * 위로 더 넓히면 판 위에 얹힌 카드 둘(입력·노드, 각 392px)이 그래프 자리에 못 앉습니다.
+ *
+ * 고른 너비는 localStorage 에 남깁니다(sb.sidew). 탭을 오갈 때마다 다시 끌어야 하면
+ * 넓혀 둔 뜻이 없습니다.
+ */
+const SIDE_MIN = 300
+const SIDE_DEF = 468
+const sideMax = () => Math.max(SIDE_MIN, Math.round(window.innerWidth * 0.7))
+/** 사람이 고른 너비. 창이 좁아 지금 그만큼 못 주는 때에도 이 값은 그대로 둡니다 */
+let SIDE_WANT = SIDE_DEF
+
+function applySide(keep) {
+  const w = Math.min(sideMax(), Math.max(SIDE_MIN, Math.round(SIDE_WANT)))
+  document.documentElement.style.setProperty('--side-w', `${w}px`)
+  const grip = $('sideGrip')
+  if (grip) {
+    grip.setAttribute('aria-valuenow', String(w))
+    grip.setAttribute('aria-valuemin', String(SIDE_MIN))
+    grip.setAttribute('aria-valuemax', String(sideMax()))
+  }
+  if (keep) { try { localStorage.setItem('sb.sidew', String(w)) } catch { /* 사생활 모드 */ } }
+  return w
+}
+
+/** @param {number} px - 바라는 판 너비 @param {boolean} [keep] - localStorage 에 남길지 */
+const setSide = (px, keep = true) => {
+  SIDE_WANT = Math.min(sideMax(), Math.max(SIDE_MIN, Math.round(px)))
+  return applySide(keep)
+}
+
+function wireSideResize() {
+  const grip = $('sideGrip')
+  if (!grip) return
+  let saved = 0
+  try { saved = Number(localStorage.getItem('sb.sidew')) } catch { /* 사생활 모드 */ }
+  setSide(saved > 0 ? saved : SIDE_DEF, false)
+
+  /*
+   * 끄는 동안의 pointermove 는 창에서 받습니다. 손잡이는 7px 이라 손이 조금만 앞서 가도
+   * 벗어나고, 그때 손잡이에서만 받고 있으면 끌기가 그 자리에서 끊깁니다. setPointerCapture
+   * 대신 창에 거는 이유는 판 안쪽이 스크롤 영역이라 캡처가 그쪽 제스처와 겹치는 것입니다.
+   */
+  const onMove = (e) => setSide(window.innerWidth - e.clientX)
+  const stop = () => {
+    grip.classList.remove('on')
+    document.body.classList.remove('side-drag')
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', stop)
+    window.removeEventListener('pointercancel', stop)
+  }
+  grip.addEventListener('pointerdown', (e) => {
+    if (e.button) return
+    e.preventDefault() // 판 안의 글이 끌기와 같이 잡히지 않게
+    grip.classList.add('on')
+    document.body.classList.add('side-drag')
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', stop)
+    window.addEventListener('pointercancel', stop)
+  })
+  // 두 번 누르면 처음 너비로. 넓혀 놓고 되돌리는 길이 끌기 말고도 하나 있어야 합니다
+  grip.addEventListener('dblclick', () => setSide(SIDE_DEF))
+  // 손 대신 화살표로도 잡습니다. 24px 씩, Home 은 처음 너비입니다
+  grip.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft') setSide(SIDE_WANT + 24)
+    else if (e.key === 'ArrowRight') setSide(SIDE_WANT - 24)
+    else if (e.key === 'Home') setSide(SIDE_DEF)
+    else return
+    e.preventDefault()
+  })
+  // 창이 좁아지면 70% 천장도 같이 내려옵니다. 고른 값은 두고 지금 주는 폭만 줄입니다
+  window.addEventListener('resize', () => applySide(false))
+}
+wireSideResize()
 
 const drop = $('inputCard')
 drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('drop') })
