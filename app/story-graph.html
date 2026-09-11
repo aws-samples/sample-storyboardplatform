@@ -41,6 +41,11 @@
     --sh1: var(--sb-sh);
     --sh2: var(--sb-sh-lg);
     --r: 14px;
+    /*
+     * 오른쪽 판의 너비. 사람이 판 왼쪽 손잡이(.side-grip)를 끌면 이 값만 갈린다
+     * (story-graph.js 의 wireSideResize). 468px 은 끌기 전의 너비다.
+     */
+    --side-w: 468px;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   [hidden] { display: none !important; }
@@ -50,8 +55,8 @@
     font-size: 15px; line-height: 1.7; letter-spacing: -.005em;
     height: 100vh; overflow: hidden; -webkit-font-smoothing: antialiased;
   }
-  /* 줄: 위 띠 · 기능 탭 바 · 내용 */
-  .app { display: grid; grid-template-columns: 1fr 468px; grid-template-rows: 66px auto 1fr; height: 100vh; }
+  /* 줄: 위 띠 · 기능 탭 바 · 내용. 오른쪽 칸의 너비는 --side-w 한 곳에서 온다 */
+  .app { display: grid; grid-template-columns: 1fr var(--side-w); grid-template-rows: 66px auto 1fr; height: 100vh; }
   /* 탭 바는 두 칸을 다 씁니다. 탭 바 모양은 nav-tabs.js 가 들고 있습니다 */
   #navMount { grid-column: 1 / -1; min-width: 0; }
   #navMount { z-index: 19; }
@@ -66,7 +71,37 @@
   .who { font-size: 14px; font-weight: 700; color: var(--ink2); white-space: nowrap; }
   .grow { flex: 1; }
   .graph-area { position: relative; overflow: hidden; background: var(--bg); }
-  .sidebar { background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; overflow: hidden; }
+  /* position 은 손잡이(.side-grip)를 이 판의 왼쪽 경계에 앉히기 위한 것이다 */
+  .sidebar { position: relative; background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; overflow: hidden; }
+
+  /*
+   * ── 판을 넓히는 손잡이 ──────────────────────────────────────────────────────
+   *
+   * 판의 왼쪽 경계에 세로로 붙는다. 잡히는 자리는 손끝을 위해 7px 로 넓게 두고, 눈에
+   * 보이는 선은 가운데 1px 만 그린다(::after). 늘 보이지만 판의 경계선처럼 보이고,
+   * 손이 올라가면 강조색으로 「이건 잡을 수 있는 것」이라고 말한다.
+   *
+   * 판 밖(left: -3px)이 아니라 안쪽(left: 0)에 두는 이유는 .sidebar 가 overflow:hidden
+   * 이라 밖으로 나간 만큼이 잘리는 것이다. 안쪽 7px 은 판마다 18px 여백이 있어 글자를
+   * 가리지 않는다(.panel-scroll · .stats-bar).
+   */
+  .side-grip {
+    position: absolute; left: 0; top: 0; bottom: 0; width: 7px; z-index: 12;
+    background: none; border: none; padding: 0; cursor: col-resize; touch-action: none;
+  }
+  .side-grip::after {
+    content: ''; position: absolute; left: 3px; top: 0; bottom: 0; width: 1px;
+    background: var(--line2); transition: background .14s, box-shadow .14s;
+  }
+  .side-grip:hover::after, .side-grip.on::after, .side-grip:focus-visible::after {
+    background: var(--acc); box-shadow: 0 0 0 1px var(--acc-soft);
+  }
+  .side-grip:focus { outline: none; }
+  /*
+   * 끄는 동안에는 온 화면의 글자를 잡지 못하게 한다. 판 안에는 대본과 표가 있어서,
+   * 이것이 없으면 옆으로 끄는 손이 글을 긁어 놓고 끌기가 그쪽에 먹힌다.
+   */
+  body.side-drag, body.side-drag * { cursor: col-resize !important; user-select: none !important; }
   #network { width: 100%; height: 100%; }
 
   /* ── 버튼 · 입력 ────────────────────────────────────────────────────────── */
@@ -227,10 +262,19 @@
   .stat .n { font-size: 27px; font-weight: 800; line-height: 1.15; letter-spacing: -.03em; color: var(--ink); }
   .stat .l { font-size: 12.5px; font-weight: 600; color: var(--ink3); margin-top: 3px; }
 
-  .tabs { display: flex; gap: 7px; padding: 12px 14px; border-bottom: 1px solid var(--line2); background: var(--panel); flex-shrink: 0; }
+  /*
+   * 판을 300px 까지 좁힐 수 있으므로(손잡이) 넷이 다 못 들어가는 폭이 생긴다. 그때
+   * 이름을 세로로 접지 않고 띠가 옆으로 밀리게 둔다 — 「씨/앗」 처럼 두 줄로 접히면
+   * 탭이 탭으로 보이지 않는다. 스크롤바는 감춘다. 안 감추면 띠가 두 배로 높아진다.
+   */
+  .tabs {
+    display: flex; gap: 7px; padding: 12px 14px; border-bottom: 1px solid var(--line2);
+    background: var(--panel); flex-shrink: 0; overflow-x: auto; scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
   .tab {
     padding: 10px 18px; font-size: 15px; font-weight: 700; cursor: pointer; color: var(--ink3);
-    border-radius: 11px; transition: all .15s; user-select: none;
+    border-radius: 11px; transition: all .15s; user-select: none; white-space: nowrap; flex: 0 0 auto;
   }
   .tab:hover { color: var(--ink); background: var(--bg-soft); }
   .tab.active { color: var(--acc-ink); background: var(--acc-soft); }
@@ -256,6 +300,14 @@
     background: linear-gradient(135deg, var(--p1, var(--acc-soft)), var(--p2, var(--bg-soft)));
     border-bottom: 1px solid rgba(255,255,255,.7);
   }
+  /*
+   * 씨앗 카드 머리에는 모델이 붙인 제목과 점수만 든다. 예전에는 여기 탐지기 이름표
+   * (.probe-tag)가 서고 제목은 아래 본문 첫 줄이었다. 이름표를 빼면서 제목을 그 자리로
+   * 올렸다 — 머리에 점수만 남기면 카드가 숫자 하나로 시작한다.
+   *
+   * .probe-tag 규칙 자체는 남는다. 대본화 탭의 머리줄(renderExpand)이 분기 번호·이름을
+   * 같은 알약 모양으로 얹는다. 씨앗의 탐지기 이름을 적는 자리는 이제 없다.
+   */
   .probe-tag {
     font-size: 13px; font-weight: 800; letter-spacing: -.01em; color: var(--pi, var(--acc-ink));
     background: rgba(255,255,255,.75); border-radius: 999px; padding: 6px 13px; white-space: nowrap;
@@ -273,9 +325,18 @@
     background: var(--ok); border-radius: 999px; padding: 4px 9px; line-height: 1;
   }
   .seed-body { padding: 15px 16px 16px; }
-  .seed-title { font-size: 19px; font-weight: 800; line-height: 1.45; letter-spacing: -.02em; color: var(--ink); margin-bottom: 9px; cursor: pointer; }
+  /* 머리 안에서 남는 자리를 다 쓴다. min-width:0 이 없으면 긴 제목이 점수를 밀어낸다 */
+  .seed-title {
+    flex: 1; min-width: 0; font-size: 19px; font-weight: 800; line-height: 1.45;
+    letter-spacing: -.02em; color: var(--ink); cursor: pointer; overflow-wrap: break-word;
+  }
   .seed-title:hover { color: var(--acc-ink); }
   .seed-rationale { font-size: 15.5px; color: var(--ink2); line-height: 1.75; margin-bottom: 11px; }
+  /* 이 소재가 왜 이 자리인가. 순서를 고른 이유를 한 줄로 받아 적는다 (refineSeeds) */
+  .seed-why {
+    font-size: 13.5px; line-height: 1.6; color: var(--pi, var(--acc-ink));
+    border-left: 3px solid var(--p1, var(--acc-soft)); padding-left: 9px; margin-bottom: 11px;
+  }
   .seed-focus { font-size: 13.5px; color: var(--ink3); margin-bottom: 14px; }
 
   /* ── 스토리 · 분기 ──────────────────────────────────────────────────────── */
@@ -287,6 +348,8 @@
     border: 1px solid rgba(255,255,255,.8); border-radius: 14px; padding: 13px 15px;
     margin-bottom: 16px; font-size: 14px; color: var(--ink2); line-height: 1.6;
   }
+  /* 이 분기가 어느 씨앗에서 왔는지. 탐지기 이름표가 아니라 그 씨앗의 제목을 적는다 */
+  .seed-name { font-size: 15px; font-weight: 800; letter-spacing: -.015em; color: var(--ink); }
   .logline { color: var(--ink2); font-size: 16.5px; line-height: 1.8; margin-bottom: 16px; }
   .pivot-box {
     background: var(--warn-soft); border: 1px solid var(--sb-work-line); border-radius: 14px;
@@ -518,7 +581,13 @@
         <button class="btn" id="extractBtn" data-coach="extract">그래프 추출</button>
         <button class="btn btn--line" id="mockBtn">예시 대본으로 보기</button>
       </div>
-      <div class="hint" id="inputHint">최소 8자 이상. 추출은 Bedrock 연결이 필요합니다.</div>
+      <!--
+        여기에는 이 카드에 무엇을 어떻게 넣는지만 적습니다. 예전에는 「최소 8자 이상.
+        추출은 Bedrock 연결이 필요합니다.」였는데, 둘 다 넣기 전에 알 필요가 없는 말입니다.
+        여덟 자는 아무도 어기지 않고, Bedrock 은 이 화면을 쓰는 사람의 일이 아닙니다.
+        정말 필요할 때는 story-graph.js 의 extract 가 같은 자리에 그때 적습니다.
+      -->
+      <div class="hint" id="inputHint">시놉시스나 대본을 붙여 넣거나 .txt / .fdx 파일을 이 카드에 끌어 넣어주세요.</div>
     </section>
 
     <section class="card card--node" id="nodeCard" hidden>
@@ -531,6 +600,13 @@
   </div>
 
   <div class="sidebar">
+    <!--
+      판의 왼쪽 경계. 끌면 판이 왼쪽으로 넓어집니다(story-graph.js 의 wireSideResize).
+      최소 300px · 최대 화면의 70% 이고, 두 번 누르면 처음 너비로 돌아옵니다.
+      화살표로도 잡히도록 tabindex 와 separator 역할을 줍니다.
+    -->
+    <div class="side-grip" id="sideGrip" tabindex="0" role="separator" aria-orientation="vertical"
+         aria-label="오른쪽 판 너비" title="끌어서 판을 넓힙니다 · 두 번 누르면 처음 너비"></div>
     <div class="stats-bar" data-coach="stats">
       <div class="stat"><div class="n" id="s-nodes">-</div><div class="l">노드</div></div>
       <div class="stat"><div class="n" id="s-asserted">-</div><div class="l">명시 엣지</div></div>

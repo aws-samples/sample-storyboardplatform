@@ -28,15 +28,18 @@
   } = await import(`./domain/graph-probes.js?t=${Date.now()}`)
   const {
     extractGraphPrompt, chunkText, contextPackPrompt, branchPrompt, summarizePrompt,
-    freeDirectionPrompt
+    freeDirectionPrompt, seedTitlesPrompt, seedRankPrompt
   } = await import(`./domain/prompts.js?t=${Date.now()}`)
+  const {
+    RANK_MAX, TITLE_MAX, hasJargon, cleanSeedTitle, applySeedTitles, applySeedRank,
+  } = await import(`./domain/seed-refine.js?t=${Date.now()}`)
   const {
     scriptToText, scriptFormatPrompt, localScript, scriptBlob, scriptFileName,
     SCRIPT_FORMATS
   } = await import(`./domain/script-format.js?t=${Date.now()}`)
   const {
     summarizeForExtraction, planGraph, planCuts, planBranches, planFreeBranches,
-    planBranchOutline, planScript
+    planBranchOutline, planScript, nameSeeds, rankSeeds, refineSeeds
   } = await import(`./services/planner.js?t=${Date.now()}`)
   const { localBranches, branchToSpec, branchOutlinePrompt, localBranchOutline } = await import(`./domain/local-fallback.js?t=${Date.now()}`)
   const { parseJson } = await import(`./domain/json-repair.js?t=${Date.now()}`)
@@ -4169,6 +4172,202 @@
     const net = { plan: async () => { calls++; return { text: cut, stop: 'max_tokens' } } }
     const { out } = await withConsole(() => planBranches(net, seed0, seedStore))
     return calls === 1 && out.title === '잘렸지만 산다' && out.branches.length === 1
+  })())
+
+  // ── 씨앗 제목·순서 다듬기: seed-refine.js · seedTitlesPrompt · refineSeeds ───
+  // 탐지기 제목은 탐지기마다 한 벌이라 같은 유형의 카드 셋이 같은 틀로 찍힌다. 제목과
+  // 순서만 모델에게 묻고, 못 쓸 답은 버려서 탐지기 제목·점수 순서로 되돌린다.
+  // 여기서 못 박는 것은 폴백이다. 모델이 없거나 이상하게 답해도 화면은 전과 같이 돈다.
+  const mkSeeds = (n) => Array.from({ length: n }, (_, i) => ({
+    probe: 'dangling_consequence',
+    score: Math.round((2 - i * 0.1) * 100) / 100,
+    title: `아직 결과가 남지 않은 사건: 사건${i + 1}`,
+    desc: `사건${i + 1} 이후 아무런 후속 전개가 없습니다`,
+    focus: [`e${i + 1}`],
+  }))
+  const titleRes = (titles) => ({ titles: titles.map((t, i) => ({ n: i + 1, title: t })) })
+
+  ok('제목 프롬프트는 소재를 번호로 세우고 규칙을 못 박는다', (() => {
+    const p = seedTitlesPrompt(findSeeds(seedStore).slice(0, 3), seedStore)
+    return p.includes('"titles"') && p.includes('10자 이내') && p.includes('겹치지 않게')
+      && p.includes('1. [') && p.includes('가온')
+  })())
+  ok('순위 프롬프트는 판단 기준과 한 줄 이유를 요구한다', (() => {
+    const p = seedRankPrompt(findSeeds(seedStore).slice(0, 3), seedStore)
+    return p.includes('드라마적 매력도') && p.includes('반전 가능성')
+      && p.includes('"ranking"') && p.includes('"why"') && p.includes('1위부터 3위까지')
+  })())
+  ok('두 프롬프트 모두 기술 용어를 쓰지 말라고 적는다', (() => {
+    const seeds = findSeeds(seedStore).slice(0, 3)
+    return [seedTitlesPrompt(seeds, seedStore), seedRankPrompt(seeds, seedStore)].every((p) =>
+      p.includes('노드·엣지') && p.includes('loves') && p.includes('t=0')
+      && p.includes('JSON 의 키 이름') && p.includes('한국어로 쓴다'))
+  })())
+  ok('씨앗이 없거나 판이 없어도 프롬프트는 만들어진다',
+    typeof seedTitlesPrompt([], seedStore) === 'string' && typeof seedRankPrompt([], null) === 'string')
+
+  ok('받은 제목을 카드에 입히고 탐지기 제목은 남겨 둔다', (() => {
+    const src = mkSeeds(3)
+    const out = applySeedTitles(src, titleRes(['첫 단추', '두 번째 밤', '세 번째 편지']))
+    return out.length === 3 && out[0].title === '첫 단추' && out[2].title === '세 번째 편지'
+      && out[0].baseTitle === src[0].title && out[0].desc === src[0].desc
+      && out.every((s, i) => s.focus[0] === `e${i + 1}` && s.score === src[i].score
+        && s.probe === src[i].probe)
+  })())
+  ok('제목은 번호를 따라 붙는다. 응답이 뒤섞여 와도 맞다', (() => {
+    const out = applySeedTitles(mkSeeds(3), { titles: [{ n: 3, title: '셋째' }, { n: 1, title: '첫째' }] })
+    return out[0].title === '첫째' && out[2].title === '셋째'
+      && out[1].title.startsWith('아직 결과가')
+  })())
+  ok('기술 용어가 섞인 제목은 버리고 탐지기 제목을 쓴다', (() => {
+    const src = mkSeeds(5)
+    const out = applySeedTitles(src, titleRes(
+      ['노드 세 개의 밤', 'loves 가 끊긴다', 't=0 의 사건', '엣지가 남았다', '쓸 수 있는 제목']))
+    return out.slice(0, 4).every((s, i) => s.title === src[i].title && s.baseTitle === undefined)
+      && out[4].title === '쓸 수 있는 제목'
+  })())
+  ok('너무 길거나 비어 있는 제목도 버린다', (() => {
+    const src = mkSeeds(3)
+    const out = applySeedTitles(src, titleRes(['가'.repeat(TITLE_MAX + 1), '', '좋은 제목']))
+    return out[0].title === src[0].title && out[1].title === src[1].title && out[2].title === '좋은 제목'
+  })())
+  ok('제목이 겹치면 앞의 카드만 쓴다', (() => {
+    const out = applySeedTitles(mkSeeds(3), titleRes(['같은 제목', '같은 제목', '다른 제목']))
+    return out[0].title === '같은 제목' && out[1].title.startsWith('아직 결과가')
+      && out[2].title === '다른 제목'
+  })())
+  ok('제목 응답이 이상하면 하나도 바꾸지 않는다', (() => {
+    const src = mkSeeds(3)
+    const same = (out) => out.length === 3 && out.every((s, i) => s.title === src[i].title)
+    return same(applySeedTitles(src, {})) && same(applySeedTitles(src, null))
+      && same(applySeedTitles(src, { titles: '아니다' }))
+      && same(applySeedTitles(src, { titles: [{ n: 9, title: '없는 번호' }] }))
+  })())
+  ok('따옴표와 번호가 붙어 온 제목은 벗겨 쓴다',
+    cleanSeedTitle('  1. "학부모 모임의 후폭풍" ') === '학부모 모임의 후폭풍'
+    && cleanSeedTitle('「미라의 선택」') === '미라의 선택' && cleanSeedTitle(' ') === '')
+  ok('기술 용어는 한국어·영문 관계어·시점 표기를 다 잡는다',
+    hasJargon('노드가 셋') && hasJargon('mentor_of 가 끊긴다') && hasJargon('t=0 의 밤')
+    && hasJargon('writeback 을 한다') && hasJargon('엣지를 끊는다')
+    && !hasJargon('학부모 모임의 후폭풍') && !hasJargon('미라와 루미의 마지막 밤'))
+
+  ok('순위대로 다시 세우고 이유를 한 줄 붙인다', (() => {
+    const out = applySeedRank(mkSeeds(3), {
+      ranking: [{ n: 3, rank: 1, why: '반전이 가장 크다' }, { n: 1, rank: 2, why: '갈등이 깊다' },
+        { n: 2, rank: 3, why: '뒤가 궁금하다' }],
+    })
+    return out.map((s) => s.focus[0]).join(',') === 'e3,e1,e2'
+      && out[0].why === '반전이 가장 크다' && out[0].score === 1.8
+  })())
+  ok('순위에서 빠진 씨앗은 점수 순서로 뒤에 남는다', (() => {
+    const out = applySeedRank(mkSeeds(4), { ranking: [{ n: 4, rank: 1 }, { n: 2, rank: 2 }] })
+    return out.length === 4 && out.map((s) => s.focus[0]).join(',') === 'e4,e2,e1,e3'
+  })())
+  ok('순위를 안 적어 오면 온 순서를 순위로 본다', (() => {
+    const out = applySeedRank(mkSeeds(3), { ranking: [{ n: 3 }, { n: 2 }] })
+    return out.map((s) => s.focus[0]).join(',') === 'e3,e2,e1'
+  })())
+  ok('상위 열 개 뒤의 씨앗은 순서를 건드리지 않는다', (() => {
+    const src = mkSeeds(RANK_MAX + 3)
+    const out = applySeedRank(src, { ranking: [{ n: 2, rank: 1 }, { n: 1, rank: 2 }] })
+    return out.length === src.length
+      && out.slice(RANK_MAX).every((s, i) => s.focus[0] === src[RANK_MAX + i].focus[0])
+  })())
+  ok('쓸 수 있는 순위가 하나뿐이면 점수 순서를 그대로 둔다', (() => {
+    const src = mkSeeds(3)
+    const keep = (out) => out.every((s, i) => s.focus[0] === src[i].focus[0])
+    return keep(applySeedRank(src, { ranking: [{ n: 2, rank: 1 }] }))
+      && keep(applySeedRank(src, { ranking: [] })) && keep(applySeedRank(src, null))
+  })())
+  ok('기술 용어가 섞인 이유는 카드에 올리지 않는다', (() => {
+    const out = applySeedRank(mkSeeds(2), {
+      ranking: [{ n: 2, rank: 1, why: 'tension 이 가장 높다' },
+        { n: 1, rank: 2, why: '두 사람이 부딪힌다' }],
+    })
+    return out[0].why === undefined && out[1].why === '두 사람이 부딪힌다'
+  })())
+
+  const seedTitleJson = '{"titles":[{"n":1,"title":"첫 소재"},{"n":2,"title":"둘째 소재"},'
+    + '{"n":3,"title":"셋째 소재"}]}'
+  const seedRankJson = '{"ranking":[{"n":3,"rank":1,"why":"반전이 크다"},'
+    + '{"n":1,"rank":2,"why":"갈등이 깊다"},{"n":2,"rank":3,"why":"다음 회가 궁금하다"}]}'
+  const isTitleAsk = (p) => p.includes('"titles"')
+
+  ok('씨앗 다듬기는 두 번만 부르고 고른 모델을 실어 보낸다', await (async () => {
+    const sent = []
+    const net = {
+      plan: async (spec) => {
+        sent.push(spec)
+        return { text: isTitleAsk(spec.prompt) ? seedTitleJson : seedRankJson }
+      },
+    }
+    const out = await refineSeeds(net, mkSeeds(3), seedStore, { model: 'haiku-4.5' })
+    return sent.length === 2 && sent.every((s) => s.model === 'haiku-4.5' && s.think === false
+      && s.prompt.length <= 8000)
+      && out.length === 3 && out[0].title === '셋째 소재' && out[0].why === '반전이 크다'
+      && out.map((s) => s.focus[0]).join(',') === 'e3,e1,e2'
+  })())
+  ok('제목만 실패하면 순서만 바뀐다', await (async () => {
+    const net = {
+      plan: async (spec) => (isTitleAsk(spec.prompt)
+        ? { text: '엉뚱한 답', stop: 'end_turn' } : { text: seedRankJson }),
+    }
+    const { out } = await withConsole(() => refineSeeds(net, mkSeeds(3), seedStore))
+    return out.map((s) => s.focus[0]).join(',') === 'e3,e1,e2'
+      && out.every((s) => s.title.startsWith('아직 결과가'))
+  })())
+  ok('순서만 실패하면 제목만 바뀐다', await (async () => {
+    const net = {
+      plan: async (spec) => (isTitleAsk(spec.prompt)
+        ? { text: seedTitleJson } : { text: '엉뚱한 답', stop: 'end_turn' }),
+    }
+    const { out } = await withConsole(() => refineSeeds(net, mkSeeds(3), seedStore))
+    return out.map((s) => s.focus[0]).join(',') === 'e1,e2,e3'
+      && out[0].title === '첫 소재' && out.every((s) => s.why === undefined)
+  })())
+  ok('둘 다 실패해도 던지지 않고 탐지기 결과를 그대로 준다', await (async () => {
+    const src = mkSeeds(3)
+    const net = { plan: async () => ({ text: '엉뚱한 답', stop: 'end_turn' }) }
+    const { out, said } = await withConsole(() => refineSeeds(net, src, seedStore))
+    return out.length === 3 && out.every((s, i) => s === src[i])
+      && said.some((l) => l.includes('제목을 받지 못했다'))
+      && said.some((l) => l.includes('순서를 받지 못했다'))
+  })())
+  ok('로컬 모드에서는 왕복 없이 그대로 돌려준다', await (async () => {
+    const src = mkSeeds(3)
+    return (await refineSeeds(null, src, seedStore)) === src
+      && (await refineSeeds({}, src, seedStore)).length === 3
+      && (await refineSeeds(null, [], seedStore)).length === 0
+  })())
+  ok('씨앗이 하나면 순위는 묻지 않는다', await (async () => {
+    const sent = []
+    const net = {
+      plan: async (spec) => { sent.push(spec); return { text: '{"titles":[{"n":1,"title":"단 하나"}]}' } },
+    }
+    const out = await refineSeeds(net, mkSeeds(1), seedStore)
+    return sent.length === 1 && isTitleAsk(sent[0].prompt) && out[0].title === '단 하나'
+  })())
+  ok('열여섯 개가 넘는 씨앗은 앞쪽만 물어보고 나머지는 그대로 둔다', await (async () => {
+    const src = mkSeeds(20)
+    const sent = []
+    const net = {
+      plan: async (spec) => {
+        sent.push(spec)
+        return { text: isTitleAsk(spec.prompt) ? seedTitleJson : seedRankJson }
+      },
+    }
+    const out = await refineSeeds(net, src, seedStore, { model: 'sonnet-5' })
+    const titleAsk = sent.find((s) => isTitleAsk(s.prompt)).prompt
+    return out.length === 20 && titleAsk.includes('16. [') && !titleAsk.includes('17. [')
+      && sent.every((s) => s.prompt.length <= 8000)
+      // 순서는 상위 열 개만 다시 세운다. 뒤쪽은 점수 순서 그대로다
+      && out.slice(RANK_MAX).every((s, i) => s.focus[0] === src[RANK_MAX + i].focus[0])
+  })())
+  ok('나눠 부르는 두 함수도 따로 쓸 수 있다', await (async () => {
+    const t = await nameSeeds({ plan: async () => ({ text: seedTitleJson }) }, mkSeeds(3), seedStore)
+    const r = await rankSeeds({ plan: async () => ({ text: seedRankJson }) }, mkSeeds(3), seedStore)
+    return t[0].title === '첫 소재' && t.every((s) => s.why === undefined)
+      && r.map((s) => s.focus[0]).join(',') === 'e3,e1,e2' && r[0].why === '반전이 크다'
   })())
 
   // ── 고른 분기 → 대본: branchToSpec / branchOutlinePrompt / planBranchOutline ─
