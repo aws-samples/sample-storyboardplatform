@@ -3655,6 +3655,160 @@
       && scrub({ src: 'data:image/png;base64,' + 'A'.repeat(3_000_000) }).src === '')
   }
 
+  /* ── 자산으로 생성하기 — 사람이 짚은 하나만 (board.js 의 openMake) ─────────────
+   *
+   * assetJobs 는 컷을 읽어 한 벌을 뽑고, 이 창은 사람이 「소품 · 삼각김밥」이라고 짚어 그
+   * 하나만 뽑습니다. 두 길이 같은 서버 자리(server.py 의 ISOLATE)를 쓰므로, 짚어 보내는
+   * 값이 assetJobs 가 보내는 것과 같은 모양이어야 합니다. 여기서 그 셋을 맞대어 봅니다.
+   *
+   * 소스를 읽습니다 — 창을 여는 길이 로그인·GPU·승인을 지나야 열려서 실행할 수 없습니다.
+   */
+  try {
+    const src = await (await fetch(`pages/board.js?t=${Date.now()}`)).text()
+    const mk = src.slice(src.indexOf('async function runMake()'), src.indexOf('async function saveMake()'))
+
+    ok('짚은 종류를 서버의 ISOLATE 열쇠로 보낸다', /refKind:\s*`asset_\$\{type\}`/.test(mk))
+    ok('배경만 컷 크기, 나머지는 정방형 — assetJobs 의 kind 와 같다',
+      /kind:\s*type === 'bg' \? 'cut' : 'asset'/.test(mk))
+    /*
+     * 「이 그림 속 이것만」이라 그림을 조건으로 받는 모델이어야 합니다. 화면이 고른 모델이
+     * img2img 갈래면 기반을 지우고 다시 그려서 다른 물건이 나옵니다(extractAssets 와 같은 판단).
+     */
+    ok('그림을 조건으로 받는 모델로 보낸다', /model:\s*keepModelId\(\)/.test(mk))
+    ok('그 컷의 승인된 그림을 기반으로 넣는다', /asInit\(stillOf\(p\)\)/.test(mk)
+      && /refs:\s*\[init\]/.test(mk))
+    /* 뽑는 자격은 한 곳에서 봅니다. 여기 조건을 새로 적으면 두 단추가 다른 때에 열립니다 */
+    ok('뽑을 수 있는지는 whyNotExtract 하나가 정한다',
+      /const whyNotMake = \(panel\) => whyNotExtract\(panel\)/.test(src))
+    /*
+     * 남의 화면에도 「생성 중」으로 보여야 합니다. GPU 한 대를 나눠 쓰므로 이 칸이 비어
+     * 있으면 두 사람이 같은 기계를 겹쳐 부릅니다(extractAssets · animate 와 같은 규칙).
+     */
+    ok('그리는 동안 판에 generating 을 적는다', /generating: me\.id, genAt: now\(\)/.test(mk))
+    ok('끝나면 generating 을 반드시 되돌린다',
+      /finally \{[\s\S]*generating: false/.test(mk))
+
+    const save = src.slice(src.indexOf('async function saveMake()'), src.indexOf('let fastPoll'))
+    /*
+     * 검수가 저장보다 앞입니다. 팀 전체가 보는 자산이 되는 일이라, 눌러서 바로 들어가면
+     * 사람은 마음에 안 드는 그림을 자산관리에서 지우는 일부터 배웁니다.
+     */
+    ok('저장 전에 한 번 더 묻는다', /confirmAsk\(\{[\s\S]*재활용하시겠습니까/.test(save)
+      && save.indexOf('confirmAsk') < save.indexOf("kind: 'asset.add'"))
+    ok('그만두면 아무것도 남기지 않는다', /if \(!ok\) return/.test(save))
+    /*
+     * 덮지 않습니다. extractAssets 는 같은 컷의 같은 종류를 다시 뽑으면 갈아 끼우는데
+     * (asset.patch) 여기서 그러면 방금 짚은 삼각김밥이 그 앞의 커피를 지웁니다.
+     */
+    ok('자산은 새로 붙는다(갈아 끼우지 않는다)', /kind: 'asset\.add'/.test(save)
+      && !/asset\.patch/.test(save))
+    /* 자산관리 화면은 op 로그를 다시 읽습니다. 그 화면이 장을 가르는 열쇠가 type 입니다 */
+    ok('자산관리가 장을 가르는 type 을 남긴다', /asset: \{[\s\S]*\btype,/.test(save))
+    ok('어느 컷에서 나왔는지 남긴다', /fromPanelId: p\.id/.test(save))
+  } catch (e) {
+    ok('자산으로 생성하기 소스를 읽는다', false, e.message)
+  }
+
+  /* ── 오른쪽 판의 모양 — 글씨 크기와 무게 (board.js 의 renderDetail) ───────────
+   *
+   * 이 판이 「글씨가 작고 몰려 있다」로 돌아온 적이 있습니다. 기능을 하나 붙일 때마다 단추를
+   * 같은 .acts 줄에 밀어넣고 설명을 11.5px 문단으로 아래에 쌓은 결과였습니다 — 셋째 단추를
+   * 붙이는 순간 344px 판에서 줄이 접히고, 그때 딸려 온 문단 넷이 그 아래로 흘렀습니다.
+   *
+   * 되돌아가기 쉬운 자리라 규칙을 못으로 박습니다. 검사하는 것은 셋입니다.
+   *
+   *   1. 단추 옆에 설명 문단을 따로 쌓지 않는다 — 이름과 설명이 한 칸에 든다(.tile)
+   *   2. 이 판에서 읽는 글은 한 크기다 — .why 가 12.5px 이다
+   *   3. 실제로 누르는 것에 9.5px 를 쓰지 않는다 — .mini 가 12px 이다
+   *
+   * 소스를 읽습니다. 이 판을 그리는 길이 로그인·소켓·컷 고르기를 지나야 열려서, 위 자산
+   * 검사와 같은 방법입니다.
+   */
+  try {
+    const src = await (await fetch(`pages/board.js?t=${Date.now()}`)).text()
+    const css = await (await fetch(`board.html?t=${Date.now()}`)).text()
+
+    /*
+     * 그림이 나온 다음에 하는 일 셋(영상·자산·스케치)은 타일입니다. 이름과 설명이 한 칸에
+     * 들어 있어야 그 설명이 판 아래로 흐르지 않습니다.
+     */
+    const tile = src.slice(src.indexOf('const tile = (act, label, sub, why'), src.indexOf('const cutTiles ='))
+    ok('타일 하나가 이름과 설명을 같이 든다',
+      /class="tile__t"/.test(tile) && /class="tile__sub"/.test(tile))
+    /*
+     * 막혀 있으면 설명 자리에 막힌 이유가 들어갑니다. 이 규칙이 없어지면 사라진 문단들이
+     * 「왜 막혔는지」를 말할 자리를 잃고 다시 판 아래로 돌아옵니다. 일이 돌고 있을 때는
+     * 그 진행이 이유보다 앞섭니다 — 「이미 영상을 만들고 있습니다」보다 진행 한 줄이 낫습니다.
+     */
+    ok('막힌 타일은 설명 자리에 그 이유를 낸다', /\$\{esc\(busy \|\| why \|\| sub\)\}/.test(tile))
+    ok('일이 돌고 있는 타일은 진행을 앞세우고 aria-busy 를 든다',
+      /tile--busy/.test(tile) && /aria-busy="true"/.test(tile))
+
+    /* 그리기 하나만 큰 단추입니다. 셋이 같은 크기로 한 줄에 서던 자리입니다 */
+    const cutGen = src.slice(src.indexOf('const cutGen = !may('), src.indexOf("const genLead = !may('art')"))
+    ok('그리기만 판 폭을 쓰는 큰 단추다',
+      /data-do="generate"[^>]*/.test(cutGen) && /btn--wide btn--go/.test(cutGen))
+    ok('나머지 셋은 타일로 내려간다', /\$\{cutTiles\}/.test(cutGen)
+      && !/class="acts"/.test(cutGen))
+    /*
+     * 무엇으로 그리는지는 이름·값 표입니다. 한 문장이었는데 조사가 갈리는 자리가 있었고
+     * (「v4으로 붙습니다」) 11.5px 두 줄이라 각주로 보였습니다.
+     */
+    ok('무엇으로 그리는지는 표로 낸다', /class="with"/.test(cutGen)
+      && /genRows\.map/.test(cutGen))
+
+    /*
+     * 바닥 띠. 갈 수 있는 길과 못 가는 길을 층으로 가릅니다 — 다섯이 같은 크기로 서서
+     * 판을 세 줄로 채우던 자리입니다. 감추지는 않습니다(누르면 이유가 뜹니다).
+     */
+    const foot = src.slice(src.indexOf('const actBtn = (x, cls)'), src.indexOf('const poseFields ='))
+    ok('갈 수 있는 길만 큰 단추로 세운다', /class="foot__go"/.test(foot)
+      && /actOn = acts\.filter\(\(x\) => mayTransition\(p\.status, x\)\.ok\)/.test(foot))
+    ok('못 가는 길도 남긴다(감추지 않는다)', /class="foot__off"/.test(foot)
+      && /actOff\.map\(\(x\) => actBtn\(x, 'foot__x'\)\)/.test(foot))
+
+    /* 이 판에서 읽는 글은 한 크기입니다. .cmt · .cut__action 과 같은 12.5px 입니다 */
+    ok('안내 한 줄이 12.5px 다', /\.why \{[^}]*font-size: 12\.5px/.test(css))
+    /* 실제로 누르는 작은 단추(이 컷 지우기 · 크게 보기)에 9.5px 를 쓰지 않습니다 */
+    ok('밑줄 단추가 12px 다', /\.mini \{[^}]*font-size: 12px/.test(css))
+    /* 덩이를 여닫는 제목입니다. 한글에 uppercase·자간을 걸면 잔글씨 라벨로 보입니다 */
+    ok('덩이 제목이 13px 굵은 글씨다', /\.sec__t \{[^}]*font-size: 13px[^}]*font-weight: 600/.test(css))
+
+    /*
+     * 생성 자리는 「이미지 만들기」로 잠깁니다. editable(내용 편집)로 잠그면, 권한 관리에서
+     * 이미지 만들기를 허용해도 내용 편집이 막힌 사람에게는 단추가 그대로 잠겨 있습니다.
+     * 승인된 컷은 둘 다 잠깁니다 — artOk 가 status 를 함께 봅니다.
+     */
+    ok('생성 권한은 art 로 따로 본다', /const artOk = p\.status !== 'approved' && may\('art'\)/.test(src))
+    ok('승인된 컷은 상태를 사유로 낸다',
+      /const noArt = nope\(p\.status === 'approved' \? whyNotEdit\(p\) : whyNot\('art'\)\)/.test(src))
+    // 생성 자리에 editable 이 다시 스며들면 위 수정이 조용히 되돌아갑니다
+    ok('그리기 단추는 artOk 로 잠근다',
+      /data-do="generate" \$\{!artOk \? noArt/.test(src)
+      && !/data-do="generate" \$\{!editable/.test(src))
+    ok('스케치 올리기도 artOk 다', !/data-do="upload" \$\{editable/.test(src))
+    ok('생성 지시 칸도 artOk 다', /id="genPrompt"[^]*?\$\{artOk \? '' : `readonly \$\{noArt\}`\}/.test(src.replace(/\n/g, '')))
+
+    /*
+     * 이 그림을 그대로 자산으로(keepAsAsset). 그리지 않으므로 승인도 생성 서버도 보지
+     * 않습니다 — 조건이 stillOf 와 권한 둘뿐인 것이 이 기능의 뜻입니다. canGen 이 끼면
+     * GPU 가 꺼진 날 쓸 수 없게 됩니다.
+     */
+    ok('그대로 자산으로는 그림과 권한만 본다',
+      /const keepLine = p\.charId \|\| !stillOf\(p\) \|\| !mayExtract\(\) \? '' :/.test(src))
+    ok('종류 셋이 곧 단추다', /data-do="keep:\$\{t\}"/.test(src)
+      && /REF_TYPES\.map/.test(src))
+    // 새로 만들지 않고 갈아 끼웁니다. 컷을 다시 그릴 때마다 같은 자산이 쌓이면 안 됩니다
+    ok('같은 종류를 다시 누르면 갈아 끼운다',
+      /source === 'keep'\)\n?\s*if \(prev\)/.test(src.replace(/\r/g, ''))
+      || /const prev = assetsFrom\(panel\.id\)\.find\(\(a\) => a\.type === type && a\.source === 'keep'\)/.test(src))
+    // 없앤 「작은 글씨 문단」으로 돌아가지 않게 줄 형식을 잠급니다
+    ok('그 줄은 .line 이고 단추는 묶음 안에 있다',
+      /class="line__set"/.test(src) && /\.line__set \{/.test(css))
+  } catch (e) {
+    ok('오른쪽 판의 모양을 읽는다', false, e.message)
+  }
+
   /* ── permissions.js ↔ 서버의 허용 목록 ───────────────────────────────────────
    *
    * domain/permissions.js 의 표는 화면이 버튼을 미리 막는 근거이고, 실제로 튕기는 것은
@@ -3708,6 +3862,37 @@
     // 표의 역할도 모두 이름을 가집니다. panels.js 의 ROLES 와 짝입니다
     ok('표의 역할은 모두 이름을 가진다',
       [...new Set(Object.values(JOB_ROLES).flat())].every((r) => ROLES[r]))
+
+    /*
+     * 권한 표(perm.js)의 「역할 고정」. 위에서 맞대어 본 그 서버 목록을 화면 표도 들고
+     * 있어야 합니다 — 서버가 막는 일을 표에서 「허용」으로 켤 수 있으면, 켜 놓고 눌렀을 때
+     * 서버가 튕겨서 표가 거짓말을 합니다. 열려면 역할을 바꾸라고 말하는 것이 맞습니다.
+     */
+    const { CAPS, serverFixed, permModel } = await import(`./components/perm.js?t=${Date.now()}`)
+    ok('art 는 서버 목록을 들고 있다', CAPS.art.server?.join() === [...JOB_ROLES.gen].join())
+    ok('plan 도 들고 있다', CAPS.plan.server?.join() === [...JOB_ROLES.plan].join())
+    // 서버가 안 보는 일에는 두지 않습니다. 두면 손질할 수 있어야 할 칸이 잠깁니다
+    ok('내용 편집·컷 진행에는 서버 고정이 없다',
+      !CAPS.edit.server && !CAPS.approve?.server)
+    ok('서버 목록 밖의 역할은 고정이다', serverFixed('art', 'director') && serverFixed('art', 'reviewer'))
+    ok('목록 안의 역할은 고정이 아니다', !serverFixed('art', 'artist'))
+    // 손질이 남아 있어도 힘이 없어야 합니다. 이 다섯 자리를 다 거칩니다
+    const fixed = permModel({
+      perms: { 'role:director:art': { on: true, _ts: { on: 1 } } },
+      roleOf: () => 'director', meId: 'u1',
+    })
+    ok('표에서 켜 두어도 막음이다', fixed.mayRole('art', 'director') === false
+      && fixed.may('art', 'u1') === false)
+    ok('사유가 역할을 바꾸라고 말한다', /서버가 역할로 고정/.test(fixed.whyNot('art', 'u1')))
+    ok('힘없는 손질은 「n칸 손질」에 안 센다', fixed.changed().length === 0)
+    ok('뒤집는 op 도 안 나온다', fixed.toggle('role', 'director', 'art') === null)
+    // 서버가 안 보는 칸의 손질은 그대로 먹어야 합니다(고정이 너무 넓게 먹으면 여기서 걸립니다)
+    const free = permModel({
+      perms: { 'role:reviewer:edit': { on: true, _ts: { on: 1 } } },
+      roleOf: () => 'reviewer', meId: 'u2',
+    })
+    ok('서버가 안 보는 칸의 손질은 먹는다',
+      free.mayRole('edit', 'reviewer') === true && free.changed().length === 1)
   } catch (err) {
     ok(`서버 쪽 허용 목록을 읽지 못했다 (${err.message})`, false)
   }

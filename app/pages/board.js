@@ -1743,10 +1743,325 @@ async function extractAssets(panel, { auto = false } = {}) {
   if (failed.length) notice(`${labelOf(panel)} · 자산 ${failed.length}개를 못 뽑았습니다. ${failed[0]}`)
 }
 
+/**
+ * 컷의 지금 그림을 그대로 자산으로 둡니다. 위의 extractAssets 와 아래의 자산으로 생성하기가
+ * 둘 다 GPU 로 다시 그리는 일인 데 비해, 이것은 아무것도 그리지 않습니다 — 이미 나온 그림이
+ * 쓸 만할 때 사람이 「이게 소품이다」 짚어서 그 그림째로 자산관리에 넣는 자리입니다.
+ * 그래서 승인도, 생성 서버도 기다리지 않습니다.
+ *
+ * 같은 컷·같은 종류를 다시 누르면 새로 만들지 않고 그 자산의 그림을 갈아 끼웁니다
+ * (asset.patch). 컷을 다시 그릴 때마다 같은 이름의 자산이 쌓이면 자산관리가 못 쓰게 됩니다.
+ *
+ * @param {object} panel
+ * @param {'char'|'bg'|'prop'} type
+ */
+function keepAsAsset(panel, type) {
+  if (!REF_TYPES.includes(type)) return
+  if (!mayExtract()) { notice(denyReason('extract', roleOf(me.id))); return }
+  const src = stillOf(panel)
+  if (!src) { notice('먼저 이미지가 있어야 합니다'); return }
+  const firstCast = (panel.cast || []).map((id) => state.chars[id]).find(Boolean)
+  const name = type === 'char' ? (firstCast?.name || labelOf(panel))
+    : type === 'bg' ? (sceneMeta(panel.scene || '').where || labelOf(panel))
+      : labelOf(panel)
+  const fromN = (liveVer(panel)?.i ?? 0) + 1
+  const charId = type === 'char' ? (firstCast?.id ?? null) : null
+  const prev = assetsFrom(panel.id).find((a) => a.type === type && a.source === 'keep')
+  if (prev) {
+    emit({ kind: 'asset.patch', assetId: prev.id, fields: { src, fromN, name, charId, ts: now() } })
+  } else {
+    emit({
+      kind: 'asset.add',
+      asset: { id: uid(), type, name, charId, src, fromPanelId: panel.id, fromN, author: me.id, ts: now(), source: 'keep' },
+    })
+  }
+  announce(`${labelOf(panel)} · ${ASSET_TYPES[type]} 자산으로 자산관리에 넣었습니다.`)
+  renderDetail()
+}
+
 /*
  * 자산 칩 한 장을 그리던 assetCard 가 나갔습니다. 컷의 참조 자산 줄에서만 쓰던 것이고
  * (위 refAssets), 그 줄이 없어졌습니다. 자산을 눈으로 보고 고르는 화면은 자산관리입니다.
  */
+
+/* ══ 자산으로 생성하기 — 사람이 짚은 것 하나만 떼어냅니다 ═══════════════════════════
+ *
+ * 위의 extractAssets 와 나란히 서는 다른 일입니다.
+ *
+ *   자산으로 뽑기   기계가 컷을 읽어 인물마다 하나·배경 하나·소품 하나를 한꺼번에 뽑습니다
+ *                  (assetJobs). 승인 직후 자동으로도 돕니다
+ *   자산으로 생성하기 사람이 「소품 · 삼각김밥」이라고 짚어 그 하나만 뽑습니다
+ *
+ * 둘이 다 필요한 까닭은 소품에 있습니다. assetJobs 의 소품 한 줄은 「이 그림에서 가장 중요한
+ * 물건 하나」이고(server.py 의 ISOLATE.asset_prop) 그 판단은 모델의 것입니다. 편의점에서
+ * 삼각김밥을 먹는 컷에서 모델이 진열대를 고르면, 사람이 원한 것을 짚어 줄 자리가 없었습니다.
+ * 인물도 같습니다 — 컷에 붙은 등장 인물만 뽑히므로(panel.cast) 이름 없이 지나가는 사람은
+ * 아무리 잘 그려져 있어도 자산이 되지 못했습니다.
+ *
+ * 저장은 위와 같은 op(asset.add)입니다. 자산관리 화면은 이 로그를 처음부터 다시 읽으므로
+ * (pages/assets.js) 여기서 남긴 것이 그 화면의 「소품」 장에 그대로 섭니다 — 두 화면을
+ * 잇는 코드가 따로 없습니다.
+ */
+
+/*
+ * 창의 상태. 한 벌만 둡니다 — 창이 하나라 두 컷을 동시에 뽑을 수 없고, 그것이 맞습니다
+ * (GPU 한 대를 나눠 씁니다).
+ *
+ *   panelId  어느 컷에서 떼어내는지. null 이면 창이 닫혀 있습니다
+ *   type     char · bg · prop 중 하나
+ *   what     사람이 적은 것. 「삼각김밥」
+ *   busy     그리는 중 한 줄. 없으면 안 그리는 중입니다
+ *   out      나온 그림 {src, gen}. 검수 받는 자리입니다
+ *   err      마지막 실패 사유
+ */
+let mk = null
+
+/** 창에서 고를 수 있는 종류 셋. 스틸은 자산들로 만든 결과물이라 떼어내는 것이 아닙니다(REF_TYPES) */
+const MK_TYPES = [
+  { type: 'char', hint: '이 사람만. 얼굴·머리·옷을 그대로 두고 배경과 다른 사람을 지웁니다' },
+  { type: 'bg', hint: '이 장소만. 사람이 다 빠진 빈 배경이 됩니다' },
+  { type: 'prop', hint: '이 물건만. 단색 배경에 가운데 크게 놓입니다' },
+]
+
+/*
+ * 무엇을 적어야 하는지 예를 듭니다. 빈 칸에 「무엇을 떼어낼까요」만 있으면 사람이 문장을
+ * 씁니다(「삼각김밥을 먹고 있는 장면」). 그것이 그대로 지시문이 되면 그 장면이 다시 그려집니다.
+ */
+const MK_PLACE = { char: '예: 앞치마를 입은 점원', bg: '예: 편의점 안', prop: '예: 삼각김밥' }
+
+/** 이 컷에서 창을 열 수 있는지. 못 하면 그 이유 한 줄입니다. 뽑는 규칙은 위와 같습니다 */
+const whyNotMake = (panel) => whyNotExtract(panel)
+
+function openMake(panel) {
+  const why = whyNotMake(panel)
+  if (why) { notice(why); return }
+  /*
+   * 처음 고를 종류. 소품입니다.
+   *
+   * 인물과 배경은 자동으로 뽑히는 것과 겹칩니다 — 컷에 붙은 인물과 그 씬의 배경은 승인
+   * 직후 이미 자산이 되어 있습니다. 사람이 이 창까지 오는 것은 대개 그 셋에 없는 것이
+   * 있어서이고, 그 자리가 소품입니다.
+   */
+  mk = { panelId: panel.id, type: 'prop', what: '', busy: '', out: null, err: '' }
+  renderMake()
+  byId('make').showModal()
+  byId('mkWhat')?.focus()
+}
+
+function closeMake() {
+  /*
+   * 그리는 중에는 닫지 않습니다. GPU 는 이미 돌고 있고, 창을 닫으면 그 그림을 받을 자리가
+   * 없어져서 사람은 「1분 기다렸는데 아무 일도 없었다」를 봅니다. 나온 뒤에는 버릴 수 있습니다.
+   */
+  if (mk?.busy) { notice('그리는 중입니다. 나오면 저장하거나 버릴 수 있습니다.'); return }
+  // 상태를 지우는 것은 close 를 받는 자리 하나입니다 — Esc·바깥 누르기도 같은 길로 옵니다
+  byId('make').close()
+}
+
+/**
+ * 창의 안쪽. 세 자리가 위에서 아래로 섭니다 — 어디서 · 무엇을 · 나온 것.
+ *
+ * 관리 화면(renderAdmin)과 같은 방식으로 통째로 다시 그립니다. 다만 사람이 치고 있는 칸을
+ * 새로 만들면 글자와 캐럿이 날아가므로 그 값은 opts 로 지켜 옮깁니다(renderNav 의 keep 과
+ * 같은 규칙입니다).
+ */
+function renderMake() {
+  const host = byId('makeBody')
+  if (!host || !mk) return
+  /*
+   * 한글을 조합하는 중에는 물러섭니다. 조합 중인 글자가 든 칸을 새로 만들면 그 글자가
+   * 사라집니다 — 아래 renderDetail 이 같은 자리에서 같은 것을 지킵니다(composing).
+   */
+  if (composing(host)) return
+  const p = state.panels[mk.panelId]
+  // 뽑던 컷이 지워졌습니다(남이 지울 수 있습니다). 떼어낼 그림이 없으니 창을 접습니다
+  if (!p) { byId('make').close(); return }
+
+  const live = document.activeElement
+  const keep = live?.id === 'mkWhat'
+    ? { value: live.value, start: live.selectionStart, end: live.selectionEnd } : null
+
+  const still = stillOf(p)
+  const label = ASSET_TYPES[mk.type]
+  const what = mk.what.trim()
+
+  setHtml(host, `<div class="mk__in">
+    <h2 class="mk__h">자산으로 생성하기</h2>
+    <p class="mk__sub">이 컷에서 하나만 떼어내 자산으로 둡니다. 다음 컷은 그 자산을 참조로 받아
+      같은 얼굴·같은 장소·같은 물건으로 그립니다.</p>
+
+    <div class="mk__from">
+      <div class="mk__thumb">${still ? media(still, `alt="${esc(`${whereOf(p)} ${labelOf(p)}`)}"`) : ''}</div>
+      <div class="mk__fromtxt">
+        <b>${esc(`${whereOf(p)} · ${labelOf(p)}`)}</b>
+        ${esc(p.action || '이 컷의 그림에서 떼어냅니다.')}
+      </div>
+    </div>
+
+    <span class="mk__lab">어떤 자산으로</span>
+    <div class="mk__types" role="group" aria-label="자산 종류">
+      ${MK_TYPES.map((t) => `
+        <button type="button" class="mk__type" data-mktype="${t.type}" data-on="${mk.type === t.type ? 1 : 0}"
+          aria-pressed="${mk.type === t.type}" ${mk.busy ? 'disabled' : ''}>
+          <b>${esc(ASSET_TYPES[t.type])}</b><span>${esc(t.hint)}</span>
+        </button>`).join('')}
+    </div>
+
+    <div class="mk__field">
+      <label class="mk__lab" for="mkWhat">무엇을 떼어낼지</label>
+      <input class="mk__what" id="mkWhat" value="${esc(mk.what)}" maxlength="60"
+        placeholder="${esc(MK_PLACE[mk.type])}" spellcheck="false" ${mk.busy ? 'disabled' : ''}>
+      ${/*
+        * 낱말 하나로 적게 합니다. 문장을 넣으면 그 문장이 그대로 지시문이 되어(server.py 의
+        * build) 「떼어내기」가 아니라 「그 장면 다시 그리기」가 됩니다.
+        */''}
+      <p class="why">그림에 있는 것의 이름을 낱말로 적습니다. 문장을 넣으면 그 장면이 다시
+        그려집니다. 비워 두면 이 컷에서 ${esc(label)}에 해당하는 것을 기계가 고릅니다.</p>
+    </div>
+
+    ${mk.busy ? `<p class="mk__busy">${esc(mk.busy)}</p>` : ''}
+    ${mk.err ? `<p class="why why--bad">${esc(mk.err)}</p>` : ''}
+    ${mk.out ? `
+      <div class="mk__out"><img src="${esc(mk.out.src)}" alt="${esc(`떼어낸 ${label}${what ? ` · ${what}` : ''}`)}"></div>
+      <p class="why">이 그림을 ${esc(label)} 자산으로 저장하면 자산관리의 「${esc(label)}」 장에 섭니다.
+        마음에 안 들면 다시 그립니다 — 누를 때마다 다른 그림이 나옵니다.</p>` : ''}
+
+    <div class="mk__row">
+      ${/*
+        * 닫기가 왼쪽입니다. 오른쪽 끝은 「지금 할 일」의 자리이고, 그것이 그리기·저장입니다
+        * (confirm.js 의 .cfm__row 와 같은 규칙).
+        */''}
+      <button type="button" class="btn btn--ghost" id="mkClose"><span class="mono">닫기</span></button>
+      <span class="mk__spacer"></span>
+      ${mk.out ? `
+        <button type="button" class="btn btn--line" id="mkRedo" ${mk.busy ? 'disabled' : ''}>다시 그리기</button>
+        <button type="button" class="btn btn--solid" id="mkSave" ${mk.busy ? 'disabled' : ''}>자산으로 저장</button>`
+    : `<button type="button" class="btn btn--solid" id="mkGo" ${mk.busy ? 'disabled' : ''}>
+          ${mk.busy ? '떼어내는 중…' : `${esc(label)}${josa(label, '으로', '로')} 떼어내기`}</button>`}
+    </div>
+  </div>`)
+
+  const box = byId('mkWhat')
+  if (box && keep) {
+    box.value = keep.value
+    try { box.setSelectionRange(keep.start, keep.end) } catch { /* 글이 짧아졌을 때 */ }
+    box.focus()
+  }
+}
+
+/**
+ * 짚은 것 하나를 그립니다. 저장은 아직 하지 않습니다 — 사람이 보고 정합니다.
+ *
+ * 그림을 조건으로 받는 모델로 보냅니다(keepModelId). 「이 그림 속 이것만」이라 기반을 지우고
+ * 다시 그리는 갈래로 가면 다른 물건이 나옵니다 — extractAssets 와 같은 판단입니다.
+ */
+async function runMake() {
+  if (!mk || mk.busy) return
+  const p = state.panels[mk.panelId]
+  if (!p) return
+  const why = whyNotMake(p)
+  if (why) { mk.err = why; renderMake(); return }
+
+  const what = mk.what.trim().slice(0, 60)
+  const type = mk.type
+  const label = ASSET_TYPES[type]
+  /*
+   * 지시문. 적은 것을 그대로 보냅니다 — 앞말은 서버가 종류로 고릅니다(ISOLATE[refKind]).
+   * 비워 두면 컷의 화면 설명이 갑니다. assetJobs 의 소품 한 줄과 같은 값이라, 짚지 않은
+   * 「자산으로 생성하기」는 「자산으로 뽑기」의 그 한 장과 같은 결과가 됩니다.
+   */
+  const prompt = what || String(p.action || '')
+  mk.busy = '승인된 그림을 읽습니다…'
+  mk.err = ''
+  mk.out = null
+  renderMake()
+  /*
+   * 같은 칸(generating)에 적습니다. 남의 화면에 「○○ 생성 중」으로 보여 같은 GPU 를 겹쳐
+   * 부르지 않습니다 — extractAssets · animate 와 같은 규칙입니다.
+   */
+  emit({ kind: 'panel.patch', panelId: p.id, fields: { generating: me.id, genAt: now(), genError: null } })
+  assetWork.set(p.id, `${label}${what ? ` · ${what}` : ''} 떼어내는 중…`)
+  renderDetail()
+  try {
+    const init = await asInit(stillOf(p))
+    const aim = `${label}${what ? ` · ${what}` : ''}`
+    mk.busy = `${aim}${josa(aim, '을', '를')} 그립니다…`
+    renderMake()
+    const r = await askGpuPatient({
+      prompt,
+      // 배경은 컷과 같은 가로, 인물·소품은 정방형입니다(server.py 의 SIZE · assetJobs 의 kind)
+      kind: type === 'bg' ? 'cut' : 'asset',
+      model: keepModelId(),
+      refs: [init],
+      refKind: `asset_${type}`,
+      strength: 0.95,
+    }, (t) => { if (mk) { mk.busy = t; renderMake() } })
+    if (!mk) return   // 그 사이에 창이 닫혔습니다. 남길 자리가 없습니다
+    mk.out = { src: r.url, gen: { model: r.model, seed: r.seed ?? null, ms: r.ms ?? null } }
+    announce(`${label}${josa(label, '을', '를')} 떼어냈습니다. 저장할지 정해주세요.`)
+  } catch (err) {
+    if (mk) mk.err = err.message
+  } finally {
+    assetWork.delete(p.id)
+    emit({
+      kind: 'panel.patch', panelId: p.id,
+      fields: { generating: false, genError: mk?.err ? `자산으로 생성하기 · ${mk.err}` : null },
+    })
+    if (mk) { mk.busy = ''; renderMake() }
+    renderDetail()
+  }
+}
+
+/**
+ * 검수를 받고 자산으로 남깁니다.
+ *
+ * 여기서 한 번 더 묻는 까닭은 이것이 팀 전체가 보는 자산이 된다는 점입니다. 그림은 이미
+ * 눈앞에 있으니 「맞나」를 묻는 것이 아니라 「팀의 자산으로 둘 것인가」를 묻습니다 — 다음
+ * 컷들이 이 그림을 참조로 물려받기 시작합니다.
+ *
+ * 갈아 끼우지 않습니다. extractAssets 는 같은 컷의 같은 종류를 다시 뽑으면 그 자산의 그림을
+ * 덮는데(asset.patch), 그쪽은 「이 컷의 인물·배경·소품 한 벌」이라 한 자리가 하나입니다.
+ * 여기는 사람이 짚은 것이고 컷 하나에서 소품 셋을 따로 뽑는 것이 이 기능의 목적이므로,
+ * 덮으면 방금 뽑은 삼각김밥이 그 앞의 커피를 지웁니다.
+ */
+async function saveMake() {
+  if (!mk?.out || mk.busy) return
+  const p = state.panels[mk.panelId]
+  const type = mk.type
+  const label = ASSET_TYPES[type]
+  const what = mk.what.trim().slice(0, 40)
+  const name = what || `${whereOf(p)} ${label}`.trim() || label
+  if (!mayExtract()) { notice(`${denyReason('extract', roleOf(me.id))} ${ASK}.`); return }
+
+  const ok = await confirmAsk({
+    title: `${label} 자산으로 저장하고 재활용하시겠습니까?`,
+    body: '자산관리에 들어가서 팀 전체가 씁니다. 다음 컷들은 이것을 참조로 받아 같은 모습으로 그립니다.',
+    list: [
+      `종류 · ${label}`,
+      `이름 · ${name}`,
+      `떼어낸 곳 · ${whereOf(p)} ${labelOf(p)}`,
+    ],
+    yes: '저장합니다',
+    no: '그만두기',
+  })
+  if (!ok) return
+  /*
+   * charId 는 비웁니다. 이 인물이 명부의 누구인지는 사람이 짚은 낱말로 알 수 없고, 붙이려면
+   * 명부에서 고르게 해야 합니다. 비워 두면 자산관리에서 이름을 고칠 때 그 자리에서 잇습니다
+   * (pages/assets.js 의 charName 은 없는 값에 빈칸을 냅니다).
+   */
+  emit({
+    kind: 'asset.add',
+    asset: {
+      id: uid(), type, name, charId: null, src: mk.out.src,
+      fromPanelId: p.id, fromN: (liveVer(p)?.i ?? 0) + 1,
+      author: me.id, ts: now(), gen: mk.out.gen, prompt: what || null,
+    },
+  })
+  announce(`${label} 「${name}」${josa(name, '을', '를')} 자산관리에 넣었습니다.`)
+  notice(`${label} 「${name}」${josa(name, '을', '를')} 자산관리의 ${label} 장에 넣었습니다.`, 'ok')
+  byId('make').close()
+}
 
 let fastPoll = null
 async function pollGpu() {
@@ -1990,6 +2305,14 @@ function render() {
   renderFresh()
   renderHold()
   renderAdmin()
+  /*
+   * 자산으로 생성하기 창. 열려 있을 때만 무언가를 합니다.
+   *
+   * 여기 넣어 두는 까닭은 창이 판의 값을 보고 서 있기 때문입니다 — 어느 컷에서 떼어내는지,
+   * 그 컷에 무슨 그림이 붙어 있는지. 남이 그 컷을 지우거나 새 버전을 붙이면 창도 그것을
+   * 따라야 하고, 컷이 사라졌으면 창이 접혀야 합니다(renderMake).
+   */
+  renderMake()
 }
 
 function renderHeader() {
@@ -2040,6 +2363,38 @@ function renderTime() {
     </div>`)
 }
 
+/*
+ * ══ 왼쪽 기둥의 이름 고치기 ═════════════════════════════════════════════════
+ *
+ * 「컷 보드」라고만 적혀 있었습니다. 프로젝트 이름은 머리 띠에 있고(boardTitle) 이 줄은
+ * 회차가 없는 판의 자리표였는데, 회차를 나눈 판에서는 이 목록이 「1회 · 2회」로 서므로
+ * 회차마다 이름이 있습니다. 그러면 회차가 없는 판의 그 한 줄에도 이름이 있어야 합니다.
+ *
+ * 어디에 적히는지가 둘로 갈립니다.
+ *   회차가 없는 줄  판의 이름입니다(board.patch 의 title). 머리 띠와 인쇄 머리글이 같은
+ *                  값을 봅니다 — 이름을 고치면 그 셋이 같이 바뀝니다
+ *   회차 줄        그 회차의 이름입니다(ep.patch 의 title). epLabel 이 「3회 · 이름」으로
+ *                  적으므로 여기서 고치는 것은 뒤의 이름뿐이고 번호는 그대로입니다
+ */
+let renaming = null   // 고치는 중인 줄. '' 은 회차 없는 판, 그 밖은 epId. null 은 고치지 않는 중
+
+/** 목록 한 줄에 적히는 이름. 회차가 없으면 판의 이름입니다 */
+const navName = (ep, epCount) => (epCount ? epLabel(ep) : state.board.title || '컷 보드')
+
+/** 고친 이름을 판에 남깁니다. 빈 이름은 받지 않습니다 — 누를 곳이 없는 줄이 됩니다 */
+function saveNavName(key, raw) {
+  const value = String(raw || '').trim().slice(0, 60)
+  renaming = null
+  if (!may('edit')) { notice(`${whyNot('edit')}. ${ASK}.`); render(); return }
+  if (!value) { notice('이름을 비워 둘 수 없습니다.'); render(); return }
+  const ep = key ? state.eps[key] : null
+  if (key && !ep) { render(); return }
+  if (navName(ep, key ? 1 : 0) === value) { render(); return }
+  if (key) emit({ kind: 'ep.patch', epId: key, fields: { title: value } })
+  else emit({ kind: 'board.patch', fields: { title: value } })
+  announce(`이름을 「${value}」로 바꿨습니다.`)
+}
+
 function renderNav() {
   const chars = charList()
   byId('charCount').textContent = chars.length || ''
@@ -2055,16 +2410,47 @@ function renderNav() {
   }).join(''))
 
   const eps = epList()
+  /*
+   * 이름을 고치는 중이면 그 칸의 글과 캐럿을 지킵니다. renderNav 는 남의 op 하나에도 다시
+   * 도는데(render), 그때 칸을 새로 만들면 이름을 치던 사람의 글자가 눈앞에서 사라집니다.
+   */
+  const live = document.activeElement
+  const keep = renaming !== null && live?.id === 'navRen'
+    ? { value: live.value, start: live.selectionStart, end: live.selectionEnd } : null
   setHtml(byId('boardNav'), [null, ...eps].map((ep) => {
     const id = ep?.id ?? null
     const cuts = cutsOf(id)
     const ok = cuts.filter((p) => p.status === 'approved').length
-    const name = eps.length ? epLabel(ep) : '컷 보드'
-    return `<li><button class="nav__item" data-ep="${ep?.id ?? ''}"
+    const name = navName(ep, eps.length)
+    if (renaming === (id ?? '')) {
+      return `<li class="nav__row nav__row--edit">
+        <input class="nav__ren" id="navRen" value="${esc(name)}" maxlength="60"
+          aria-label="${esc(id ? '회차' : '보드')} 이름" spellcheck="false">
+        <button class="nav__pen nav__pen--ok" data-rensave="${esc(id ?? '')}" title="이름을 저장합니다">저장</button>
+        <button class="nav__pen" data-rencancel="1" title="그만두기">취소</button>
+      </li>`
+    }
+    return `<li class="nav__row"><button class="nav__item" data-ep="${ep?.id ?? ''}"
       data-active="${viewChar === null && viewEp === id ? 1 : 0}">
       <span class="nav__name">${esc(name)}</span><span class="nav__n">${ok}/${cuts.length}</span>
-    </button></li>`
+    </button>
+    ${/*
+      * 이름을 고치는 연필. 목록 줄 안이 아니라 옆에 세웁니다 — 줄 자체를 누르는 일이 그
+      * 보드로 가는 일이라, 안에 두면 이름을 고치려던 손이 화면을 갈아 버립니다.
+      *
+      * 막힌 사람에게도 보입니다. 감추면 「그런 기능이 없다」로 읽힙니다(perm.js 의 watchNope).
+      */''}
+    <button class="nav__pen" data-rename="${esc(id ?? '')}"
+      ${may('edit') ? '' : nope(whyNot('edit'))}
+      title="이름 바꾸기" aria-label="${esc(name)} 이름 바꾸기">✎</button></li>`
   }).join(''))
+  if (renaming !== null) {
+    const el = byId('navRen')
+    if (el) {
+      if (keep) { el.value = keep.value; try { el.setSelectionRange(keep.start, keep.end) } catch { /* 글이 짧아졌을 때 */ } }
+      if (live?.id !== 'navRen') { el.focus(); el.select() }
+    }
+  }
 
   /*
    * 인물을 골랐을 때만 그 아래 설정 칸을 폅니다. 컷 보드를 보는 중에는 고칠 인물이
@@ -3039,6 +3425,12 @@ function renderDetail() {
   const ch = p.charId ? state.chars[p.charId] : null
   const st = STATUS[p.status]
   const editable = mayEdit(p)
+  /*
+   * 그림 만들기는 「내용 편집」이 아니라 「이미지 만들기」권한입니다. 예전에는 생성 자리까지
+   * editable 로 잠가서, 권한 관리에서 「이미지 만들기」를 허용해도 「내용 편집」이 막힌
+   * 사람에게는 단추가 그대로 잠겨 있었습니다. 승인된 컷은 둘 다 잠깁니다(이야기의 규칙).
+   */
+  const artOk = p.status !== 'approved' && may('art')
   const cmts = state.comments.filter((c) => c.panelId === p.id).sort((x, y) => x.ts - y.ts)
   const logs = state.events.filter((e) => e.panelId === p.id).sort((x, y) => y.ts - x.ts).slice(0, 8)
   const cur = liveVer(p)
@@ -3064,6 +3456,8 @@ function renderDetail() {
    * 아닙니다.
    */
   const noEdit = nope(whyNotEdit(p))
+  // 생성 자리가 막힌 사유. 승인된 컷이면 상태 때문이고(whyNotEdit), 아니면 권한입니다
+  const noArt = nope(p.status === 'approved' ? whyNotEdit(p) : whyNot('art'))
   const dis = () => (editable ? '' : `readonly ${noEdit}`)
 
   const o = optsFor(p)
@@ -3135,62 +3529,120 @@ function renderDetail() {
       : ` 아직 올라오지 않았습니다(약 ${mins(picked.wait)}분).`}</p>`
 
   /*
-   * 영상 단추와 그 옆의 길이·화질. 그림 단추 바로 옆에 둡니다 — 「이 그림으로 간다」가
-   * 정해진 다음에 오는 일이라, 그것을 위해 다른 화면으로 보낼 이유가 없습니다.
+   * ══ 그림 한 장이 정해진 다음에 하는 일 셋 — 타일
    *
-   * 승인 전에도 단추는 있고 누르면 이유가 뜹니다(위 actionBtns 와 같은 규칙입니다).
-   * 지워 버리면 「영상은 어디서 만드나」가 되고, disabled 로 두면 왜 막혔는지 마우스를
-   * 올려 본 사람만 압니다.
+   * 영상으로 만들기 · 조각을 자산으로 떼기 · 손으로 그린 스케치 올리기입니다. 셋 다 이 컷의
+   * 그림에서 시작하므로 그리기 단추 아래에 모여 있습니다.
    *
-   * 인물 구도에는 내지 않습니다. 구도는 얼굴을 정하려고 그리는 그림이고, 영상으로 만들
-   * 것은 컷입니다. 생성 서버가 없는 배포에서도 내지 않습니다 — 누를 곳이 없습니다.
+   * ── 왜 단추 줄이 아니라 타일인가
+   *
+   * 셋을 .acts 한 줄에 세워 두었습니다. 오른쪽 판이 344px 이라 「이 컷 그리기 · 영상으로
+   * 생성 · 자산으로 생성하기」가 두세 줄로 접히면서 어느 것이 주된 일인지 없어졌고, 각각이
+   * 무엇을 하는 일인지는 단추 아래에 11.5px 회색 문단으로 따로 쌓였습니다. 단추 셋에 문단
+   * 넷이 딸린 셈입니다.
+   *
+   * 이름과 설명을 한 칸에 넣으면 그 문단들이 사라집니다. 칸이 두 줄이니 이름은 13px 로
+   * 세울 수 있고, 설명은 그 이름에 붙어 있어서 무엇에 대한 말인지 읽을 필요가 없습니다.
+   *
+   * ── 막힌 타일
+   *
+   * 감추지 않습니다(이 판의 규칙 — 위 actionBtns 의 머리글). 대신 설명 자리에 막힌 이유가
+   * 그대로 들어갑니다. whyNotClip·whyNotMake 가 이미 「리뷰 대기 상태입니다. 감독이 승인하면
+   * …」처럼 한 줄로 말하고 있어서, 없앤 문단들과 같은 말을 그 자리에서 합니다.
    */
   const clipping = clipWork.get(p.id)
   const clipWhy = whyNotClip(p)
   const noClip = p.charId || !canAnimate()
-  const clipBtn = noClip ? '' : `
-      <button class="btn btn--line" data-do="animate" ${clipWhy ? `aria-disabled="true" title="${esc(clipWhy)}"` : ''}>
-        ${clipping ? '영상 만드는 중…' : '영상으로 생성'}
+  const makeWhy = whyNotMake(p)
+  const noMake = p.charId || !canGen
+  /**
+   * 타일 하나. why 가 있으면 설명 자리에 그 이유가 서고 단추가 잠깁니다.
+   * @param {string} nopeAttr - 권한으로 막힌 자리에만. aria-disabled + data-nope 를 통째로 받습니다
+   * @param {string} busy - 지금 이 타일의 일이 돌고 있으면 그 진행 한 줄. 이유 대신 이것을 냅니다
+   */
+  const tile = (act, label, sub, why, nopeAttr = '', busy = '') => `
+      <button class="tile${busy ? ' tile--busy' : ''}" data-do="${act}"
+        ${busy ? `aria-disabled="true" aria-busy="true" title="${esc(busy)}"`
+    : why ? nopeAttr || `aria-disabled="true" title="${esc(why)}"` : ''}>
+        <b class="tile__t">${esc(label)}</b>
+        <span class="tile__sub">${esc(busy || why || sub)}</span>
       </button>`
+  const cutTiles = `
+    <div class="tiles">
+      ${/*
+        * 만드는 중이면 설명 자리가 진행 한 줄입니다(waitVideo·clipHint 가 적는 것). 그때
+        * whyNotClip 도 「이미 영상을 만들고 있습니다」를 내는데, 그 말보다 몇 초 남았는지가
+        * 쓸모 있습니다 — 같은 사실을 두 가지로 말할 이유가 없어 진행 쪽을 냅니다.
+        */''}
+      ${noClip ? '' : tile('animate',
+    clipping ? '영상 만드는 중…' : '영상으로 생성',
+    '이 그림을 첫 프레임으로 삼아 움직입니다', clipWhy, '', clipping || '')}
+      ${noMake ? '' : tile('make', '자산으로 생성',
+    '인물·배경·소품 중 하나만 떼어 자산관리에 둡니다', makeWhy)}
+      ${tile('upload', '스케치 올리기',
+    '직접 그린 그림이 이 컷의 다음 버전이 됩니다',
+    artOk ? '' : p.status === 'approved' ? whyNotEdit(p) : whyNot('art'), noArt)}
+    </div>`
+
   const eta = clipEta()
   /*
-   * 길이·화질은 실제로 누를 수 있을 때만 냅니다. 승인은 됐어도 그림이 없으면 첫 프레임이
-   * 없어서 단추는 막혀 있는데(whyNotClip), 고를 것이 먼저 보이면 「고르면 된다」로 읽힙니다.
+   * 영상의 길이·화질. 실제로 누를 수 있을 때만 냅니다 — 승인 전이나 그림이 없을 때는 위
+   * 타일이 그 이유를 들고 있고, 그때 고를 것이 먼저 보이면 「고르면 된다」로 읽힙니다.
+   *
+   * 라벨 없는 select 둘이 한 줄에 나란히 서 있었습니다(「3초」·「빠르게 · 832×480」). 무엇을
+   * 고르는 칸인지가 값에만 있어서, 화질을 「곱게」로 바꾸면 그 줄이 무슨 줄이었는지 사라졌습니다.
+   * 두 칸으로 갈라 각자 이름을 답니다.
    */
-  const clipRow = noClip ? '' : p.status !== 'approved' ? `
-    <p class="why">영상은 승인된 이미지로만 만듭니다 — 아직 고칠 그림으로 만들면 그 시간과 GPU
-      자리를 버립니다. 감독이 이 컷을 승인하면 「영상으로 생성」이 열립니다.</p>` : !stillOf(p) ? `
-    <p class="why">승인은 됐지만 이 컷에 그림이 없습니다. 영상은 승인된 이미지를 첫 프레임으로
-      씁니다 — 먼저 위의 「이 컷 그리기」로 그림을 한 장 만드세요.</p>` : `
-    <div class="gen__row">
-      <span class="mono gen__lab">영상</span>
-      <select id="clipSecs" aria-label="영상 길이">${clipSecs().map((s) => `
-        <option value="${s}"${clipOpts.secs === s ? ' selected' : ''}>${s}초</option>`).join('')}</select>
-      <select id="clipQuality" aria-label="영상 화질">${clipQual().map((q) => `
-        <option value="${esc(q.id)}"${clipOpts.quality === q.id ? ' selected' : ''}>${esc(q.label)}</option>`).join('')}</select>
-      ${eta ? `<span class="mono gen__val">약 ${eta < 60 ? `${eta}초` : `${mins(eta)}분`}</span>` : ''}
-    </div>
-    <p class="why">승인된 이미지가 첫 프레임입니다. 움직임은 이 컷의 작업 지시·대사·카메라에서
-      만들어 보냅니다. 나온 영상은 이 컷의 다음 버전으로 붙습니다.</p>`
+  const clipOptsRow = noClip || clipWhy ? '' : `
+    <div class="opts">
+      <label class="opts__cell"><span class="mono opts__lab">길이</span>
+        <select id="clipSecs" aria-label="영상 길이">${clipSecs().map((s) => `
+          <option value="${s}"${clipOpts.secs === s ? ' selected' : ''}>${s}초</option>`).join('')}</select></label>
+      <label class="opts__cell"><span class="mono opts__lab">화질</span>
+        <select id="clipQuality" aria-label="영상 화질">${clipQual().map((q) => `
+          <option value="${esc(q.id)}"${clipOpts.quality === q.id ? ' selected' : ''}>${esc(q.label)}</option>`).join('')}</select></label>
+      ${eta ? `<span class="opts__eta">만드는 데 약 ${eta < 60 ? `${eta}초` : `${mins(eta)}분`}</span>` : ''}
+    </div>`
 
   /*
-   * 자산 한 줄. 자산 자체는 「자산관리」 화면의 것이라 여기서는 이 컷에서 무엇이 뽑혔는지와
-   * 그 화면으로 가는 길만 둡니다. 승인 전에는 「승인하면 뽑힌다」만 말합니다. 생성 칸
-   * (genBody)과 달리 감독에게도 보입니다 — 승인을 누르는 사람이 감독이라 뽑는 진행도 그
-   * 화면에 뜹니다.
+   * 이 컷에서 뽑아 둔 자산. 자산 자체는 「자산관리」 화면의 것이라 여기서는 개수와 그 화면으로
+   * 가는 길, 그리고 한 벌을 한꺼번에 뽑는 단추만 둡니다. 생성 칸(genBody)과 달리 감독에게도
+   * 보입니다 — 승인을 누르는 사람이 감독이라 뽑는 진행도 그 화면에 뜹니다.
    *
-   * 접지 않습니다. 한 줄이고, 「승인하면 자산이 된다」는 것이 이 판에서 승인을 누르는 사람이
-   * 알아야 할 결과입니다. 접힌 제목 뒤에 두면 그 한 줄을 볼 이유가 없어집니다.
+   * 회색 문단 한 줄이었습니다. 「승인은 됐지만 뽑은 자산이 없습니다」 뒤에 9.5px 밑줄 링크로
+   * 「자산으로 뽑기」가 붙어 있어서, 이 판에서 실제로 누르는 것 중 가장 작은 글씨였습니다.
+   * 개수를 왼쪽에 숫자로 세우고 누르는 것을 오른쪽 끝에 떼어 놓습니다 — 아래 「버전」·「메모」
+   * 덩이의 제목 줄과 같은 모양이라, 접지 않은 결과 한 줄로 읽힙니다.
    */
   const assetsHref = navHref('assets', boardFromSearch())
-  const assetLine = p.charId || !canGen ? '' : extracting ? `
-    <p class="why why--busy">${esc(extracting)}</p>` : p.status !== 'approved' ? `
-    <p class="why">감독이 이 컷을 승인하면 그 그림에서 인물·배경·소품을 따로 그려
-      <a href="${esc(assetsHref)}">자산관리</a>에 넣습니다.</p>` : `
-    <p class="why">${assetMine.length
-    ? `이 컷에서 뽑은 자산 ${assetMine.length}개가 <a href="${esc(assetsHref)}">자산관리</a>에 있습니다.`
-    : `승인은 됐지만 뽑은 자산이 없습니다.${extractWhy ? ` ${esc(extractWhy)}.` : ''}`}
-      ${extractWhy ? '' : `<button type="button" class="mini" data-do="extract">${assetMine.length ? '다시 뽑기' : '자산으로 뽑기'}</button>`}</p>`
+  /*
+   * 이 그림을 그대로 자산으로(keepAsAsset). 위의 「한 벌 뽑기」와 아래 타일의 「자산으로
+   * 생성」이 둘 다 GPU 로 다시 그리는 데 비해 이것은 그리지 않으므로, 승인도 생성 서버도
+   * 필요하지 않습니다 — 그래서 조건이 다릅니다(그림만 있으면 됩니다).
+   *
+   * 종류 셋이 곧 단추입니다. 고르는 창을 띄우면 두 걸음이 되는데, 이미 나온 그림을 그대로
+   * 넣는 일에 창까지 띄울 값은 없습니다. 넣어 둔 종류에는 ✓ 를 답니다(다시 누르면 갈아 끼움).
+   */
+  const keptOf = (t) => assetsFrom(p.id).some((a) => a.type === t && a.source === 'keep')
+  const keepLine = p.charId || !stillOf(p) || !mayExtract() ? '' : `
+    <div class="line">
+      <span class="line__t">이 그림을 그대로 자산으로</span>
+      <span class="line__set">
+        ${REF_TYPES.map((t) => `<button type="button" class="line__do" data-do="keep:${t}"
+          title="${keptOf(t) ? '이미 넣은 자산의 그림을 이 그림으로 바꿉니다' : `${ASSET_TYPES[t]} 자산으로 저장합니다`}"
+          >${ASSET_TYPES[t]}${keptOf(t) ? ' ✓' : ''}</button>`).join('')}
+      </span>
+    </div>`
+  const assetLine = keepLine + (p.charId || !canGen ? '' : extracting ? `
+    <div class="line line--busy"><span class="line__t">${esc(extracting)}</span></div>`
+    : p.status !== 'approved' ? '' : `
+    <div class="line">
+      <span class="line__t">이 컷에서 뽑은 자산</span>
+      <span class="line__n">${assetMine.length}</span>
+      ${assetMine.length ? `<a class="line__go" href="${esc(assetsHref)}">자산관리에서 보기</a>` : ''}
+      ${extractWhy ? `<span class="line__why">${esc(extractWhy)}</span>`
+    : `<button type="button" class="line__do" data-do="extract">${assetMine.length ? '한 벌 다시 뽑기' : '한 벌 뽑기'}</button>`}
+    </div>`)
 
   /*
    * 기반 이미지를 얼마나 살릴지. 모델이 그것을 어떻게 쓰는지에 따라 칸 자체가 없어집니다.
@@ -3206,8 +3658,8 @@ function renderDetail() {
     : picked?.init === false || (connPick && picked.strength !== true) || picked?.strength === false ? '' : `
       <div class="gen__row">
         <span class="mono gen__lab">기반을 얼마나 살릴지</span>
-        ${MORPHS.map((v) => `<button class="chip" data-morph="${v}" data-on="${
-  Math.abs(o.strength - v) < 0.01 ? 1 : 0}" ${editable ? '' : noEdit}>${esc(morph(v))}</button>`).join('')}
+        <div class="gen__chips">${MORPHS.map((v) => `<button class="chip" data-morph="${v}" data-on="${
+  Math.abs(o.strength - v) < 0.01 ? 1 : 0}" ${editable ? '' : noEdit}>${esc(morph(v))}</button>`).join('')}</div>
       </div>`
 
   const morphWhy = refKey === 'none' && !assetIds.length ? '' : picked?.init === false ? `
@@ -3243,11 +3695,11 @@ function renderDetail() {
     <label class="f">
       <span class="f__label"><span class="mono">생성 지시</span>
         ${o.prompt !== null ? '<button class="mini" data-do="autofill">작업 내용으로 다시 채우기</button>' : ''}</span>
-      <textarea rows="3" id="genPrompt" placeholder="어떤 그림이 필요한지 적어주세요. 한국어로 써도 됩니다." ${dis()}>${esc(o.prompt ?? autoPrompt(p))}</textarea>
+      <textarea rows="3" id="genPrompt" placeholder="어떤 그림이 필요한지 적어주세요. 한국어로 써도 됩니다." ${artOk ? '' : `readonly ${noArt}`}>${esc(o.prompt ?? autoPrompt(p))}</textarea>
     </label>
     <div class="gen__row">
       <span class="mono gen__lab">기반 이미지</span>
-      ${refs.map((r) => `<button class="chip" data-ref="${r.key}" data-on="${refKey === r.key ? 1 : 0}" title="${esc(r.hint || '')}" ${editable ? '' : noEdit}>${esc(r.label)}</button>`).join('')}
+      <div class="gen__chips">${refs.map((r) => `<button class="chip" data-ref="${r.key}" data-on="${refKey === r.key ? 1 : 0}" title="${esc(r.hint || '')}" ${artOk ? '' : noArt}>${esc(r.label)}</button>`).join('')}</div>
     </div>
     ${/* 고른 기반 이미지를 눈으로 확인시켜 줍니다. 이름만 있으면 무엇을 물려받는지 모릅니다 */ ''}
     ${pickedRef?.srcs ? `<div class="gen__ref gen__ref--many">${pickedRef.srcs.map((s) => media(s, 'alt="" loading="lazy"')).join('')}</div>`
@@ -3255,8 +3707,8 @@ function renderDetail() {
     ${morphRow}
     ${/* 얼굴 안내(faceMiss·faceNote)는 컷의 것입니다. 아래 cutGen 에 있습니다 */ ''}
     <div class="acts">
-      <button class="btn btn--line" data-do="upload" ${editable ? '' : noEdit}>스케치 올리기</button>
-      <button class="btn btn--solid" data-do="generate" ${!editable ? noEdit : busyBy ? 'disabled' : ''}>
+      <button class="btn btn--line" data-do="upload" ${artOk ? '' : noArt}>스케치 올리기</button>
+      <button class="btn btn--solid" data-do="generate" ${!artOk ? noArt : busyBy ? 'disabled' : ''}>
         ${busyBy ? `${esc(busyBy.name)} 생성 중…` : ver ? '다시 그리기' : '이 구도 그리기'}
       </button>
     </div>
@@ -3264,7 +3716,35 @@ function renderDetail() {
     ${tipBox('gen.tip', [modelNote, morphWhy])}`
 
   /*
-   * ══ 컷의 그림 단추 둘 — 「그린다」와 「영상으로 만든다」
+   * 컷을 무엇으로 그리는지. 이름과 값의 표입니다.
+   *
+   * 한 문장이었습니다 — 「이 컷의 화면 설명으로, 자산 3장과 기승전의 얼굴을 물려받아 FLUX.2
+   * klein 9B 가 그립니다. 나온 것은 v4으로 붙습니다.」 다 맞는 말인데 11.5px 회색 두 줄이라
+   * 단추 아래 각주로 보였고, 정작 「어느 모델이 그리나」를 찾으려면 그 문장을 읽어야 했습니다.
+   * 조사도 여기서 갈렸습니다(v4으로).
+   *
+   * 이름을 왼쪽에 세로로 맞춰 두면 눈이 값만 훑습니다. 없는 줄은 아예 안 냅니다 — 참조가
+   * 없는 컷에 「참조 없음」을 적는 것은 자리만 먹습니다.
+   *
+   * 아래 cutGen 보다 앞에 서야 합니다. const 는 선언 앞에서 읽으면 ReferenceError 라
+   * (TDZ) 뒤에 두면 renderDetail 이 통째로 죽고 오른쪽 판이 「컷을 선택하면…」에서 멈춥니다.
+   */
+  const genRows = (() => {
+    const rows = [['지시문', '이 컷의 화면 설명']]
+    if (refKey !== 'none' && pickedRef) {
+      rows.push(['기반 이미지', pickedRef.face ? `${pickedRef.from?.name || pickedRef.label}의 얼굴`
+        : refKey === 'keyvisual' ? `${sceneMeta(p.scene).no || '이 씬'}의 키 비주얼`
+          : pickedRef.label])
+    }
+    if (assetIds.length) rows.push(['참조 자산', `${assetIds.length}장`])
+    if (picked) rows.push(['모델', picked.label])
+    // 「v4으로 붙습니다」의 조사를 피합니다. 이름이 「다음 버전」이면 값은 번호 하나로 끝납니다
+    rows.push(['다음 버전', ver ? `v${live.length + 1}` : 'v1 · 이 컷의 첫 그림'])
+    return rows
+  })()
+
+  /*
+   * ══ 컷에서 하는 일 — 그리기 한 단추와 그 다음 일 셋
    *
    * 이름을 상황에 따라 바꿉니다. 「AI로 생성」이었는데 무엇 한 장인지가 빠져서 위 탭의
    * 키비주얼과 같은 층으로 읽혔습니다 — 그쪽은 씬 하나를 그리는 일이고 이것은 컷 하나를
@@ -3273,61 +3753,50 @@ function renderDetail() {
    *
    * 그림이 없으면 「이 컷 그리기」, 있으면 「다시 그리기」입니다. 누를 때마다 버전이 하나
    * 붙기 때문에 두 번째부터는 실제로 다시 그리는 일이고, 첫 장에 「다시」는 틀린 말입니다.
+   *
+   * ── 무게를 갈라 둡니다
+   *
+   * 단추 셋이 같은 줄에 같은 크기로 서 있었습니다(그리기 · 영상 · 자산). 셋 다 344px 판에서
+   * 두 줄로 접혔고, 그 아래로 회색 문단이 다섯 쌓였습니다. 지금 이 컷에서 할 일 하나는
+   * 「그린다」이고 나머지는 그림이 나온 다음의 일이라, 그리기만 판 폭을 채우는 큰 단추로
+   * 세우고 나머지 셋은 아래 타일로 내립니다(위 cutTiles).
    */
   const cutGen = !may('art') ? `
     <p class="why">${esc(whyNot('art'))}. 필요한 그림이 있으면 아래 메모로 남겨주세요.</p>` : `
-    <div class="acts" style="margin-top:0">
-      <button class="btn btn--solid" data-do="generate" ${!editable ? noEdit : busyBy ? 'disabled' : ''}>
-        ${busyBy ? `${esc(busyBy.name)} 생성 중…` : ver ? '다시 그리기' : '이 컷 그리기'}
-      </button>
-      ${clipBtn}
-    </div>
+    <button class="btn btn--solid btn--wide btn--go" data-do="generate" ${!artOk ? noArt : busyBy ? 'disabled' : ''}>
+      ${busyBy ? `${esc(busyBy.name)} 생성 중…` : ver ? '다시 그리기' : '이 컷 그리기'}
+    </button>
     ${/*
-      * 무엇으로 그리는지 한 줄. 고르는 칸이 없어졌으므로 이 줄이 그 자리를 대신합니다 —
-      * 누르기 전에 이 컷이 무슨 얼굴·무슨 씬을 물려받는지 알아야 엉뚱한 그림을 받지 않습니다.
+      * 무엇으로 그리는지. 고르는 칸이 없어졌으므로 이 표가 그 자리를 대신합니다 — 누르기
+      * 전에 이 컷이 무슨 얼굴·무슨 씬을 물려받는지 알아야 엉뚱한 그림을 받지 않습니다.
       */''}
-    <p class="why">${busyBy ? `${esc(busyBy.name)}이 이 컷을 그리고 있습니다.`
-    : `${esc(genWith)} 그립니다.${ver ? ` 나온 것은 v${live.length + 1}으로 붙습니다.` : ''}`}</p>
-    ${clipping ? `<p class="why why--busy">${esc(clipping)}</p>` : ''}
-    ${/* 얼굴이 없는 것은 접지 않습니다. 누르기 전에 알아야 할 일이라 단추 바로 아래입니다 */''}
+    ${busyBy ? `<p class="why why--busy">${esc(busyBy.name)}이 이 컷을 그리고 있습니다.</p>` : `
+    <dl class="with">${genRows.map(([k, v]) => `
+      <dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}
+    </dl>`}
     ${faceMiss}
     ${p.genError ? `<p class="why why--bad">${esc(p.genError)}</p>` : hint ? `<p class="why">${esc(hint)}</p>` : ''}
-    ${clipRow}
-    ${/* 컷에도 스케치를 올릴 수 있어야 합니다. 손으로 그린 콘티가 그대로 이 컷의 버전이 됩니다 */''}
-    <p class="why">직접 그린 그림이 있으면
-      <button type="button" class="mini" data-do="upload" ${editable ? '' : noEdit}>스케치 올리기</button></p>
-    ${tipBox('cut.tip', [faceNote, modelNote])}`
+    ${tipBox('cut.tip', [faceNote, modelNote])}
+    ${/*
+      * 그림이 나온 다음에 하는 일 셋. 위 그리기 단추와 실선으로 갈라 둡니다 — 승인 전에는
+      * 셋 다 막혀 있고, 무엇을 하면 열리는지는 각 타일이 자기 자리에서 말합니다.
+      */''}
+    <div class="then">
+      ${cutTiles}
+      ${clipOptsRow}
+    </div>`
 
   /*
    * 접힌 채로 「지금 무엇으로 그리는지」를 한 줄로 말합니다. 이 덩이를 접으면 모델 이름과
    * 참조가 안 보이는데, 그것을 모르고 「생성」을 누르면 엉뚱한 얼굴이 나옵니다.
    *
-   * 인물 구도에만 씁니다. 컷은 이 덩이가 없어졌고(cutGen) 같은 말을 단추 아래 문장으로
-   * 합니다(genWith).
+   * 인물 구도에만 씁니다. 컷은 이 덩이가 없어졌고(cutGen) 같은 말을 단추 아래 표로
+   * 합니다(genRows).
    */
   const genLead = !may('art') ? '만들 권한이 없습니다'
     : busyBy ? `${busyBy.name} 생성 중`
       : [refKey === 'none' ? '' : pickedRef?.label || '',
         picked?.label || ''].filter(Boolean).join(' · ') || '지시문만으로 그립니다'
-
-  /*
-   * 컷을 무엇으로 그리는지. 위 genLead 와 같은 것을 문장으로 말합니다.
-   *
-   * 고르는 칸이 다 나갔으므로 이 한 줄이 그 자리입니다. 이름만 나열하면(「기승전 얼굴 ·
-   * 씬 키 비주얼 · klein」) 그것이 무엇인지 모르는 사람에게는 낱말 셋일 뿐이라, 무엇을
-   * 어디서 가져오는지를 말로 풉니다. 자산·얼굴·씬 그림이 다 없으면 지시문만 갑니다.
-   */
-  const genWith = (() => {
-    const bits = []
-    if (assetIds.length) bits.push(`자산 ${assetIds.length}장`)
-    if (refKey !== 'none' && pickedRef) {
-      bits.push(pickedRef.face ? `${pickedRef.from?.name || pickedRef.label}의 얼굴`
-        : refKey === 'keyvisual' ? `${sceneMeta(p.scene).no || '이 씬'}의 키 비주얼`
-          : pickedRef.label)
-    }
-    const from = bits.length ? `${bits.join('과 ')}${josa(bits.at(-1), '을', '를')} 물려받아` : ''
-    return `이 컷의 화면 설명${from ? `으로, ${from}` : '으로'}${picked ? ` ${picked.label}이` : ''}`
-  })()
 
   const rmWhy = !ver ? '먼저 이미지가 있어야 합니다'
     : !ver.vid ? '옛 캐시의 버전입니다. 새로고침하면 지울 수 있습니다'
@@ -3345,13 +3814,30 @@ function renderDetail() {
    * data-nope 를 달지 않는 이유: 그쪽은 「감독에게 요청하세요」가 따라붙습니다. 상태 때문에
    * 막힌 것은 부탁할 일이 아니라 앞 단계가 끝나면 저절로 풀리는 것입니다. 그래서 이유만
    * 싣고, 누르면 아래 data-act 처리가 mayTransition 을 다시 보고 그 이유를 띄웁니다.
+   *
+   * ── 지금 할 수 있는 것과 지금 못 하는 것을 층으로 가릅니다
+   *
+   * 다섯이 한 줄에 같은 크기로 있었습니다 — 리뷰 요청 · 승인 · 수정 요청 · 수정 시작 ·
+   * 승인 해제. 어느 상태에서든 실제로 갈 수 있는 길은 한둘뿐인데(TRANSITIONS), 나머지 셋넷도
+   * 같은 무게로 서서 344px 판을 세 줄로 채웠습니다. 흐려 놓기만 해서는 안 됩니다 — 옅은 단추
+   * 다섯도 단추 다섯입니다.
+   *
+   * 갈 수 있는 것은 큰 단추로 위에 세우고, 못 가는 것은 그 아래 작은 줄로 내립니다. 감추는
+   * 것이 아니라 층을 다르게 두는 것이라 누르면 여전히 이유가 뜹니다. 아무 데도 못 가는
+   * 상태(승인된 컷을 보는 아티스트)에서도 아래 줄은 남으므로 「단추가 사라졌다」가 없습니다.
    */
-  const actionBtns = Object.keys(ACTIONS).filter((x) => x !== 'assign').map((x) => {
+  const actBtn = (x, cls) => {
     const c = mayTransition(p.status, x)
-    const cls = x === 'approve' ? 'btn--approve' : x === 'request_changes' ? 'btn--reject' : 'btn--line'
     const off = may(x) ? `aria-disabled="true" title="${esc(c.reason || '')}"` : nope(whyNot(x))
-    return `<button class="btn ${cls}" data-act="${x}" ${c.ok ? '' : off}>${ACTIONS[x].label}</button>`
-  }).join('')
+    return `<button class="${cls}" data-act="${x}" ${c.ok ? '' : off}>${ACTIONS[x].label}</button>`
+  }
+  const acts = Object.keys(ACTIONS).filter((x) => x !== 'assign')
+  const actOn = acts.filter((x) => mayTransition(p.status, x).ok)
+  const actOff = acts.filter((x) => !mayTransition(p.status, x).ok)
+  const actionBtns = `
+    ${actOn.length ? `<div class="foot__go">${actOn.map((x) => actBtn(x,
+    `btn ${x === 'approve' ? 'btn--approve' : x === 'request_changes' ? 'btn--reject' : 'btn--line'}`)).join('')}</div>` : ''}
+    ${actOff.length ? `<div class="foot__off">${actOff.map((x) => actBtn(x, 'foot__x')).join('')}</div>` : ''}`
 
   const poseFields = `
     <div class="anchor">
@@ -3456,10 +3942,14 @@ function renderDetail() {
         * 담당. 접지 않습니다. 한 줄이고, 「이 컷이 지금 누구 손에 있는가」는 무엇을 하든
         * 먼저 봐야 하는 것입니다.
         *
+        * 이름을 위에 얹고 select 이 판 폭을 다 먹는 칸(.f)이었습니다. 고르는 것 하나에 두
+        * 줄이 갔고, 그 두 줄이 판을 열었을 때 제일 먼저 오는 것이라 「이 판은 칸을 채우는
+        * 자리」로 읽혔습니다. 이름을 왼쪽에 붙여 한 줄로 눕힙니다.
+        *
         * select 은 readonly 를 받지 않습니다. 잠근 채 두고 data-nope 는 감싼 칸에 답니다
         */ ''}
-      <label class="f f--tight" ${may('assign') ? '' : nope(whyNot('assign'))}>
-        <span class="f__label"><span class="mono">담당</span></span>
+      <label class="who" ${may('assign') ? '' : nope(whyNot('assign'))}>
+        <span class="mono who__lab">담당</span>
         <select data-field="assignee" ${may('assign') ? '' : 'disabled'}>
           ${assignOpts(p.assignee)}
         </select>
@@ -3520,7 +4010,7 @@ function renderDetail() {
 
       ${/* 바닥에 붙는 띠입니다. 스크롤과 무관하게 늘 보입니다 (board.html 의 .detail__foot) */ ''}
       <div class="detail__foot">
-        <div class="acts" style="margin-top:0">${actionBtns}</div>
+        ${actionBtns}
         <p class="why" id="actWhy"></p>
       </div>
     </div>`)
@@ -3762,6 +4252,21 @@ byId('toasts').addEventListener('click', (e) => {
 })
 
 function navClick(e) {
+  /*
+   * 이름 고치기가 보드 고르기보다 앞입니다. 연필과 저장·취소는 목록 줄 밖에 있지만
+   * (renderNav 의 .nav__row) 같은 기둥에서 나오므로 여기서 먼저 걸러야 합니다.
+   */
+  const pen = e.target.closest('[data-rename]')
+  if (pen) {
+    // 막혀 있으면 watchNope 가 이미 이유를 띄우고 여기까지 오지 않습니다(data-nope)
+    renaming = pen.dataset.rename
+    render()
+    return
+  }
+  const save = e.target.closest('[data-rensave]')
+  if (save) { saveNavName(save.dataset.rensave, byId('navRen')?.value); return }
+  if (e.target.closest('[data-rencancel]')) { renaming = null; render(); return }
+
   const btn = e.target.closest('[data-char],[data-ep]')
   if (!btn) return
   if ('ep' in btn.dataset) setEp(btn.dataset.ep || null)
@@ -3770,6 +4275,15 @@ function navClick(e) {
 }
 byId('charNav').addEventListener('click', navClick)
 byId('boardNav').addEventListener('click', navClick)
+/*
+ * 엔터로 저장하고 Esc 로 그만둡니다. 글 칸 하나짜리 편집이라 손이 칸을 떠나지 않고 끝나야
+ * 합니다 — 저장 단추까지 마우스로 가야 하면 이름 하나 고치는 일이 세 동작이 됩니다.
+ */
+byId('boardNav').addEventListener('keydown', (e) => {
+  if (e.target.id !== 'navRen') return
+  if (e.key === 'Enter') { e.preventDefault(); saveNavName(renaming, e.target.value) }
+  if (e.key === 'Escape') { e.preventDefault(); renaming = null; render() }
+})
 byId('newChar').addEventListener('click', addChar)
 
 const laterChar = debounceBy(160)
@@ -4015,10 +4529,12 @@ detail.addEventListener('click', async (e) => {
   }
   /*
    * 참조 자산을 켜고 끄던 갈래가 여기 있었습니다(data-asset). 칩 줄이 없어져서 나갔습니다.
-   * 무엇을 참조하는지는 autoAssets 가 잡고 단추 아래 한 줄이 말해 줍니다(genWith).
+   * 무엇을 참조하는지는 autoAssets 가 잡고 단추 아래 표가 말해 줍니다(genRows).
    * optsFor 의 assets 칸은 그대로 둡니다 — 읽는 쪽(assetIdsOf)이 여전히 봅니다.
    */
   if (doWhat === 'extract') { extractAssets(p); return }
+  if (doWhat === 'make') { openMake(p); return }
+  if (doWhat?.startsWith('keep:')) { keepAsAsset(p, doWhat.slice(5)); return }
   if (doWhat === 'autofill') { optsFor(p).prompt = null; renderDetail(); return }
   if (doWhat === 'viewer') { openViewer(p.id); return }
   if (memoClick(e, p, 'cmtInput')) return
@@ -4267,7 +4783,8 @@ document.addEventListener('keydown', (e) => {
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return
   // 「이야기 기획」 창(#plan)도 같이 보던 자리입니다. 그 창이 화면에서 나갔습니다
-  if (byId('admin').open) return
+  // 자산으로 생성하기 창도 같이 봅니다. 그 안에서 g 를 누르면 뒤의 판으로 초점이 넘어갑니다
+  if (byId('admin').open || byId('make').open) return
   if (e.key === '?') { byId('keys').showModal(); return }
   if (e.key === 'i' || e.key === 'I') {
     e.preventDefault()
@@ -4338,6 +4855,55 @@ admin.addEventListener('change', (e) => {
 })
 
 admin.addEventListener('focusout', () => setTimeout(renderAdmin))
+
+/*
+ * 자산으로 생성하기 창. 안을 renderMake 가 다시 그리므로 단추마다 붙이지 않고 창 하나가
+ * 받습니다 — 다시 그린 뒤에 붙이는 것을 잊으면 그 단추만 조용히 죽습니다(위 admin 과 같습니다).
+ */
+const make = byId('make')
+make.addEventListener('click', (e) => {
+  const type = e.target.closest('[data-mktype]')?.dataset.mktype
+  if (type) {
+    if (mk && !mk.busy) {
+      /*
+       * 종류를 바꾸면 나온 그림을 버립니다. 「소품」으로 뽑은 삼각김밥을 창에 두고 「인물」을
+       * 고르면, 저장 단추는 인물이라고 적힌 채 그 삼각김밥을 인물 자산으로 넣습니다.
+       */
+      mk.type = type
+      mk.out = null
+      mk.err = ''
+      renderMake()
+      // 다시 그린 칩은 다른 요소입니다. 키보드로 고른 사람이 초점을 잃지 않게 되찾아 줍니다
+      make.querySelector(`[data-mktype="${type}"]`)?.focus()
+    }
+    return
+  }
+  if (e.target.closest('#mkClose')) { closeMake(); return }
+  if (e.target.closest('#mkGo') || e.target.closest('#mkRedo')) { runMake(); return }
+  if (e.target.closest('#mkSave')) { saveMake(); return }
+})
+/*
+ * 치는 대로 받아 둡니다. 창을 다시 그릴 때 이 값이 자리 지킴글(placeholder)과 단추 글을
+ * 정하고, 종류를 바꿔도 적어 둔 것이 남습니다.
+ */
+make.addEventListener('input', (e) => {
+  if (e.target.id === 'mkWhat' && mk) mk.what = e.target.value
+})
+make.addEventListener('keydown', (e) => {
+  if (e.target.id !== 'mkWhat' || e.key !== 'Enter') return
+  e.preventDefault()
+  // 나온 그림이 있으면 엔터는 「저장」이 아닙니다. 팀의 자산이 되는 일은 눈으로 보고 눌러야 합니다
+  if (!mk?.out) runMake()
+})
+/*
+ * Esc. 그리는 중이면 막습니다 — 위 closeMake 와 같은 이유이고, 이쪽은 브라우저가 스스로
+ * 닫으려는 길이라 여기서 따로 잡아야 합니다.
+ */
+make.addEventListener('cancel', (e) => {
+  if (mk?.busy) { e.preventDefault(); notice('그리는 중입니다. 나오면 저장하거나 버릴 수 있습니다.') }
+})
+/* 어떤 길로 닫혔든 여기로 옵니다. 상태를 지우는 자리를 하나로 둡니다 */
+make.addEventListener('close', () => { mk = null; renderDetail() })
 
 byId('print').addEventListener('click', () => window.print())
 
