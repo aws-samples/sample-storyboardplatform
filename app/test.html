@@ -3770,6 +3770,38 @@
     ok('밑줄 단추가 12px 다', /\.mini \{[^}]*font-size: 12px/.test(css))
     /* 덩이를 여닫는 제목입니다. 한글에 uppercase·자간을 걸면 잔글씨 라벨로 보입니다 */
     ok('덩이 제목이 13px 굵은 글씨다', /\.sec__t \{[^}]*font-size: 13px[^}]*font-weight: 600/.test(css))
+
+    /*
+     * 생성 자리는 「이미지 만들기」로 잠깁니다. editable(내용 편집)로 잠그면, 권한 관리에서
+     * 이미지 만들기를 허용해도 내용 편집이 막힌 사람에게는 단추가 그대로 잠겨 있습니다.
+     * 승인된 컷은 둘 다 잠깁니다 — artOk 가 status 를 함께 봅니다.
+     */
+    ok('생성 권한은 art 로 따로 본다', /const artOk = p\.status !== 'approved' && may\('art'\)/.test(src))
+    ok('승인된 컷은 상태를 사유로 낸다',
+      /const noArt = nope\(p\.status === 'approved' \? whyNotEdit\(p\) : whyNot\('art'\)\)/.test(src))
+    // 생성 자리에 editable 이 다시 스며들면 위 수정이 조용히 되돌아갑니다
+    ok('그리기 단추는 artOk 로 잠근다',
+      /data-do="generate" \$\{!artOk \? noArt/.test(src)
+      && !/data-do="generate" \$\{!editable/.test(src))
+    ok('스케치 올리기도 artOk 다', !/data-do="upload" \$\{editable/.test(src))
+    ok('생성 지시 칸도 artOk 다', /id="genPrompt"[^]*?\$\{artOk \? '' : `readonly \$\{noArt\}`\}/.test(src.replace(/\n/g, '')))
+
+    /*
+     * 이 그림을 그대로 자산으로(keepAsAsset). 그리지 않으므로 승인도 생성 서버도 보지
+     * 않습니다 — 조건이 stillOf 와 권한 둘뿐인 것이 이 기능의 뜻입니다. canGen 이 끼면
+     * GPU 가 꺼진 날 쓸 수 없게 됩니다.
+     */
+    ok('그대로 자산으로는 그림과 권한만 본다',
+      /const keepLine = p\.charId \|\| !stillOf\(p\) \|\| !mayExtract\(\) \? '' :/.test(src))
+    ok('종류 셋이 곧 단추다', /data-do="keep:\$\{t\}"/.test(src)
+      && /REF_TYPES\.map/.test(src))
+    // 새로 만들지 않고 갈아 끼웁니다. 컷을 다시 그릴 때마다 같은 자산이 쌓이면 안 됩니다
+    ok('같은 종류를 다시 누르면 갈아 끼운다',
+      /source === 'keep'\)\n?\s*if \(prev\)/.test(src.replace(/\r/g, ''))
+      || /const prev = assetsFrom\(panel\.id\)\.find\(\(a\) => a\.type === type && a\.source === 'keep'\)/.test(src))
+    // 없앤 「작은 글씨 문단」으로 돌아가지 않게 줄 형식을 잠급니다
+    ok('그 줄은 .line 이고 단추는 묶음 안에 있다',
+      /class="line__set"/.test(src) && /\.line__set \{/.test(css))
   } catch (e) {
     ok('오른쪽 판의 모양을 읽는다', false, e.message)
   }
@@ -3827,6 +3859,37 @@
     // 표의 역할도 모두 이름을 가집니다. panels.js 의 ROLES 와 짝입니다
     ok('표의 역할은 모두 이름을 가진다',
       [...new Set(Object.values(JOB_ROLES).flat())].every((r) => ROLES[r]))
+
+    /*
+     * 권한 표(perm.js)의 「역할 고정」. 위에서 맞대어 본 그 서버 목록을 화면 표도 들고
+     * 있어야 합니다 — 서버가 막는 일을 표에서 「허용」으로 켤 수 있으면, 켜 놓고 눌렀을 때
+     * 서버가 튕겨서 표가 거짓말을 합니다. 열려면 역할을 바꾸라고 말하는 것이 맞습니다.
+     */
+    const { CAPS, serverFixed, permModel } = await import(`./components/perm.js?t=${Date.now()}`)
+    ok('art 는 서버 목록을 들고 있다', CAPS.art.server?.join() === [...JOB_ROLES.gen].join())
+    ok('plan 도 들고 있다', CAPS.plan.server?.join() === [...JOB_ROLES.plan].join())
+    // 서버가 안 보는 일에는 두지 않습니다. 두면 손질할 수 있어야 할 칸이 잠깁니다
+    ok('내용 편집·컷 진행에는 서버 고정이 없다',
+      !CAPS.edit.server && !CAPS.approve?.server)
+    ok('서버 목록 밖의 역할은 고정이다', serverFixed('art', 'director') && serverFixed('art', 'reviewer'))
+    ok('목록 안의 역할은 고정이 아니다', !serverFixed('art', 'artist'))
+    // 손질이 남아 있어도 힘이 없어야 합니다. 이 다섯 자리를 다 거칩니다
+    const fixed = permModel({
+      perms: { 'role:director:art': { on: true, _ts: { on: 1 } } },
+      roleOf: () => 'director', meId: 'u1',
+    })
+    ok('표에서 켜 두어도 막음이다', fixed.mayRole('art', 'director') === false
+      && fixed.may('art', 'u1') === false)
+    ok('사유가 역할을 바꾸라고 말한다', /서버가 역할로 고정/.test(fixed.whyNot('art', 'u1')))
+    ok('힘없는 손질은 「n칸 손질」에 안 센다', fixed.changed().length === 0)
+    ok('뒤집는 op 도 안 나온다', fixed.toggle('role', 'director', 'art') === null)
+    // 서버가 안 보는 칸의 손질은 그대로 먹어야 합니다(고정이 너무 넓게 먹으면 여기서 걸립니다)
+    const free = permModel({
+      perms: { 'role:reviewer:edit': { on: true, _ts: { on: 1 } } },
+      roleOf: () => 'reviewer', meId: 'u2',
+    })
+    ok('서버가 안 보는 칸의 손질은 먹는다',
+      free.mayRole('edit', 'reviewer') === true && free.changed().length === 1)
   } catch (err) {
     ok(`서버 쪽 허용 목록을 읽지 못했다 (${err.message})`, false)
   }
