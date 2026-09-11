@@ -3555,6 +3555,9 @@ function renderDetail() {
   const noClip = p.charId || !canAnimate()
   const makeWhy = whyNotMake(p)
   const noMake = p.charId || !canGen
+  // 그림이 없거나 자산 권한이 없으면 「그대로 저장」 타일 셋은 서지 않습니다(아래 cutTiles)
+  const keptOf = (t) => assetsFrom(p.id).some((a) => a.type === t && a.source === 'keep')
+  const noKeep = p.charId || !stillOf(p) || !mayExtract()
   /**
    * 타일 하나. why 가 있으면 설명 자리에 그 이유가 서고 단추가 잠깁니다.
    * @param {string} nopeAttr - 권한으로 막힌 자리에만. aria-disabled + data-nope 를 통째로 받습니다
@@ -3582,6 +3585,20 @@ function renderDetail() {
       ${tile('upload', '스케치 올리기',
     '직접 그린 그림이 이 컷의 다음 버전이 됩니다',
     artOk ? '' : p.status === 'approved' ? whyNotEdit(p) : whyNot('art'), noArt)}
+      ${/*
+        * 이 그림을 그대로 자산으로(keepAsAsset). 바로 위 「자산으로 생성」과 아래 「한 벌 뽑기」가
+        * 둘 다 GPU 로 다시 그리는 데 비해 이것은 그리지 않습니다 — 이미 나온 그림이 쓸 만할 때
+        * 사람이 「이게 소품이다」 짚는 자리라 승인도 생성 서버도 필요하지 않습니다(그림만 있으면
+        * 됩니다). 그래서 위 둘이 막혀 있어도 이 셋은 열려 있을 수 있습니다.
+        *
+        * 종류 셋이 곧 타일입니다. 고르는 창을 띄우면 두 걸음이 되는데, 이미 나온 그림을 그대로
+        * 넣는 일에 창까지 띄울 값은 없습니다. 넣어 둔 종류는 이름에 ✓ 를 답니다(다시 누르면
+        * 그 자산의 그림을 갈아 끼움 — 컷을 다시 그릴 때마다 쌓이면 자산관리가 못 쓰게 됩니다).
+        */''}
+      ${noKeep ? '' : REF_TYPES.map((t) => tile(`keep:${t}`,
+    `${ASSET_TYPES[t]}${josa(ASSET_TYPES[t], '으로', '로')} 저장${keptOf(t) ? ' ✓' : ''}`,
+    keptOf(t) ? '이미 넣은 자산의 그림을 이 그림으로 바꿉니다' : '지금 이 그림을 그대로 자산관리에 둡니다',
+    '')).join('')}
     </div>`
 
   const eta = clipEta()
@@ -3615,25 +3632,7 @@ function renderDetail() {
    * 덩이의 제목 줄과 같은 모양이라, 접지 않은 결과 한 줄로 읽힙니다.
    */
   const assetsHref = navHref('assets', boardFromSearch())
-  /*
-   * 이 그림을 그대로 자산으로(keepAsAsset). 위의 「한 벌 뽑기」와 아래 타일의 「자산으로
-   * 생성」이 둘 다 GPU 로 다시 그리는 데 비해 이것은 그리지 않으므로, 승인도 생성 서버도
-   * 필요하지 않습니다 — 그래서 조건이 다릅니다(그림만 있으면 됩니다).
-   *
-   * 종류 셋이 곧 단추입니다. 고르는 창을 띄우면 두 걸음이 되는데, 이미 나온 그림을 그대로
-   * 넣는 일에 창까지 띄울 값은 없습니다. 넣어 둔 종류에는 ✓ 를 답니다(다시 누르면 갈아 끼움).
-   */
-  const keptOf = (t) => assetsFrom(p.id).some((a) => a.type === t && a.source === 'keep')
-  const keepLine = p.charId || !stillOf(p) || !mayExtract() ? '' : `
-    <div class="line">
-      <span class="line__t">이 그림을 그대로 자산으로</span>
-      <span class="line__set">
-        ${REF_TYPES.map((t) => `<button type="button" class="line__do" data-do="keep:${t}"
-          title="${keptOf(t) ? '이미 넣은 자산의 그림을 이 그림으로 바꿉니다' : `${ASSET_TYPES[t]} 자산으로 저장합니다`}"
-          >${ASSET_TYPES[t]}${keptOf(t) ? ' ✓' : ''}</button>`).join('')}
-      </span>
-    </div>`
-  const assetLine = keepLine + (p.charId || !canGen ? '' : extracting ? `
+  const assetLine = p.charId || !canGen ? '' : extracting ? `
     <div class="line line--busy"><span class="line__t">${esc(extracting)}</span></div>`
     : p.status !== 'approved' ? '' : `
     <div class="line">
@@ -3642,7 +3641,7 @@ function renderDetail() {
       ${assetMine.length ? `<a class="line__go" href="${esc(assetsHref)}">자산관리에서 보기</a>` : ''}
       ${extractWhy ? `<span class="line__why">${esc(extractWhy)}</span>`
     : `<button type="button" class="line__do" data-do="extract">${assetMine.length ? '한 벌 다시 뽑기' : '한 벌 뽑기'}</button>`}
-    </div>`)
+    </div>`
 
   /*
    * 기반 이미지를 얼마나 살릴지. 모델이 그것을 어떻게 쓰는지에 따라 칸 자체가 없어집니다.
